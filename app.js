@@ -5,11 +5,17 @@
 // Global State refs
 let charts = {};
 let sortableInstances = [];
+let currentUser = null;
 
 document.addEventListener('DOMContentLoaded', async () => {
+    setupAuth();
+
     // 1. Initialize UI Elements
     initNavigation();
     initModals();
+    setupProfileModal();
+    setupSettingsModal();
+    setupHeaderFeatures();
     initFilters();
 
     // Show Loading
@@ -344,8 +350,12 @@ function updatePriorityChart(tasks, priorityList) {
 function updateStaffChart(tasks, staffList) {
     const ctx = document.getElementById('chart-staff').getContext('2d');
 
+    // Filter staffList to only show valid users based on our hardcoded list
+    const validUsersList = ['Pritheeswarar', 'Mubarak', 'Sudharshan'];
+    const filteredStaff = staffList.filter(s => validUsersList.includes(s));
+
     // Sort staff by workload
-    const workloads = staffList.map(staff => ({
+    const workloads = filteredStaff.map(staff => ({
         name: staff,
         count: tasks.filter(t => t.staff === staff && t.status !== 'Completed').length
     })).sort((a, b) => b.count - a.count);
@@ -675,7 +685,7 @@ function renderAllTasksList(state) {
                     ${task.project || '-'}
                 </td>
                 <td class="px-4 py-3 min-w-[200px]">
-                    <div class="font-medium text-gray-800 w-full truncate max-w-xs cursor-pointer hover:text-primary hover:underline hover-active" onclick="openTaskModal(${task.id})">${task.task}</div>
+                    <div class="font-medium text-gray-800 w-full truncate max-w-xs cursor-pointer hover:text-primary hover:underline hover-active" onclick="openTaskModal(${task.id}, {viewOnly: true})">${task.task}</div>
                 </td>
                 <td class="px-4 py-3 whitespace-nowrap">
                     <div class="flex items-center gap-2 text-gray-700">
@@ -1079,7 +1089,52 @@ function setupFormHandlers() {
 
     document.getElementById('btn-export-pdf')?.addEventListener('click', (e) => {
         e.preventDefault();
-        window.print();
+
+        const tasks = store.state.tasks;
+        const printWindow = window.open('', '', 'width=1000,height=800');
+
+        let printHtml = `
+            <html><head><title>WeRunOps Tasks Export</title>
+            <style>
+                body { font-family: system-ui, sans-serif; padding: 20px; color: #333; }
+                h1 { border-bottom: 2px solid #eee; padding-bottom: 10px; margin-bottom: 20px; }
+                table { border-collapse: collapse; width: 100%; font-size: 13px; }
+                th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+                th { background-color: #f9fafb; font-weight: 600; color: #4B5563; }
+                .meta { color: #666; font-size: 13px; margin-bottom: 20px; }
+            </style>
+            </head><body>
+            <h1>WeRunOps Task Export</h1>
+            <div class="meta">Exported on: ${new Date().toLocaleString()} &bull; Total Tasks: ${tasks.length}</div>
+            <table>
+            <thead><tr>
+                <th>ID</th><th>Client</th><th>Project</th><th>Task Name</th><th>Staff</th><th>Status</th><th>Priority</th><th>Due Date</th>
+            </tr></thead><tbody>
+        `;
+
+        tasks.sort((a, b) => a.id - b.id).forEach(t => {
+            printHtml += `<tr>
+                <td style="color:#6B7280">#${t.id}</td>
+                <td><strong>${t.client}</strong></td>
+                <td>${t.project || '-'}</td>
+                <td>${t.task}</td>
+                <td>${t.staff}</td>
+                <td>${t.status}</td>
+                <td>${t.priority}</td>
+                <td>${formatDate(t.dueDate)}</td>
+            </tr>`;
+        });
+
+        printHtml += '</tbody></table></body></html>';
+
+        printWindow.document.open();
+        printWindow.document.write(printHtml);
+        printWindow.document.close();
+
+        printWindow.setTimeout(() => {
+            printWindow.print();
+        }, 500);
+
         document.getElementById('export-actions-menu').classList.add('hidden');
     });
 
@@ -1203,7 +1258,7 @@ function initModals() {
     });
 
     // Trigger Add Follow-up from within task modal
-    document.getElementById('btn-create-followup')?.addEventListener('click', () => {
+    document.getElementById('btn-add-followup')?.addEventListener('click', () => {
         const currentTaskId = parseInt(document.getElementById('task-id').value);
         const task = store.state.tasks.find(t => t.id === currentTaskId);
         if (task) {
@@ -1227,10 +1282,22 @@ window.openTaskModal = function (taskId = null, defaults = {}) {
     const form = document.getElementById('task-form');
     form.reset();
 
+    const fields = ['task-client', 'task-project', 'task-name', 'task-staff', 'task-status', 'task-priority', 'task-start-date', 'task-due-date', 'task-waiting', 'task-notes'];
+    fields.forEach(f => {
+        const el = document.getElementById(f);
+        if (el) {
+            el.disabled = false;
+            el.classList.remove('bg-gray-50', 'text-gray-500', 'cursor-not-allowed', 'border-transparent');
+            el.classList.add('border-gray-300');
+        }
+    });
+    document.getElementById('btn-save-task').classList.remove('hidden');
+
     document.getElementById('task-activity-container').classList.add('hidden');
+    document.getElementById('task-children-container').classList.add('hidden');
     document.getElementById('modal-priority-display').classList.add('hidden');
     document.getElementById('task-relationship-container').classList.add('hidden');
-    document.getElementById('btn-create-followup')?.classList.add('hidden');
+    document.getElementById('btn-add-followup')?.classList.add('hidden');
     document.getElementById('task-parent-id').value = '';
 
     if (taskId) {
@@ -1241,7 +1308,7 @@ window.openTaskModal = function (taskId = null, defaults = {}) {
 
         const task = store.state.tasks.find(t => t.id === parseInt(taskId));
         if (task) {
-            document.getElementById('btn-create-followup')?.classList.remove('hidden');
+            document.getElementById('btn-add-followup')?.classList.remove('hidden');
 
             // Link visualization check
             if (task.parentId) {
@@ -1290,6 +1357,25 @@ window.openTaskModal = function (taskId = null, defaults = {}) {
                 logList.innerHTML = logHtml;
                 logContainer.classList.remove('hidden');
             }
+
+            // Follow up children logic
+            const childrenTasks = store.state.tasks.filter(t => t.parentId == task.id);
+            if (childrenTasks.length > 0) {
+                const childContainer = document.getElementById('task-children-container');
+                const childList = document.getElementById('task-children-list');
+
+                childList.innerHTML = childrenTasks.map(c => `
+                    <div class="bg-gray-50 border border-gray-100 p-2.5 rounded text-sm hover:border-primary border-opacity-40 hover:bg-white transition cursor-pointer flex justify-between items-center" onclick="closeTaskModal(); setTimeout(() => openTaskModal(${c.id}, {viewOnly: true}), 350)">
+                        <div class="flex items-center gap-3">
+                            <span class="status-badge ${getStatusColorClass(c.status)}">${c.status}</span>
+                            <span class="font-semibold text-gray-800">#${c.id} ${c.task}</span>
+                        </div>
+                        <i data-lucide="chevron-right" class="w-4 h-4 text-gray-400"></i>
+                    </div>
+                `).join('');
+                childContainer.classList.remove('hidden');
+                lucide.createIcons({ root: childList });
+            }
         }
     } else {
         // Add mode
@@ -1311,6 +1397,20 @@ window.openTaskModal = function (taskId = null, defaults = {}) {
             document.getElementById('task-staff').value = defaults.staff;
             document.getElementById('task-name').value = defaults.taskName;
         }
+    }
+
+    if (defaults.viewOnly) {
+        document.getElementById('modal-task-title').textContent = 'Task Details (Read-only)';
+        document.getElementById('btn-save-task').classList.add('hidden');
+
+        fields.forEach(f => {
+            const el = document.getElementById(f);
+            if (el) {
+                el.disabled = true;
+                el.classList.add('bg-gray-50', 'text-gray-500', 'cursor-not-allowed', 'border-transparent');
+                el.classList.remove('border-gray-300');
+            }
+        });
     }
 
     // Show modal with animation
@@ -1413,4 +1513,413 @@ function initFilters() {
             <p class="text-sm text-gray-500">Filter criteria can be customized here to refine task views across the application.</p>
         `;
     }
+}
+
+const DEFAULT_USERS = [
+    { username: 'Eshwar', password: '110495', name: 'Pritheeswarar', role: 'Admin', initials: 'P' },
+    { username: 'Mubarak', password: '6544332211', name: 'Mubarak', role: 'Manager', initials: 'M' },
+    { username: 'Sudhar', password: '19091997', name: 'Sudharshan', role: 'User', initials: 'S' }
+];
+
+function getValidUsers() {
+    const stored = localStorage.getItem('werunops_users');
+    if (stored) return JSON.parse(stored);
+    localStorage.setItem('werunops_users', JSON.stringify(DEFAULT_USERS));
+    return DEFAULT_USERS;
+}
+
+// --- Auth & Header Features ---
+function setupAuth() {
+    const loginForm = document.getElementById('login-form');
+    const viewLogin = document.getElementById('view-login');
+    const mainHeader = document.getElementById('main-header');
+    const mainContent = document.getElementById('main-content');
+    const errorMsg = document.getElementById('login-error-msg');
+
+    // Check for existing session
+    const storedSession = localStorage.getItem('werunops_session');
+    if (storedSession) {
+        const sessionUser = JSON.parse(storedSession);
+        const validUsers = getValidUsers();
+        // verify session user still exists and password matches
+        const user = validUsers.find(u => u.username === sessionUser.username && u.password === sessionUser.password);
+        if (user) {
+            currentUser = { ...user };
+            viewLogin.classList.add('hidden');
+            mainHeader.classList.remove('hidden');
+            mainContent.classList.remove('hidden');
+            updateHeaderProfile();
+            // We intentionally don't drop a new login history row for a pure refresh
+        } else {
+            localStorage.removeItem('werunops_session');
+        }
+    }
+
+    loginForm?.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const usernameInput = document.getElementById('login-username').value.trim();
+        const passwordInput = document.getElementById('login-password').value;
+        const spinner = document.getElementById('login-spinner');
+        const loginText = document.getElementById('login-text');
+        const submitBtn = loginForm.querySelector('button[type="submit"]');
+        
+        // Prevent double clicks
+        if (submitBtn.disabled) return;
+        
+        submitBtn.disabled = true;
+        spinner.classList.remove('hidden');
+        loginText.textContent = 'Signing In...';
+        if(errorMsg) errorMsg.classList.add('hidden');
+        
+        setTimeout(() => {
+            const validUsers = getValidUsers();
+            const user = validUsers.find(u => u.username.toLowerCase() === usernameInput.toLowerCase() && u.password === passwordInput);
+            
+            if (user) {
+                currentUser = { ...user };
+                
+                // Track Login
+                const loginTime = new Date().toISOString();
+                currentUser.sessionStart = loginTime;
+                localStorage.setItem('werunops_session', JSON.stringify(currentUser));
+                
+                viewLogin.classList.add('hidden');
+                mainHeader.classList.remove('hidden');
+                mainContent.classList.remove('hidden');
+                
+                updateHeaderProfile();
+                showNotification('Welcome', `Successfully signed in as ${user.name}.`, 'success');
+            } else {
+                if(errorMsg) {
+                    errorMsg.textContent = 'Invalid username or password.';
+                    errorMsg.classList.remove('hidden');
+                } else {
+                    showNotification('Login Failed', 'Invalid username or password.', 'error');
+                }
+            }
+            
+            // Re-enable button
+            submitBtn.disabled = false;
+            spinner.classList.add('hidden');
+            loginText.textContent = 'Sign In';
+        }, 800);
+    });
+
+    document.getElementById('btn-logout')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        
+        if (currentUser && currentUser.sessionStart) {
+            logSessionHistory(currentUser.username, currentUser.name, currentUser.sessionStart);
+        }
+        
+        currentUser = null;
+        localStorage.removeItem('werunops_session');
+        
+        viewLogin.classList.remove('hidden');
+        mainHeader.classList.add('hidden');
+        mainContent.classList.add('hidden');
+        document.getElementById('login-password').value = '';
+    });
+}
+
+function logSessionHistory(username, name, startTime) {
+    const historyData = localStorage.getItem('werunops_history');
+    let history = historyData ? JSON.parse(historyData) : [];
+    
+    const endTime = new Date();
+    const start = new Date(startTime);
+    const durationMs = endTime - start;
+    
+    // Format duration e.g. "2h 15m" or "5m 30s"
+    const hours = Math.floor(durationMs / 3600000);
+    const mins = Math.floor((durationMs % 3600000) / 60000);
+    const secs = Math.floor((durationMs % 60000) / 1000);
+    
+    let durationStr = '';
+    if (hours > 0) durationStr += `${hours}h `;
+    if (mins > 0 || hours > 0) durationStr += `${mins}m `;
+    durationStr += `${secs}s`;
+    
+    history.unshift({
+        username,
+        name,
+        loginTime: startTime,
+        logoutTime: endTime.toISOString(),
+        duration: durationStr
+    });
+    
+    // Keep max 100 logs
+    if (history.length > 100) history = history.slice(0, 100);
+    
+    localStorage.setItem('werunops_history', JSON.stringify(history));
+}
+
+function updateHeaderProfile() {
+    if (!currentUser) return;
+    const nameEl = document.getElementById('header-user-name');
+    const roleEl = document.getElementById('header-user-role');
+    const avatarEl = document.getElementById('header-avatar');
+    if (nameEl) nameEl.textContent = currentUser.name;
+    if (roleEl) roleEl.textContent = currentUser.role;
+    if (avatarEl) avatarEl.textContent = currentUser.initials;
+    
+    const presenceList = document.getElementById('header-presence-list');
+    if (presenceList) {
+        const validUsers = getValidUsers();
+        presenceList.innerHTML = validUsers.map(u => {
+            const isMe = u.username === currentUser.username;
+            const dotClass = isMe ? 'bg-green-500' : 'bg-gray-300';
+            const textClass = isMe ? 'text-gray-800 font-medium' : 'text-gray-500';
+            const meLabel = isMe ? ' <span class="text-[10px] text-gray-400 font-normal ml-1">(me)</span>' : '';
+            return `
+                <div class="flex items-center gap-2 py-1 px-2">
+                    <span class="w-2 h-2 rounded-full ${dotClass}"></span>
+                    <span class="text-xs ${textClass}">${u.name}${meLabel}</span>
+                    <span class="text-[10px] text-gray-400 ml-auto border border-gray-200 px-1.5 py-0.5 rounded-full bg-white">${isMe ? 'Online' : 'Offline'}</span>
+                </div>
+            `;
+        }).join('');
+    }
+}
+
+function setupProfileModal() {
+    const modalProfile = document.getElementById('modal-profile');
+    const btnOpen = document.getElementById('btn-open-profile');
+    const form = document.getElementById('profile-form');
+    if (!modalProfile || !btnOpen) return;
+
+    function closeProfile() {
+        const modalBox = modalProfile.querySelector('.bg-white');
+        modalBox.classList.add('scale-95');
+        modalProfile.classList.add('opacity-0');
+        setTimeout(() => {
+            modalProfile.classList.add('hidden');
+            document.body.classList.remove('modal-open');
+        }, 300);
+    }
+
+    btnOpen.addEventListener('click', (e) => {
+        e.preventDefault();
+        document.getElementById('header-user-panel').classList.add('hidden');
+        if (currentUser) {
+            document.getElementById('profile-name').value = currentUser.name;
+            document.getElementById('profile-role').value = currentUser.role;
+            document.getElementById('profile-modal-avatar').textContent = currentUser.initials;
+        }
+
+        modalProfile.classList.remove('hidden');
+        setTimeout(() => {
+            modalProfile.classList.remove('opacity-0');
+            modalProfile.querySelector('.bg-white').classList.remove('scale-95');
+        }, 10);
+        document.body.classList.add('modal-open');
+    });
+
+    document.querySelectorAll('.btn-close-profile-modal').forEach(btn => {
+        btn.addEventListener('click', closeProfile);
+    });
+
+    form?.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const name = document.getElementById('profile-name').value;
+        const role = document.getElementById('profile-role').value;
+        const spinner = document.getElementById('profile-save-spinner');
+
+        spinner.classList.remove('hidden');
+        document.getElementById('profile-save-text').textContent = 'Saving...';
+
+        setTimeout(() => {
+            if (currentUser) {
+                currentUser.name = name;
+                currentUser.role = role;
+                currentUser.initials = name.charAt(0).toUpperCase();
+            }
+            updateHeaderProfile();
+
+            spinner.classList.add('hidden');
+            document.getElementById('profile-save-text').textContent = 'Save';
+            closeProfile();
+            showNotification('Profile Updated', 'Your profile info has been saved.', 'success');
+        }, 500);
+    });
+}
+
+function setupSettingsModal() {
+    const modalSettings = document.getElementById('modal-settings');
+    const btnOpen = document.getElementById('btn-open-settings');
+    const form = document.getElementById('password-form');
+    if (!modalSettings || !btnOpen) return;
+    
+    function closeSettings() {
+        const modalBox = modalSettings.querySelector('.bg-white');
+        modalBox.classList.add('scale-95');
+        modalSettings.classList.add('opacity-0');
+        setTimeout(() => {
+            modalSettings.classList.add('hidden');
+            document.body.classList.remove('modal-open');
+        }, 300);
+    }
+
+    btnOpen.addEventListener('click', (e) => {
+        e.preventDefault();
+        document.getElementById('header-user-panel').classList.add('hidden');
+        
+        // Reset Password form
+        if(form) {
+            form.reset();
+            const errorMsg = document.getElementById('password-error-msg');
+            if(errorMsg) errorMsg.classList.add('hidden');
+        }
+        
+        // Populate History
+        const listEl = document.getElementById('login-history-list');
+        const historyData = localStorage.getItem('werunops_history');
+        if (listEl) {
+            if (historyData) {
+                const history = JSON.parse(historyData);
+                listEl.innerHTML = history.map(h => `
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-4 py-3 font-medium text-gray-900">${h.name}</td>
+                        <td class="px-4 py-3">${new Date(h.loginTime).toLocaleString()}</td>
+                        <td class="px-4 py-3">${new Date(h.logoutTime).toLocaleString()}</td>
+                        <td class="px-4 py-3 text-gray-500">${h.duration}</td>
+                    </tr>
+                `).join('');
+            } else {
+                listEl.innerHTML = '<tr><td colspan="4" class="px-4 py-6 text-center text-gray-500">No login history recorded yet.</td></tr>';
+            }
+        }
+        
+        modalSettings.classList.remove('hidden');
+        setTimeout(() => {
+            modalSettings.classList.remove('opacity-0');
+            modalSettings.querySelector('.bg-white').classList.remove('scale-95');
+        }, 10);
+        document.body.classList.add('modal-open');
+    });
+
+    document.querySelectorAll('.btn-close-settings-modal').forEach(btn => {
+        btn.addEventListener('click', closeSettings);
+    });
+
+    form?.addEventListener('submit', (e) => {
+        e.preventDefault();
+        if (!currentUser) return;
+        
+        const currentP = document.getElementById('current-password').value;
+        const newP = document.getElementById('new-password').value;
+        const confirmP = document.getElementById('confirm-password').value;
+        const errorMsg = document.getElementById('password-error-msg');
+        const spinner = document.getElementById('password-save-spinner');
+        
+        // Validate
+        if (currentP !== currentUser.password) {
+            errorMsg.textContent = 'Incorrect current password.';
+            errorMsg.classList.remove('hidden');
+            return;
+        }
+        
+        if (newP !== confirmP) {
+            errorMsg.textContent = 'New passwords do not match.';
+            errorMsg.classList.remove('hidden');
+            return;
+        }
+        
+        errorMsg.classList.add('hidden');
+        spinner.classList.remove('hidden');
+        document.getElementById('password-save-text').textContent = 'Updating...';
+        
+        setTimeout(() => {
+            const validUsers = getValidUsers();
+            const userIndex = validUsers.findIndex(u => u.username === currentUser.username);
+            
+            if (userIndex !== -1) {
+                validUsers[userIndex].password = newP;
+                localStorage.setItem('werunops_users', JSON.stringify(validUsers));
+                currentUser.password = newP;
+                localStorage.setItem('werunops_session', JSON.stringify(currentUser));
+                showNotification('Success', 'Password updated successfully.', 'success');
+                closeSettings();
+            }
+            
+            spinner.classList.add('hidden');
+            document.getElementById('password-save-text').textContent = 'Update Password';
+        }, 500);
+    });
+}
+
+function setupHeaderFeatures() {
+    const searchInput = document.getElementById('header-search-input');
+    const resultsContainer = document.getElementById('header-search-results');
+
+    searchInput?.addEventListener('input', (e) => {
+        const query = e.target.value.toLowerCase();
+        if (!query) {
+            resultsContainer.innerHTML = '';
+            resultsContainer.classList.add('hidden');
+            return;
+        }
+
+        const matches = store.state.tasks.filter(t =>
+            t.task.toLowerCase().includes(query) ||
+            t.id.toString().includes(query) ||
+            t.client.toLowerCase().includes(query)
+        ).slice(0, 5);
+
+        if (matches.length > 0) {
+            resultsContainer.innerHTML = matches.map(t => `
+                <div class="p-2 hover:bg-gray-50 cursor-pointer rounded border-b border-gray-50 border-last-none" onclick="openTaskModal(${t.id}, {viewOnly: true})">
+                    <p class="text-xs text-primary font-medium">#${t.id} &bull; ${t.client}</p>
+                    <p class="text-sm font-semibold text-gray-800 truncate">${t.task}</p>
+                </div>
+            `).join('');
+        } else {
+            resultsContainer.innerHTML = '<div class="p-3 text-center text-xs text-gray-500">No matching tasks found</div>';
+        }
+        resultsContainer.classList.remove('hidden');
+    });
+}
+
+function updateNotifications() {
+    const list = document.getElementById('notifications-list');
+    const countBadge = document.getElementById('notification-count');
+    const dot = document.getElementById('notification-dot');
+
+    if (!list || !store.state || !store.state.tasks) return;
+
+    const actionableTasks = store.state.tasks.filter(t =>
+        t.status !== 'Completed' && (isOverdue(t.dueDate) || t.status === 'Follow Up')
+    );
+
+    if (actionableTasks.length > 0) {
+        if (countBadge) countBadge.textContent = actionableTasks.length;
+        if (dot) dot.classList.remove('hidden');
+
+        list.innerHTML = actionableTasks.map(t => {
+            const isOv = isOverdue(t.dueDate);
+            return `
+            <div class="px-4 py-3 hover:bg-gray-50 cursor-pointer border-b border-gray-50 transition" onclick="openTaskModal(${t.id}, {viewOnly: true})">
+                <div class="flex items-start gap-3">
+                    <div class="mt-0.5 w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${isOv ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}">
+                        <i data-lucide="${isOv ? 'alert-circle' : 'corner-down-right'}" class="w-3 h-3"></i>
+                    </div>
+                    <div>
+                        <p class="text-xs font-semibold ${isOv ? 'text-red-600' : 'text-green-600'} mb-0.5">${isOv ? 'Overdue Task' : 'Follow Up Required'}</p>
+                        <p class="text-sm text-gray-800 font-medium leading-tight mb-1">${t.task}</p>
+                        <p class="text-xs text-gray-500">Due: ${formatDate(t.dueDate)} &bull; ${t.client}</p>
+                    </div>
+                </div>
+            </div>
+        `}).join('');
+    } else {
+        if (countBadge) countBadge.textContent = '0';
+        if (dot) dot.classList.add('hidden');
+        list.innerHTML = `
+            <div class="p-4 text-center text-sm text-gray-500">
+                <i data-lucide="inbox" class="w-8 h-8 mx-auto text-gray-300 mb-2"></i>
+                No new notifications.
+            </div>
+        `;
+    }
+    lucide.createIcons({ root: list });
 }

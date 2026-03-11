@@ -355,12 +355,15 @@ class DataStore {
             throw new Error(`Cannot delete client "${clientName}" because it is currently assigned to active tasks.`);
         }
 
+        const initialLength = this.state.config.clients.length;
         this.state.config.clients = this.state.config.clients.filter(c => c.name !== clientName);
 
-        if (CONFIG.useGithub && CONFIG.token) {
-            await this.saveToGithub();
-        } else {
-            this.saveToLocal();
+        if (this.state.config.clients.length !== initialLength) {
+            if (CONFIG.useGithub && CONFIG.token) {
+                await this.saveToGithub();
+            } else {
+                this.saveToLocal();
+            }
         }
     }
 }
