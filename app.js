@@ -60,42 +60,74 @@ function renderAllViews(state) {
 function initNavigation() {
     const navTabs = document.querySelectorAll('.nav-tab');
     const views = document.querySelectorAll('.view-section');
+    const mainHeader = document.getElementById('main-header');
+    const mainContent = document.getElementById('main-content');
+    const viewLogin = document.getElementById('view-login');
+
+    function handleRoute() {
+        let hash = window.location.hash;
+        if (!hash || hash === '#/') {
+            hash = localStorage.getItem('currentUser') ? '#/dashboard' : '#/login';
+        }
+        
+        let targetId = 'view-dashboard';
+        if (hash === '#/kanban') targetId = 'view-kanban';
+        else if (hash === '#/tasks') targetId = 'view-tasks';
+        else if (hash === '#/today') targetId = 'view-today';
+        else if (hash === '#/clients') targetId = 'view-clients';
+        else if (hash === '#/login') targetId = 'view-login';
+
+        if (targetId === 'view-login') {
+            viewLogin.classList.remove('hidden');
+            mainHeader.classList.add('hidden');
+            mainContent.classList.add('hidden');
+            return;
+        } else {
+            viewLogin.classList.add('hidden');
+            mainHeader.classList.remove('hidden');
+            mainContent.classList.remove('hidden');
+        }
+
+        // Process tabs
+        navTabs.forEach(t => {
+            t.classList.remove('active', 'text-primary');
+            t.classList.add('text-gray-500');
+            t.style.borderBottomColor = 'transparent';
+        });
+
+        const activeTab = Array.from(navTabs).find(t => t.getAttribute('data-target') === targetId);
+        if (activeTab) {
+            activeTab.classList.add('active', 'text-primary');
+            activeTab.classList.remove('text-gray-500');
+            activeTab.style.borderBottomColor = 'var(--primary-blue)';
+        }
+
+        views.forEach(view => {
+            if (view.id === targetId) {
+                view.classList.remove('hidden');
+                if (targetId === 'view-dashboard') {
+                    Object.values(charts).forEach(chart => chart.resize());
+                }
+            } else {
+                view.classList.add('hidden');
+            }
+        });
+
+        if (window.innerWidth < 768) {
+            document.getElementById('main-nav').classList.add('hidden');
+        }
+    }
+
+    window.addEventListener('hashchange', handleRoute);
 
     navTabs.forEach(tab => {
         tab.addEventListener('click', () => {
-            // Update active styling on tabs
-            navTabs.forEach(t => {
-                t.classList.remove('active', 'text-primary');
-                t.classList.add('text-gray-500');
-                t.style.borderBottomColor = 'transparent';
-            });
-
-            tab.classList.add('active', 'text-primary');
-            tab.classList.remove('text-gray-500');
-            tab.style.borderBottomColor = 'var(--primary-blue)';
-
-            // Show target view, hide others
             const targetId = tab.getAttribute('data-target');
-            views.forEach(view => {
-                if (view.id === targetId) {
-                    view.classList.remove('hidden');
-                    // If switching to dashboard, resize charts to fix Chart.js canvas render issues
-                    if (targetId === 'view-dashboard') {
-                        Object.values(charts).forEach(chart => chart.resize());
-                    }
-                } else {
-                    view.classList.add('hidden');
-                }
-            });
-
-            // Mobile menu behavior
-            if (window.innerWidth < 768) {
-                document.getElementById('main-nav').classList.add('hidden');
-            }
+            const route = targetId.replace('view-', '');
+            window.location.hash = '#/' + route;
         });
     });
 
-    // Mobile Menu Toggle
     document.getElementById('mobile-menu-btn').addEventListener('click', () => {
         const nav = document.getElementById('main-nav');
         nav.classList.toggle('hidden');
@@ -105,6 +137,8 @@ function initNavigation() {
             nav.classList.remove('flex', 'flex-col', 'absolute', 'top-16', 'left-0', 'w-full', 'bg-white', 'shadow-md', 'z-40');
         }
     });
+
+    handleRoute();
 }
 
 // --- UI Utilities ---
@@ -1537,7 +1571,7 @@ function setupAuth() {
     const errorMsg = document.getElementById('login-error-msg');
 
     // Check for existing session
-    const storedSession = localStorage.getItem('werunops_session');
+    const storedSession = localStorage.getItem('currentUser');
     if (storedSession) {
         const sessionUser = JSON.parse(storedSession);
         const validUsers = getValidUsers();
@@ -1545,13 +1579,11 @@ function setupAuth() {
         const user = validUsers.find(u => u.username === sessionUser.username && u.password === sessionUser.password);
         if (user) {
             currentUser = { ...user };
-            viewLogin.classList.add('hidden');
-            mainHeader.classList.remove('hidden');
-            mainContent.classList.remove('hidden');
             updateHeaderProfile();
             // We intentionally don't drop a new login history row for a pure refresh
         } else {
-            localStorage.removeItem('werunops_session');
+            localStorage.removeItem('currentUser');
+            window.location.hash = '#/login';
         }
     }
 
@@ -1566,6 +1598,8 @@ function setupAuth() {
         // Prevent double clicks
         if (submitBtn.disabled) return;
         
+        console.log('Login attempt:', usernameInput, passwordInput);
+        
         submitBtn.disabled = true;
         spinner.classList.remove('hidden');
         loginText.textContent = 'Signing In...';
@@ -1576,20 +1610,20 @@ function setupAuth() {
             const user = validUsers.find(u => u.username.toLowerCase() === usernameInput.toLowerCase() && u.password === passwordInput);
             
             if (user) {
+                console.log('LOGIN SUCCESS');
                 currentUser = { ...user };
                 
                 // Track Login
                 const loginTime = new Date().toISOString();
                 currentUser.sessionStart = loginTime;
-                localStorage.setItem('werunops_session', JSON.stringify(currentUser));
+                localStorage.setItem('currentUser', JSON.stringify(currentUser));
                 
-                viewLogin.classList.add('hidden');
-                mainHeader.classList.remove('hidden');
-                mainContent.classList.remove('hidden');
+                window.location.hash = '#/dashboard';
                 
                 updateHeaderProfile();
                 showNotification('Welcome', `Successfully signed in as ${user.name}.`, 'success');
             } else {
+                console.log('LOGIN FAILED');
                 if(errorMsg) {
                     errorMsg.textContent = 'Invalid username or password.';
                     errorMsg.classList.remove('hidden');
@@ -1613,11 +1647,9 @@ function setupAuth() {
         }
         
         currentUser = null;
-        localStorage.removeItem('werunops_session');
+        localStorage.removeItem('currentUser');
         
-        viewLogin.classList.remove('hidden');
-        mainHeader.classList.add('hidden');
-        mainContent.classList.add('hidden');
+        window.location.hash = '#/login';
         document.getElementById('login-password').value = '';
     });
 }
@@ -1837,7 +1869,7 @@ function setupSettingsModal() {
                 validUsers[userIndex].password = newP;
                 localStorage.setItem('werunops_users', JSON.stringify(validUsers));
                 currentUser.password = newP;
-                localStorage.setItem('werunops_session', JSON.stringify(currentUser));
+                localStorage.setItem('currentUser', JSON.stringify(currentUser));
                 showNotification('Success', 'Password updated successfully.', 'success');
                 closeSettings();
             }
