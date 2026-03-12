@@ -8,8 +8,6 @@ let sortableInstances = [];
 let currentUser = null;
 
 document.addEventListener('DOMContentLoaded', async () => {
-    setupAuth();
-
     // 1. Initialize UI Elements
     initNavigation();
     initModals();
@@ -23,6 +21,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // 2. Initialize Data Store
     await store.init();
+
+    // 3. Setup Auth now that store is ready
+    setupAuth();
 
     // Subscribe to state changes to update UI
     store.subscribe((state) => {
@@ -1549,19 +1550,6 @@ function initFilters() {
     }
 }
 
-const DEFAULT_USERS = [
-    { username: 'Eshwar', password: '110495', name: 'Pritheeswarar', role: 'Admin', initials: 'P' },
-    { username: 'Mubarak', password: '6544332211', name: 'Mubarak', role: 'Manager', initials: 'M' },
-    { username: 'Sudhar', password: '19091997', name: 'Sudharshan', role: 'User', initials: 'S' }
-];
-
-function getValidUsers() {
-    const stored = localStorage.getItem('werunops_users');
-    if (stored) return JSON.parse(stored);
-    localStorage.setItem('werunops_users', JSON.stringify(DEFAULT_USERS));
-    return DEFAULT_USERS;
-}
-
 // --- Auth & Header Features ---
 function setupAuth() {
     const loginForm = document.getElementById('login-form');
@@ -1574,11 +1562,12 @@ function setupAuth() {
     const storedSession = localStorage.getItem('currentUser');
     if (storedSession) {
         const sessionUser = JSON.parse(storedSession);
-        const validUsers = getValidUsers();
+        const validUsers = store.state.authUsers || [];
         // verify session user still exists and password matches
         const user = validUsers.find(u => u.username === sessionUser.username && u.password === sessionUser.password);
         if (user) {
             currentUser = { ...user };
+            store.startPresenceHeartbeat(currentUser.username);
             updateHeaderProfile();
             // We intentionally don't drop a new login history row for a pure refresh
         } else {
@@ -1606,17 +1595,20 @@ function setupAuth() {
         if(errorMsg) errorMsg.classList.add('hidden');
         
         setTimeout(() => {
-            const validUsers = getValidUsers();
+            const validUsers = store.state.authUsers || [];
             const user = validUsers.find(u => u.username.toLowerCase() === usernameInput.toLowerCase() && u.password === passwordInput);
             
             if (user) {
                 console.log('LOGIN SUCCESS');
                 currentUser = { ...user };
                 
-                // Track Login
+                // Track Login locally
                 const loginTime = new Date().toISOString();
                 currentUser.sessionStart = loginTime;
                 localStorage.setItem('currentUser', JSON.stringify(currentUser));
+                
+                // Github Heartbeat Start
+                store.startPresenceHeartbeat(currentUser.username);
                 
                 window.location.hash = '#/dashboard';
                 
@@ -1639,11 +1631,21 @@ function setupAuth() {
         }, 800);
     });
 
-    document.getElementById('btn-logout')?.addEventListener('click', (e) => {
+    document.getElementById('btn-logout')?.addEventListener('click', async (e) => {
         e.preventDefault();
         
         if (currentUser && currentUser.sessionStart) {
             logSessionHistory(currentUser.username, currentUser.name, currentUser.sessionStart);
+        }
+        
+        store.stopPresenceHeartbeat();
+        if(store.state && store.state.livePresence && currentUser) {
+            store.state.livePresence[currentUser.username] = { online: false, lastSeen: new Date().toISOString() };
+            if (CONFIG.useGithub && CONFIG.token) {
+                try { await store.saveToGithub(); } catch(err) {}
+            } else {
+                store.saveToLocal();
+            }
         }
         
         currentUser = null;
@@ -1655,8 +1657,10 @@ function setupAuth() {
 }
 
 function logSessionHistory(username, name, startTime) {
-    const historyData = localStorage.getItem('werunops_history');
-    let history = historyData ? JSON.parse(historyData) : [];
+    if (!store.state) return;
+    if (!store.state.loginHistory) store.state.loginHistory = [];
+    
+    let history = store.state.loginHistory;
     
     const endTime = new Date();
     const start = new Date(startTime);
@@ -1680,10 +1684,14 @@ function logSessionHistory(username, name, startTime) {
         duration: durationStr
     });
     
-    // Keep max 100 logs
-    if (history.length > 100) history = history.slice(0, 100);
+    // Keep max 200 logs globally
+    if (history.length > 200) store.state.loginHistory = history.slice(0, 200);
     
-    localStorage.setItem('werunops_history', JSON.stringify(history));
+    if (CONFIG.useGithub && CONFIG.token) {
+        store.saveToGithub().catch(e=>console.warn(e));
+    } else {
+        store.saveToLocal();
+    }
 }
 
 function updateHeaderProfile() {
@@ -1697,17 +1705,30 @@ function updateHeaderProfile() {
     
     const presenceList = document.getElementById('header-presence-list');
     if (presenceList) {
-        const validUsers = getValidUsers();
+        const validUsers = store.state.authUsers || [];
+        const live = store.state.livePresence || {};
+        const now = Date.now();
+        
         presenceList.innerHTML = validUsers.map(u => {
             const isMe = u.username === currentUser.username;
-            const dotClass = isMe ? 'bg-green-500' : 'bg-gray-300';
-            const textClass = isMe ? 'text-gray-800 font-medium' : 'text-gray-500';
+            const presence = live[u.username];
+            let isOnline = false;
+            
+            if (presence && presence.online && presence.lastSeen) {
+                const diffObj = now - new Date(presence.lastSeen).getTime();
+                // online if pinged within last 60 seconds
+                if (diffObj < 60000) isOnline = true;
+            }
+            if (isMe) isOnline = true; // Always show self as online
+
+            const dotClass = isOnline ? 'bg-green-500' : 'bg-gray-300';
+            const textClass = isOnline ? 'text-gray-800 font-medium' : 'text-gray-500';
             const meLabel = isMe ? ' <span class="text-[10px] text-gray-400 font-normal ml-1">(me)</span>' : '';
             return `
                 <div class="flex items-center gap-2 py-1 px-2">
                     <span class="w-2 h-2 rounded-full ${dotClass}"></span>
                     <span class="text-xs ${textClass}">${u.name}${meLabel}</span>
-                    <span class="text-[10px] text-gray-400 ml-auto border border-gray-200 px-1.5 py-0.5 rounded-full bg-white">${isMe ? 'Online' : 'Offline'}</span>
+                    <span class="text-[10px] text-gray-400 ml-auto border border-gray-200 px-1.5 py-0.5 rounded-full bg-white">${isOnline ? 'Online' : 'Offline'}</span>
                 </div>
             `;
         }).join('');
@@ -1805,11 +1826,10 @@ function setupSettingsModal() {
         
         // Populate History
         const listEl = document.getElementById('login-history-list');
-        const historyData = localStorage.getItem('werunops_history');
+        const historyData = store.state.loginHistory || [];
         if (listEl) {
-            if (historyData) {
-                const history = JSON.parse(historyData);
-                listEl.innerHTML = history.map(h => `
+            if (historyData.length > 0) {
+                listEl.innerHTML = historyData.map(h => `
                     <tr class="hover:bg-gray-50">
                         <td class="px-4 py-3 font-medium text-gray-900">${h.name}</td>
                         <td class="px-4 py-3">${new Date(h.loginTime).toLocaleString()}</td>
@@ -1862,14 +1882,20 @@ function setupSettingsModal() {
         document.getElementById('password-save-text').textContent = 'Updating...';
         
         setTimeout(() => {
-            const validUsers = getValidUsers();
+            const validUsers = store.state.authUsers || [];
             const userIndex = validUsers.findIndex(u => u.username === currentUser.username);
             
             if (userIndex !== -1) {
                 validUsers[userIndex].password = newP;
-                localStorage.setItem('werunops_users', JSON.stringify(validUsers));
                 currentUser.password = newP;
                 localStorage.setItem('currentUser', JSON.stringify(currentUser));
+                
+                if (CONFIG.useGithub && CONFIG.token) {
+                    store.saveToGithub().catch(()=>{});
+                } else {
+                    store.saveToLocal();
+                }
+                
                 showNotification('Success', 'Password updated successfully.', 'success');
                 closeSettings();
             }

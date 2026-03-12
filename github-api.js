@@ -5,14 +5,21 @@
 
 const CONFIG = {
     // If true, uses GitHub API. If false, uses localStorage (for development/testing without tokens)
-    useGithub: false,
-    repo: 'username/backoffice-dashboard',
+    useGithub: true,
+    repo: 'pritheeswararshanmugam/werunops-kanban-board',
     branch: 'main',
-    token: '', // Store securely or provide via prompt in real app. DO NOT hardcode in production.
+    token: '', // STOP! You MUST paste your GitHub Personal Access Token (PAT) here for multi-user sync to work
     dataFile: 'data/state.json'
 };
 
 const DEFAULT_STATE = {
+    authUsers: [
+        { username: 'Eshwar', password: '110495', name: 'Pritheeswarar', role: 'Admin', initials: 'P' },
+        { username: 'Mubarak', password: '6544332211', name: 'Mubarak', role: 'Manager', initials: 'M' },
+        { username: 'Sudhar', password: '19091997', name: 'Sudharshan', role: 'User', initials: 'S' }
+    ],
+    livePresence: {},
+    loginHistory: [],
     tasks: [
         {
             id: 1,
@@ -83,6 +90,42 @@ class DataStore {
 
     notify() {
         this.listeners.forEach(listener => listener(this.state));
+    }
+
+    startPresenceHeartbeat(username) {
+        if (!this.state) return;
+
+        const pingPresence = async () => {
+            if (CONFIG.useGithub && CONFIG.token) {
+                try {
+                    await this.fetchFromGithub(); // Sync latest remote state
+                } catch(e) { console.warn('Heartbeat fetch failed', e); }
+            }
+            if(!this.state) return;
+            if(!this.state.livePresence) this.state.livePresence = {};
+            
+            this.state.livePresence[username] = {
+                online: true,
+                lastSeen: new Date().toISOString()
+            };
+            
+            if (CONFIG.useGithub && CONFIG.token) {
+                try { await this.saveToGithub(); } catch(e) {}
+            } else {
+                this.saveToLocal();
+            }
+        };
+
+        pingPresence();
+        if(this.presenceInterval) clearInterval(this.presenceInterval);
+        this.presenceInterval = setInterval(pingPresence, 30000);
+    }
+
+    stopPresenceHeartbeat() {
+        if(this.presenceInterval) {
+            clearInterval(this.presenceInterval);
+            this.presenceInterval = null;
+        }
     }
 
     async init() {
