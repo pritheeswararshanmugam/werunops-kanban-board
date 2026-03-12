@@ -1,0 +1,131 @@
+{
+  "authUsers": [
+    {
+      "username": "Eshwar",
+      "password": "110495",
+      "name": "Pritheeswarar",
+      "role": "Admin",
+      "initials": "P"
+    },
+    {
+      "username": "Mubarak",
+      "password": "6544332211",
+      "name": "Mubarak",
+      "role": "Manager",
+      "initials": "M"
+    },
+    {
+      "username": "Sudhar",
+      "password": "19091997",
+      "name": "Sudharshan",
+      "role": "User",
+      "initials": "S"
+    }
+  ],
+  "livePresence": {},
+  "loginHistory": [],
+  "tasks": [
+    {
+      "id": 1,
+      "client": "JS Roofing",
+      "project": "House 12",
+      "task": "Create PO fascia",
+      "staff": "Mubarak",
+      "status": "In Progress",
+      "priority": "High",
+      "startDate": "2026-03-09",
+      "dueDate": "2026-03-12",
+      "waitingFor": "Supplier",
+      "notes": "Waiting for supplier pricing",
+      "createdAt": "2026-03-11T05:58:10.198Z",
+      "updatedAt": "2026-03-12T05:58:10.198Z",
+      "activityLog": [
+        {
+          "action": "Status changed to \"In Progress\"",
+          "user": "Mubarak",
+          "timestamp": "2026-03-12T03:58:10.198Z"
+        },
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-03-11T05:58:10.198Z"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "client": "A to Z Roofing",
+      "project": "House 5",
+      "task": "Prepare quote",
+      "staff": "Eswar",
+      "status": "New",
+      "priority": "Medium",
+      "startDate": "",
+      "dueDate": "2026-03-13",
+      "waitingFor": "",
+      "notes": "Need to check recent material prices.",
+      "createdAt": "2026-03-12T05:58:10.198Z",
+      "updatedAt": "2026-03-12T05:58:10.198Z",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Eswar",
+          "timestamp": "2026-03-12T05:58:10.198Z"
+        }
+      ]
+    }
+  ],
+  "config": {
+    "clients": [
+      {
+        "id": 1,
+        "name": "JS Roofing",
+        "contact": "John Smith",
+        "email": "john@jsroofing.com",
+        "phone": "555-0100"
+      },
+      {
+        "id": 2,
+        "name": "A to Z Roofing",
+        "contact": "Alice",
+        "email": "alice@atoz.com",
+        "phone": "555-0101"
+      },
+      {
+        "id": 3,
+        "name": "Allvent",
+        "contact": "Bob",
+        "email": "bob@allvent.com",
+        "phone": "555-0102"
+      },
+      {
+        "id": 4,
+        "name": "Malligai Sweets",
+        "contact": "Charlie",
+        "email": "charlie@malligai.com",
+        "phone": "555-0103"
+      }
+    ],
+    "staff": [
+      "Mubarak",
+      "Eswar",
+      "Pritheeswarar",
+      "Sudharshan"
+    ],
+    "statuses": [
+      "New",
+      "In Progress",
+      "Waiting Client",
+      "Waiting Supplier",
+      "Follow Up",
+      "Completed"
+    ],
+    "priorities": [
+      "High",
+      "Medium",
+      "Low"
+    ],
+    "nextTaskId": 3,
+    "nextClientId": 5
+  }
+}
