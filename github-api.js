@@ -91,6 +91,8 @@ class DataStore {
     constructor() {
         this.state = null;
         this.listeners = [];
+        this._saving = false;  // mutex to prevent concurrent saves
+        this._lastSha = null;  // cache the last known SHA
     }
 
     // Subscribe to state changes
@@ -109,11 +111,15 @@ class DataStore {
         if (!this.state) return;
 
         const pingPresence = async () => {
-            if (CONFIG.useGithub && CONFIG.token) {
-                try {
-                    await this.fetchFromGithub(); // Sync latest remote state
-                } catch (e) { console.warn('Heartbeat fetch failed', e); }
+            if (!CONFIG.useGithub || !CONFIG.token) return;
+            // Skip heartbeat save if another save is already running
+            if (this._saving) {
+                console.log('[Heartbeat] Skipping - another save is in progress');
+                return;
             }
+            try {
+                await this.fetchFromGithub();
+            } catch (e) { console.warn('Heartbeat fetch failed', e); }
             if (!this.state) return;
             if (!this.state.livePresence) this.state.livePresence = {};
 
@@ -122,10 +128,8 @@ class DataStore {
                 lastSeen: new Date().toISOString()
             };
 
-            if (CONFIG.useGithub && CONFIG.token) {
-                try { await this.saveToGithub(); } catch (e) { }
-            } else {
-                this.saveToLocal();
+            try { await this.saveToGithub(); } catch (e) {
+                console.warn('Heartbeat save failed (non-critical):', e.message);
             }
         };
 
@@ -182,17 +186,23 @@ class DataStore {
             const response = await fetch(url, {
                 headers: {
                     'Authorization': `token ${CONFIG.token}`,
-                    'Accept': 'application/vnd.github.v3.raw'
+                    'Accept': 'application/vnd.github.v3+json'
                 }
             });
 
             if (response.ok) {
-                this.state = await response.json();
+                const fileData = await response.json();
+                // Cache the SHA for saves
+                this._lastSha = fileData.sha;
+                // Decode the content
+                const decoded = decodeURIComponent(escape(atob(fileData.content)));
+                this.state = JSON.parse(decoded);
                 this.migrateData();
                 // Also cache locally
                 localStorage.setItem('backoffice_state_backup', JSON.stringify(this.state));
             } else if (response.status === 404) {
                 // File doesn't exist yet, use default
+                this._lastSha = null;
                 this.state = JSON.parse(JSON.stringify(DEFAULT_STATE));
                 await this.saveToGithub(); // Create the file
             } else {
@@ -208,21 +218,37 @@ class DataStore {
         this.notify();
     }
 
-    async saveToGithub() {
-        try {
-            // First get the file sha to update it
-            let sha = null;
-            const getUrl = `https://api.github.com/repos/${CONFIG.repo}/contents/${CONFIG.dataFile}?ref=${CONFIG.branch}`;
+    async saveToGithub(retryCount = 0) {
+        // Mutex: wait if another save is in progress
+        if (this._saving) {
+            // Wait up to 10 seconds for the other save to finish
+            for (let i = 0; i < 20; i++) {
+                await new Promise(r => setTimeout(r, 500));
+                if (!this._saving) break;
+            }
+            if (this._saving) {
+                console.warn('Save timeout - another save is still running');
+                this.saveToLocal();
+                return false;
+            }
+        }
 
-            try {
-                const getRes = await fetch(getUrl, {
-                    headers: { 'Authorization': `token ${CONFIG.token}` }
-                });
-                if (getRes.ok) {
-                    const getData = await getRes.json();
-                    sha = getData.sha;
-                }
-            } catch (e) { /* File might not exist */ }
+        this._saving = true;
+        try {
+            // Use cached SHA if available, otherwise fetch it
+            let sha = this._lastSha;
+            if (!sha) {
+                const getUrl = `https://api.github.com/repos/${CONFIG.repo}/contents/${CONFIG.dataFile}?ref=${CONFIG.branch}`;
+                try {
+                    const getRes = await fetch(getUrl, {
+                        headers: { 'Authorization': `token ${CONFIG.token}` }
+                    });
+                    if (getRes.ok) {
+                        const getData = await getRes.json();
+                        sha = getData.sha;
+                    }
+                } catch (e) { /* File might not exist */ }
+            }
 
             // Encode content to base64
             const content = btoa(unescape(encodeURIComponent(JSON.stringify(this.state, null, 2))));
@@ -245,19 +271,32 @@ class DataStore {
                 body: JSON.stringify(body)
             });
 
-            if (!response.ok) {
-                throw new Error(`Failed to save to GitHub: ${response.status}`);
+            if (response.ok) {
+                // Update cached SHA from the response
+                const result = await response.json();
+                this._lastSha = result.content.sha;
+                // Cache locally on success
+                localStorage.setItem('backoffice_state_backup', JSON.stringify(this.state));
+                this.notify();
+                return true;
+            } else if (response.status === 409 && retryCount < 3) {
+                // SHA conflict - refetch and retry
+                console.warn(`SHA conflict on save (attempt ${retryCount + 1}), refetching...`);
+                this._saving = false;
+                this._lastSha = null;
+                await this.fetchFromGithub();
+                return await this.saveToGithub(retryCount + 1);
+            } else {
+                const errBody = await response.text();
+                throw new Error(`Failed to save to GitHub: ${response.status} - ${errBody}`);
             }
-
-            // Cache locally on success
-            localStorage.setItem('backoffice_state_backup', JSON.stringify(this.state));
-            this.notify();
-            return true;
         } catch (error) {
             console.error("Error saving to GitHub:", error);
             // Fallback save to local so data isn't lost
             this.saveToLocal();
             throw error;
+        } finally {
+            this._saving = false;
         }
     }
 
