@@ -6,6 +6,46 @@
 let charts = {};
 let sortableInstances = [];
 let currentUser = null;
+const SESSION_KEY = 'currentUser';
+let renderQueued = false;
+let pendingRenderState = null;
+let lastDashboardFingerprint = '';
+
+function escapeHTML(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function safe(value) {
+    return escapeHTML(value);
+}
+
+function debounce(fn, wait = 120) {
+    let timeoutId = null;
+    return (...args) => {
+        if (timeoutId) clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => fn(...args), wait);
+    };
+}
+
+const debouncedRenderAllViews = debounce((state) => {
+    renderAllViews(state);
+}, 80);
+
+function scheduleRender(state) {
+    pendingRenderState = state;
+    if (renderQueued) return;
+    renderQueued = true;
+
+    requestAnimationFrame(() => {
+        renderQueued = false;
+        debouncedRenderAllViews(pendingRenderState);
+    });
+}
 
 document.addEventListener('DOMContentLoaded', async () => {
     // 1. Initialize UI Elements
@@ -25,13 +65,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 3. Setup Auth now that store is ready
     setupAuth();
 
+    // Start realtime state stream for multi-user consistency
+    store.startRealtimeStateListener();
+
     // Subscribe to state changes to update UI
     store.subscribe((state) => {
-        renderAllViews(state);
+        scheduleRender(state);
     });
 
     // Initial Render
-    renderAllViews(store.state);
+    scheduleRender(store.state);
 
     // Hide Loading
     document.getElementById('global-loader').classList.add('hidden');
@@ -65,6 +108,8 @@ function renderAllViews(state) {
     renderTodayTasks(state);
     renderClientsList(state);
     populateSelects(state.config);
+    updateNotifications();
+    updateHeaderProfile();
 }
 
 // --- Navigation & Routing ---
@@ -79,7 +124,7 @@ function initNavigation() {
     function handleRoute() {
         let hash = window.location.hash;
         if (!hash || hash === '#/') {
-            hash = localStorage.getItem('currentUser') ? '#/dashboard' : '#/login';
+            hash = localStorage.getItem(SESSION_KEY) ? '#/dashboard' : '#/login';
         }
         
         let targetId = 'view-dashboard';
@@ -214,6 +259,8 @@ function isOverdue(dateString) {
 function showNotification(title, message, type = 'info') {
     const container = document.getElementById('notification-container');
     const toast = document.createElement('div');
+    const safeTitle = safe(title);
+    const safeMessage = safe(message);
 
     let icon = 'info';
     let colorClass = 'bg-blue-50 text-blue-800 border-blue-200';
@@ -239,8 +286,8 @@ function showNotification(title, message, type = 'info') {
             <i data-lucide="${icon}" class="w-5 h-5 ${iconClass}"></i>
         </div>
         <div class="flex-1">
-            <h4 class="font-semibold text-sm">${title}</h4>
-            <div class="text-sm mt-1 opacity-90">${message}</div>
+            <h4 class="font-semibold text-sm">${safeTitle}</h4>
+            <div class="text-sm mt-1 opacity-90">${safeMessage}</div>
         </div>
         <button class="ml-auto -mx-1.5 -my-1.5 p-1.5 rounded-lg focus:ring-2 focus:ring-gray-300 hover:bg-black/5 inline-flex h-8 w-8 justify-center items-center transition" aria-label="Close" onclick="this.parentElement.remove()">
             <i data-lucide="x" class="w-4 h-4"></i>
@@ -279,14 +326,19 @@ function renderDashboard(state) {
         }
     });
 
+    const currentFingerprint = `${tasks.length}|${openCount}|${inProgressCount}|${completedCount}|${overdueCount}|${tasks.map(t => t.updatedAt || '').join('|')}`;
     const metricsContainer = document.getElementById('dashboard-metrics');
-    metricsContainer.innerHTML = `
-        ${createMetricCard('Open Tasks', openCount, 'folder-open', 'bg-blue-500')}
-        ${createMetricCard('In Progress', inProgressCount, 'settings-2', 'bg-amber-500')}
-        ${createMetricCard('Completed', completedCount, 'check-circle', 'bg-gray-500')}
-        ${createMetricCard('Overdue', overdueCount, 'alert-circle', overdueCount > 0 ? 'bg-red-500 animate-pulse' : 'bg-red-500')}
-    `;
-    lucide.createIcons({ root: metricsContainer });
+
+    if (lastDashboardFingerprint !== currentFingerprint) {
+        metricsContainer.innerHTML = `
+            ${createMetricCard('Open Tasks', openCount, 'folder-open', 'bg-blue-500')}
+            ${createMetricCard('In Progress', inProgressCount, 'settings-2', 'bg-amber-500')}
+            ${createMetricCard('Completed', completedCount, 'check-circle', 'bg-gray-500')}
+            ${createMetricCard('Overdue', overdueCount, 'alert-circle', overdueCount > 0 ? 'bg-red-500 animate-pulse' : 'bg-red-500')}
+        `;
+        lucide.createIcons({ root: metricsContainer });
+        lastDashboardFingerprint = currentFingerprint;
+    }
 
     // 2. Charts
     updateStatusChart(tasks, state.config.statuses);
@@ -328,6 +380,15 @@ function getChartColors() {
     };
 }
 
+function areArraysEqual(a, b) {
+    if (!Array.isArray(a) || !Array.isArray(b)) return false;
+    if (a.length !== b.length) return false;
+    for (let index = 0; index < a.length; index++) {
+        if (a[index] !== b[index]) return false;
+    }
+    return true;
+}
+
 function updateStatusChart(tasks, statusList) {
     const ctx = document.getElementById('chart-status').getContext('2d');
     const colors = getChartColors();
@@ -335,28 +396,37 @@ function updateStatusChart(tasks, statusList) {
     const counts = statusList.map(status => tasks.filter(t => t.status === status).length);
     const bgColors = [colors.new, colors.progress, colors.waitingClient, colors.waitingSupplier, colors.followup, colors.completed];
 
-    if (charts.status) charts.status.destroy();
-
-    charts.status = new Chart(ctx, {
-        type: 'doughnut',
-        data: {
-            labels: statusList,
-            datasets: [{
-                data: counts,
-                backgroundColor: bgColors,
-                borderWidth: 2,
-                hoverOffset: 4
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: { position: 'right', labels: { usePointStyle: true, padding: 15, font: { family: 'Inter' } } }
+    if (!charts.status) {
+        charts.status = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: statusList,
+                datasets: [{
+                    data: counts,
+                    backgroundColor: bgColors,
+                    borderWidth: 2,
+                    hoverOffset: 4
+                }]
             },
-            cutout: '70%'
-        }
-    });
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'right', labels: { usePointStyle: true, padding: 15, font: { family: 'Inter' } } }
+                },
+                cutout: '70%'
+            }
+        });
+        return;
+    }
+
+    const chart = charts.status;
+    const dataChanged = !areArraysEqual(chart.data.datasets[0].data, counts) || !areArraysEqual(chart.data.labels, statusList);
+    if (!dataChanged) return;
+    chart.data.labels = [...statusList];
+    chart.data.datasets[0].data = [...counts];
+    chart.data.datasets[0].backgroundColor = bgColors;
+    chart.update('none');
 }
 
 function updatePriorityChart(tasks, priorityList) {
@@ -366,31 +436,40 @@ function updatePriorityChart(tasks, priorityList) {
     const counts = priorityList.map(prio => tasks.filter(t => t.priority === prio && t.status !== 'Completed').length);
     const bgColors = [colors.high, colors.medium, colors.low];
 
-    if (charts.priority) charts.priority.destroy();
-
-    charts.priority = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: priorityList,
-            datasets: [{
-                label: 'Open Tasks',
-                data: counts,
-                backgroundColor: bgColors,
-                borderRadius: 4
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: { display: false }
+    if (!charts.priority) {
+        charts.priority = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: priorityList,
+                datasets: [{
+                    label: 'Open Tasks',
+                    data: counts,
+                    backgroundColor: bgColors,
+                    borderRadius: 4
+                }]
             },
-            scales: {
-                y: { beginAtZero: true, grid: { borderDash: [2, 4], color: '#f3f4f6' }, ticks: { stepSize: 1, font: { family: 'Inter' } } },
-                x: { grid: { display: false }, ticks: { font: { family: 'Inter' } } }
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false }
+                },
+                scales: {
+                    y: { beginAtZero: true, grid: { borderDash: [2, 4], color: '#f3f4f6' }, ticks: { stepSize: 1, font: { family: 'Inter' } } },
+                    x: { grid: { display: false }, ticks: { font: { family: 'Inter' } } }
+                }
             }
-        }
-    });
+        });
+        return;
+    }
+
+    const chart = charts.priority;
+    const dataChanged = !areArraysEqual(chart.data.datasets[0].data, counts) || !areArraysEqual(chart.data.labels, priorityList);
+    if (!dataChanged) return;
+    chart.data.labels = [...priorityList];
+    chart.data.datasets[0].data = [...counts];
+    chart.data.datasets[0].backgroundColor = bgColors;
+    chart.update('none');
 }
 
 function updateStaffChart(tasks, staffList) {
@@ -406,30 +485,41 @@ function updateStaffChart(tasks, staffList) {
         count: tasks.filter(t => t.staff === staff && t.status !== 'Completed').length
     })).sort((a, b) => b.count - a.count);
 
-    if (charts.staff) charts.staff.destroy();
+    const labels = workloads.map(w => w.name);
+    const data = workloads.map(w => w.count);
 
-    charts.staff = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: workloads.map(w => w.name),
-            datasets: [{
-                label: 'Active Tasks',
-                data: workloads.map(w => w.count),
-                backgroundColor: '#3b82f6', // primary blue
-                borderRadius: 4
-            }]
-        },
-        options: {
-            indexAxis: 'y',
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: { legend: { display: false } },
-            scales: {
-                x: { beginAtZero: true, grid: { borderDash: [2, 4] }, ticks: { stepSize: 1 } },
-                y: { grid: { display: false } }
+    if (!charts.staff) {
+        charts.staff = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels,
+                datasets: [{
+                    label: 'Active Tasks',
+                    data,
+                    backgroundColor: '#3b82f6',
+                    borderRadius: 4
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { beginAtZero: true, grid: { borderDash: [2, 4] }, ticks: { stepSize: 1 } },
+                    y: { grid: { display: false } }
+                }
             }
-        }
-    });
+        });
+        return;
+    }
+
+    const chart = charts.staff;
+    const dataChanged = !areArraysEqual(chart.data.labels, labels) || !areArraysEqual(chart.data.datasets[0].data, data);
+    if (!dataChanged) return;
+    chart.data.labels = labels;
+    chart.data.datasets[0].data = data;
+    chart.update('none');
 }
 
 function updateClientChart(tasks) {
@@ -466,28 +556,41 @@ function updateClientChart(tasks) {
         counts.push(otherCount);
     }
 
-    if (charts.client) charts.client.destroy();
+    const finalLabels = labels.length > 0 ? labels : ['No active tasks'];
+    const finalData = counts.length > 0 ? counts : [1];
+    const finalColors = counts.length > 0
+        ? ['#2563eb', '#7c3aed', '#059669', '#d97706', '#dc2626', '#6b7280']
+        : ['#e5e7eb'];
 
-    charts.client = new Chart(ctx, {
-        type: 'pie',
-        data: {
-            labels: labels.length > 0 ? labels : ['No active tasks'],
-            datasets: [{
-                data: counts.length > 0 ? counts : [1],
-                backgroundColor: counts.length > 0 ?
-                    ['#2563eb', '#7c3aed', '#059669', '#d97706', '#dc2626', '#6b7280'] :
-                    ['#e5e7eb'],
-                borderWidth: 1
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: { position: 'right', labels: { boxWidth: 12, font: { family: 'Inter' } } }
+    if (!charts.client) {
+        charts.client = new Chart(ctx, {
+            type: 'pie',
+            data: {
+                labels: finalLabels,
+                datasets: [{
+                    data: finalData,
+                    backgroundColor: finalColors,
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'right', labels: { boxWidth: 12, font: { family: 'Inter' } } }
+                }
             }
-        }
-    });
+        });
+        return;
+    }
+
+    const chart = charts.client;
+    const dataChanged = !areArraysEqual(chart.data.labels, finalLabels) || !areArraysEqual(chart.data.datasets[0].data, finalData);
+    if (!dataChanged) return;
+    chart.data.labels = finalLabels;
+    chart.data.datasets[0].data = finalData;
+    chart.data.datasets[0].backgroundColor = finalColors;
+    chart.update('none');
 }
 
 function renderActivityFeed(tasks) {
@@ -526,6 +629,10 @@ function renderActivityFeed(tasks) {
         const timeAgo = getTimeAgo(act.timestamp);
         let icon = 'activity';
         let bg = 'bg-gray-100 text-gray-600';
+        const safeUser = safe(act.user);
+        const safeAction = safe((act.action || '').toLowerCase());
+        const safeTaskName = safe(act.taskName);
+        const safeTaskId = Number(act.taskId) || 0;
 
         if (act.action.includes('created')) { icon = 'plus'; bg = 'bg-blue-100 text-blue-600'; }
         else if (act.action.includes('Status changed') || act.action.includes('via drag')) { icon = 'arrow-right-left'; bg = 'bg-amber-100 text-amber-600'; }
@@ -537,8 +644,8 @@ function renderActivityFeed(tasks) {
                     <i data-lucide="${icon}" class="w-4 h-4"></i>
                 </div>
                 <div class="flex-1 pt-2 pb-1">
-                    <p class="text-sm text-gray-800"><span class="font-medium">${act.user}</span> ${act.action.toLowerCase()}</p>
-                    <p class="text-xs text-primary font-medium mt-0.5 hover:underline cursor-pointer" onclick="openTaskModal(${act.taskId})">#${act.taskId} ${act.taskName}</p>
+                    <p class="text-sm text-gray-800"><span class="font-medium">${safeUser}</span> ${safeAction}</p>
+                    <p class="text-xs text-primary font-medium mt-0.5 hover:underline cursor-pointer" onclick="openTaskModal(${safeTaskId})">#${safeTaskId} ${safeTaskName}</p>
                     <p class="text-xs text-gray-400 mt-1">${timeAgo}</p>
                 </div>
             </div>
@@ -637,32 +744,41 @@ function renderKanban(state) {
 
 function createKanbanCard(task) {
     const priorityColor = `border-priority-${task.priority}`;
+    const safeTaskId = Number(task.id) || 0;
+    const safeClient = safe(task.client);
+    const safeTaskName = safe(task.task);
+    const safeProject = safe(task.project || '');
+    const safeNotes = safe(task.notes || '');
+    const safeStaff = safe(task.staff || 'Unknown');
+    const safeWaitingFor = safe(task.waitingFor || '');
+    const safeStaffInitial = safe((task.staff || 'U').charAt(0));
+
     return `
-        <div class="bg-white p-3 rounded-lg shadow-sm hover:shadow-md cursor-grab active:cursor-grabbing border items-center border-l-4 border-y-gray-200 border-r-gray-200 ${priorityColor} transition group relative" data-id="${task.id}" onclick="openTaskModal(${task.id})">
+        <div class="bg-white p-3 rounded-lg shadow-sm hover:shadow-md cursor-grab active:cursor-grabbing border items-center border-l-4 border-y-gray-200 border-r-gray-200 ${priorityColor} transition group relative" data-id="${safeTaskId}" onclick="openTaskModal(${safeTaskId})">
             
             <!-- Quick actions on hover -->
             <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition flex gap-1 bg-white rounded-md shadow-sm border border-gray-100 p-0.5 z-10">
-                <button class="p-1 text-gray-400 hover:text-primary rounded" onclick="event.stopPropagation(); openTaskModal(${task.id})"><i data-lucide="edit-2" class="w-3.5 h-3.5"></i></button>
+                <button class="p-1 text-gray-400 hover:text-primary rounded" onclick="event.stopPropagation(); openTaskModal(${safeTaskId})"><i data-lucide="edit-2" class="w-3.5 h-3.5"></i></button>
             </div>
 
             <div class="flex justify-between items-start mb-1.5 pr-6">
-                <span class="text-xs font-semibold text-gray-500">#${task.id} &bull; ${task.client}</span>
+                <span class="text-xs font-semibold text-gray-500">#${safeTaskId} &bull; ${safeClient}</span>
             </div>
             
-            <h4 class="text-sm font-semibold text-gray-800 leading-tight mb-1">${task.task}</h4>
-            ${task.project ? `<p class="text-xs text-gray-500 mb-2 truncate"><i data-lucide="home" class="w-3 h-3 inline mr-1 pb-0.5"></i>${task.project}</p>` : ''}
+            <h4 class="text-sm font-semibold text-gray-800 leading-tight mb-1">${safeTaskName}</h4>
+            ${task.project ? `<p class="text-xs text-gray-500 mb-2 truncate"><i data-lucide="home" class="w-3 h-3 inline mr-1 pb-0.5"></i>${safeProject}</p>` : ''}
             
-            ${task.notes ? `<p class="text-xs text-gray-500 mb-3 line-clamp-2 italic border-l-2 pl-2">"${task.notes}"</p>` : '<div class="mb-3"></div>'}
+            ${task.notes ? `<p class="text-xs text-gray-500 mb-3 line-clamp-2 italic border-l-2 pl-2">"${safeNotes}"</p>` : '<div class="mb-3"></div>'}
             
             <div class="flex items-center justify-between mt-auto">
                 <div class="flex items-center gap-1.5">
-                    <div class="w-6 h-6 rounded-full bg-primary-light text-primary flex items-center justify-center text-xs font-bold" title="${task.staff}">
-                        ${task.staff.charAt(0)}
+                    <div class="w-6 h-6 rounded-full bg-primary-light text-primary flex items-center justify-center text-xs font-bold" title="${safeStaff}">
+                        ${safeStaffInitial}
                     </div>
                 </div>
                 
                 <div class="flex gap-2 text-xs">
-                    ${task.waitingFor ? `<span class="text-red-500 font-medium" title="Waiting for: ${task.waitingFor}"><i data-lucide="clock" class="w-3.5 h-3.5 inline"></i></span>` : ''}
+                    ${task.waitingFor ? `<span class="text-red-500 font-medium" title="Waiting for: ${safeWaitingFor}"><i data-lucide="clock" class="w-3.5 h-3.5 inline"></i></span>` : ''}
                     <span class="${isOverdue(task.dueDate) ? 'text-red-600 font-bold bg-red-100 px-1.5 rounded' : 'text-gray-500'}">
                         ${formatDate(task.dueDate).replace(/, 202./, '')}
                     </span>
@@ -708,7 +824,7 @@ function renderAllTasksList(state) {
         }
 
         if (valA < valB) return currentSort.dir === 'asc' ? -1 : 1;
-        if (valA > valB) return currentSort.dir === 'asc' ? 1 : 1;
+        if (valA > valB) return currentSort.dir === 'asc' ? 1 : -1;
         return 0;
     });
 
@@ -716,39 +832,48 @@ function renderAllTasksList(state) {
 
     let html = '';
     tasks.forEach(task => {
+        const safeTaskId = Number(task.id) || 0;
+        const safeClient = safe(task.client);
+        const safeProject = safe(task.project || '-');
+        const safeTaskName = safe(task.task);
+        const safeStaff = safe(task.staff || 'Unknown');
+        const safeStaffInitial = safe((task.staff || 'U').charAt(0));
+        const safeStatus = safe(task.status);
+        const safePriority = safe(task.priority);
+
         html += `
             <tr class="hover:bg-gray-50 transition border-b border-gray-100 group">
                 <td class="px-4 py-3 whitespace-nowrap">
-                    <input type="checkbox" class="task-checkbox rounded border-gray-300 text-primary cursor-pointer w-4 h-4 focus:ring-primary" value="${task.id}">
+                    <input type="checkbox" class="task-checkbox rounded border-gray-300 text-primary cursor-pointer w-4 h-4 focus:ring-primary" value="${safeTaskId}">
                 </td>
                 <td class="px-4 py-3 whitespace-nowrap font-mono text-xs text-gray-500">
-                    #${task.id}
+                    #${safeTaskId}
                 </td>
                 <td class="px-4 py-3 whitespace-nowrap">
-                    <div class="font-medium text-gray-800">${task.client}</div>
+                    <div class="font-medium text-gray-800">${safeClient}</div>
                 </td>
                 <td class="px-4 py-3 whitespace-nowrap text-gray-600">
-                    ${task.project || '-'}
+                    ${safeProject}
                 </td>
                 <td class="px-4 py-3 min-w-[200px]">
-                    <div class="font-medium text-gray-800 w-full truncate max-w-xs cursor-pointer hover:text-primary hover:underline hover-active" onclick="openTaskModal(${task.id}, {viewOnly: true})">${task.task}</div>
+                    <div class="font-medium text-gray-800 w-full truncate max-w-xs cursor-pointer hover:text-primary hover:underline hover-active" onclick="openTaskModal(${safeTaskId}, {viewOnly: true})">${safeTaskName}</div>
                 </td>
                 <td class="px-4 py-3 whitespace-nowrap">
                     <div class="flex items-center gap-2 text-gray-700">
                         <div class="w-6 h-6 rounded-full bg-primary-light text-primary flex items-center justify-center text-xs font-bold">
-                            ${task.staff.charAt(0)}
+                            ${safeStaffInitial}
                         </div>
-                        ${task.staff}
+                        ${safeStaff}
                     </div>
                 </td>
                 <td class="px-4 py-3 whitespace-nowrap">
                     <span class="status-badge ${getStatusColorClass(task.status)}">
-                        <i data-lucide="${getStatusIcon(task.status)}" class="w-3 h-3 mr-1 inline-block"></i> ${task.status}
+                        <i data-lucide="${getStatusIcon(task.status)}" class="w-3 h-3 mr-1 inline-block"></i> ${safeStatus}
                     </span>
                 </td>
                 <td class="px-4 py-3 whitespace-nowrap">
-                    <span class="text-xs font-bold px-2 py-1 rounded bg-priority-${task.priority} border border-priority-${task.priority} border-opacity-20 text-priority-${task.priority}">
-                        ${task.priority}
+                    <span class="text-xs font-bold px-2 py-1 rounded bg-priority-${safePriority} border border-priority-${safePriority} border-opacity-20 text-priority-${safePriority}">
+                        ${safePriority}
                     </span>
                 </td>
                 <td class="px-4 py-3 whitespace-nowrap ${isOverdue(task.dueDate) && task.status !== 'Completed' ? 'text-red-600 font-semibold bg-red-50 rounded px-2' : 'text-gray-600'}">
@@ -756,10 +881,10 @@ function renderAllTasksList(state) {
                 </td>
                 <td class="px-4 py-3 whitespace-nowrap text-right text-sm font-medium">
                     <div class="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button class="text-gray-400 hover:text-primary transition p-1" onclick="openTaskModal(${task.id})" title="Edit">
+                        <button class="text-gray-400 hover:text-primary transition p-1" onclick="openTaskModal(${safeTaskId})" title="Edit">
                             <i data-lucide="edit" class="w-4 h-4"></i>
                         </button>
-                        <button class="text-gray-400 hover:text-red-500 transition p-1" onclick="deleteSingleTask(${task.id})" title="Delete">
+                        <button class="text-gray-400 hover:text-red-500 transition p-1" onclick="deleteSingleTask(${safeTaskId})" title="Delete">
                             <i data-lucide="trash-2" class="w-4 h-4"></i>
                         </button>
                     </div>
@@ -864,14 +989,21 @@ function renderClientsList(state) {
     clients.forEach(client => {
         const activeTasks = state.tasks.filter(t => t.client === client.name && t.status !== 'Completed').length;
         const totalTasks = state.tasks.filter(t => t.client === client.name).length;
+        const safeName = safe(client.name);
+        const safeContact = safe(client.contact || '');
+        const safeEmail = safe(client.email || '');
+        const safePhone = safe(client.phone || '');
+        const encodedName = encodeURIComponent(client.name);
+        const deleteDisabledClass = activeTasks > 0 ? 'opacity-30 cursor-not-allowed' : '';
+        const deleteDisabledAttr = activeTasks > 0 ? 'disabled' : '';
 
         html += `
             <tr class="hover:bg-gray-50 transition border-b border-gray-100 group">
                 <td class="px-6 py-4">
-                    <div class="font-bold text-gray-800">${client.name}</div>
-                    ${client.contact ? `<div class="text-xs text-gray-500 mt-1"><i data-lucide="user" class="w-3 h-3 inline mr-1"></i>${client.contact}</div>` : ''}
-                    ${client.email ? `<div class="text-xs text-gray-400 mt-0.5"><i data-lucide="mail" class="w-3 h-3 inline mr-1"></i>${client.email}</div>` : ''}
-                    ${client.phone ? `<div class="text-xs text-gray-400 mt-0.5"><i data-lucide="phone" class="w-3 h-3 inline mr-1"></i>${client.phone}</div>` : ''}
+                    <div class="font-bold text-gray-800">${safeName}</div>
+                    ${client.contact ? `<div class="text-xs text-gray-500 mt-1"><i data-lucide="user" class="w-3 h-3 inline mr-1"></i>${safeContact}</div>` : ''}
+                    ${client.email ? `<div class="text-xs text-gray-400 mt-0.5"><i data-lucide="mail" class="w-3 h-3 inline mr-1"></i>${safeEmail}</div>` : ''}
+                    ${client.phone ? `<div class="text-xs text-gray-400 mt-0.5"><i data-lucide="phone" class="w-3 h-3 inline mr-1"></i>${safePhone}</div>` : ''}
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap">
                     <span class="status-badge ${activeTasks > 0 ? 'bg-green-50 text-green-700 border-green-200' : 'bg-gray-100 text-gray-600 border-gray-200'}">
@@ -883,10 +1015,10 @@ function renderClientsList(state) {
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap text-right">
                     <div class="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button class="text-gray-400 hover:text-primary transition p-1" onclick="openClientModal('${client.name}')" title="Edit Client">
+                        <button class="text-gray-400 hover:text-primary transition p-1" onclick="openClientModalByEncoded('${encodedName}')" title="Edit Client">
                             <i data-lucide="edit-2" class="w-4 h-4"></i>
                         </button>
-                        <button class="text-gray-400 hover:text-red-500 transition p-1" onclick="deleteClientAction('${client.name}')" title="Delete Client" ${activeTasks > 0 ? 'disabled class="opacity-30 cursor-not-allowed"' : ''}>
+                        <button class="text-gray-400 hover:text-red-500 transition p-1 ${deleteDisabledClass}" onclick="deleteClientActionByEncoded('${encodedName}')" title="Delete Client" ${deleteDisabledAttr}>
                             <i data-lucide="trash-2" class="w-4 h-4"></i>
                         </button>
                     </div>
@@ -901,6 +1033,14 @@ function renderClientsList(state) {
 
     tbody.innerHTML = html;
     lucide.createIcons({ root: tbody });
+}
+
+window.openClientModalByEncoded = function (encodedClientName) {
+    window.openClientModal(decodeURIComponent(encodedClientName));
+}
+
+window.deleteClientActionByEncoded = function (encodedClientName) {
+    window.deleteClientAction(decodeURIComponent(encodedClientName));
 }
 
 window.deleteClientAction = async function (clientName) {
@@ -974,26 +1114,35 @@ function emptyState(message, icon = 'smile', colorClass = 'text-gray-400') {
 
 function createTodayCard(task) {
     const isOverdueTask = isOverdue(task.dueDate);
+    const safeTaskId = Number(task.id) || 0;
+    const safePriority = safe(task.priority);
+    const safeStatus = safe(task.status);
+    const safeTaskName = safe(task.task);
+    const safeClient = safe(task.client);
+    const safeProject = safe(task.project || '');
+    const safeNotes = safe(task.notes || '');
+    const safeStaff = safe(task.staff || 'Unknown');
+
     return `
         <div class="bg-white p-4 rounded-xl shadow-sm hover:shadow-md transition-shadow border items-center border-l-4 border-y-gray-200 border-r-gray-200 border-priority-${task.priority}">
             <div class="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
                 
                 <div class="flex-1">
                     <div class="flex items-center gap-2 mb-1">
-                        <span class="text-xs font-mono text-gray-500">#${task.id}</span>
-                        <span class="text-xs font-bold px-2 py-0.5 rounded bg-priority-${task.priority} text-priority-${task.priority}">${task.priority}</span>
-                        <span class="status-badge ${getStatusColorClass(task.status)}">${task.status}</span>
+                        <span class="text-xs font-mono text-gray-500">#${safeTaskId}</span>
+                        <span class="text-xs font-bold px-2 py-0.5 rounded bg-priority-${safePriority} text-priority-${safePriority}">${safePriority}</span>
+                        <span class="status-badge ${getStatusColorClass(task.status)}">${safeStatus}</span>
                     </div>
                     
-                    <h4 class="text-lg font-bold text-gray-800 leading-tight mb-1 cursor-pointer hover:text-primary hover:underline" onclick="openTaskModal(${task.id})">${task.task}</h4>
-                    <p class="text-sm text-gray-600 font-medium"><i data-lucide="home" class="w-4 h-4 inline mr-1 text-gray-400"></i>${task.client} ${task.project ? `&rsaquo; ${task.project}` : ''}</p>
-                    ${task.notes ? `<p class="text-sm text-gray-500 mt-2 line-clamp-1 italic bg-gray-50 p-2 rounded">"${task.notes}"</p>` : ''}
+                    <h4 class="text-lg font-bold text-gray-800 leading-tight mb-1 cursor-pointer hover:text-primary hover:underline" onclick="openTaskModal(${safeTaskId})">${safeTaskName}</h4>
+                    <p class="text-sm text-gray-600 font-medium"><i data-lucide="home" class="w-4 h-4 inline mr-1 text-gray-400"></i>${safeClient} ${task.project ? `&rsaquo; ${safeProject}` : ''}</p>
+                    ${task.notes ? `<p class="text-sm text-gray-500 mt-2 line-clamp-1 italic bg-gray-50 p-2 rounded">"${safeNotes}"</p>` : ''}
                 </div>
                 
                 <div class="flex flex-row sm:flex-col items-end gap-3 sm:gap-2 justify-between w-full sm:w-auto mt-2 sm:mt-0 pt-3 sm:pt-0 border-t border-gray-100 sm:border-0">
                     <div class="flex gap-4 sm:gap-2">
-                        <div class="flex items-center text-sm text-gray-600" title="${task.staff}">
-                            <i data-lucide="user" class="w-4 h-4 mr-1 text-gray-400"></i> ${task.staff}
+                        <div class="flex items-center text-sm text-gray-600" title="${safeStaff}">
+                            <i data-lucide="user" class="w-4 h-4 mr-1 text-gray-400"></i> ${safeStaff}
                         </div>
                         <div class="flex items-center text-sm ${isOverdueTask ? 'text-red-600 font-bold' : 'text-gray-600'}">
                             <i data-lucide="calendar" class="w-4 h-4 mr-1 ${isOverdueTask ? 'text-red-500' : 'text-gray-400'}"></i> ${formatDate(task.dueDate)}
@@ -1001,10 +1150,10 @@ function createTodayCard(task) {
                     </div>
                     
                     <div class="flex gap-2 w-full sm:w-auto mt-2 sm:mt-0">
-                        <button onclick="markAsComplete(${task.id})" class="flex-1 sm:flex-none px-3 py-1.5 bg-green-50 text-green-700 hover:bg-green-100 border border-green-200 rounded-md text-sm font-medium transition flex items-center justify-center gap-1">
+                        <button onclick="markAsComplete(${safeTaskId})" class="flex-1 sm:flex-none px-3 py-1.5 bg-green-50 text-green-700 hover:bg-green-100 border border-green-200 rounded-md text-sm font-medium transition flex items-center justify-center gap-1">
                             <i data-lucide="check" class="w-4 h-4"></i> Complete
                         </button>
-                        <button onclick="openTaskModal(${task.id})" class="flex-1 sm:flex-none px-3 py-1.5 bg-white text-gray-700 hover:bg-gray-50 border border-gray-300 rounded-md text-sm font-medium transition flex items-center justify-center gap-1">
+                        <button onclick="openTaskModal(${safeTaskId})" class="flex-1 sm:flex-none px-3 py-1.5 bg-white text-gray-700 hover:bg-gray-50 border border-gray-300 rounded-md text-sm font-medium transition flex items-center justify-center gap-1">
                             <i data-lucide="eye" class="w-4 h-4"></i> View
                         </button>
                     </div>
@@ -1035,7 +1184,13 @@ function populateSelects(config) {
     selectors.forEach(sel => {
         const el = document.getElementById(sel.id);
         if (!el) return;
-        el.innerHTML = sel.options.map(opt => `<option value="${opt}">${opt}</option>`).join('');
+        el.innerHTML = '';
+        sel.options.forEach(opt => {
+            const optionEl = document.createElement('option');
+            optionEl.value = String(opt ?? '');
+            optionEl.textContent = String(opt ?? '');
+            el.appendChild(optionEl);
+        });
     });
 }
 
@@ -1199,9 +1354,24 @@ window.deleteSingleTask = async function (taskId) {
 }
 
 function exportTasksCSV(tasks) {
+    const csvSafe = (value) => {
+        const raw = String(value ?? '');
+        const neutralized = /^[=+\-@]/.test(raw) ? `'${raw}` : raw;
+        return `"${neutralized.replace(/"/g, '""')}"`;
+    };
+
     let csv = 'ID,Client,Project,Task,Staff,Status,Priority,Due Date\\n';
     tasks.forEach(t => {
-        csv += `"${t.id}","${t.client}","${t.project || ''}","${t.task}","${t.staff}","${t.status}","${t.priority}","${t.dueDate}"\\n`;
+        csv += [
+            csvSafe(t.id),
+            csvSafe(t.client),
+            csvSafe(t.project || ''),
+            csvSafe(t.task),
+            csvSafe(t.staff),
+            csvSafe(t.status),
+            csvSafe(t.priority),
+            csvSafe(t.dueDate)
+        ].join(',') + '\\n';
     });
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
@@ -1380,7 +1550,8 @@ window.openTaskModal = function (taskId = null, defaults = {}) {
 
             // Priority badge
             const prioDisplay = document.getElementById('modal-priority-display');
-            prioDisplay.innerHTML = `<span class="bg-priority-${task.priority} text-priority-${task.priority} px-3 py-1 rounded-full text-xs font-bold border border-priority-${task.priority} border-opacity-20">${task.priority}</span>`;
+            const safePriority = safe(task.priority);
+            prioDisplay.innerHTML = `<span class="bg-priority-${safePriority} text-priority-${safePriority} px-3 py-1 rounded-full text-xs font-bold border border-priority-${safePriority} border-opacity-20">${safePriority}</span>`;
             prioDisplay.classList.remove('hidden');
 
             // Activity Log
@@ -1390,11 +1561,13 @@ window.openTaskModal = function (taskId = null, defaults = {}) {
 
                 let logHtml = '';
                 [...task.activityLog].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).forEach(log => {
+                    const safeLogUser = safe(log.user);
+                    const safeLogAction = safe(log.action);
                     logHtml += `
                         <li class="relative pl-6 md:pl-0">
                             <div class="hidden md:block absolute left-1/2 -translate-x-1/2 w-3 h-3 rounded-full bg-primary border-4 border-white"></div>
                             <div class="md:w-[calc(50%-1.5rem)] md:ml-auto bg-gray-50 border border-gray-100 p-3 rounded shadow-sm text-sm">
-                                <span class="font-semibold text-gray-800">${log.user}</span>: ${log.action}
+                                <span class="font-semibold text-gray-800">${safeLogUser}</span>: ${safeLogAction}
                                 <div class="text-xs text-gray-400 mt-1">${formatDate(log.timestamp)} at ${new Date(log.timestamp).toLocaleTimeString()}</div>
                             </div>
                         </li>
@@ -1411,10 +1584,10 @@ window.openTaskModal = function (taskId = null, defaults = {}) {
                 const childList = document.getElementById('task-children-list');
 
                 childList.innerHTML = childrenTasks.map(c => `
-                    <div class="bg-gray-50 border border-gray-100 p-2.5 rounded text-sm hover:border-primary border-opacity-40 hover:bg-white transition cursor-pointer flex justify-between items-center" onclick="closeTaskModal(); setTimeout(() => openTaskModal(${c.id}, {viewOnly: true}), 350)">
+                    <div class="bg-gray-50 border border-gray-100 p-2.5 rounded text-sm hover:border-primary border-opacity-40 hover:bg-white transition cursor-pointer flex justify-between items-center" onclick="closeTaskModal(); setTimeout(() => openTaskModal(${Number(c.id) || 0}, {viewOnly: true}), 350)">
                         <div class="flex items-center gap-3">
-                            <span class="status-badge ${getStatusColorClass(c.status)}">${c.status}</span>
-                            <span class="font-semibold text-gray-800">#${c.id} ${c.task}</span>
+                            <span class="status-badge ${getStatusColorClass(c.status)}">${safe(c.status)}</span>
+                            <span class="font-semibold text-gray-800">#${Number(c.id) || 0} ${safe(c.task)}</span>
                         </div>
                         <i data-lucide="chevron-right" class="w-4 h-4 text-gray-400"></i>
                     </div>
@@ -1562,84 +1735,161 @@ function initFilters() {
 }
 
 // --- Auth & Header Features ---
+async function sha256Hex(input) {
+    const payload = String(input ?? '');
+    const encoder = new TextEncoder();
+    const bytes = encoder.encode(payload);
+    const digest = await crypto.subtle.digest('SHA-256', bytes);
+    const arr = Array.from(new Uint8Array(digest));
+    return arr.map(byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function signInWithFirebaseAuth(email, password) {
+    if (!CONFIG.firebaseWebApiKey) return null;
+
+    const endpoint = `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${encodeURIComponent(CONFIG.firebaseWebApiKey)}`;
+    const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            email,
+            password,
+            returnSecureToken: true
+        })
+    });
+
+    if (!response.ok) return null;
+    return response.json();
+}
+
+function buildSafeSession(user, options = {}) {
+    const now = new Date().toISOString();
+    return {
+        username: user.username,
+        name: user.name,
+        role: user.role,
+        initials: user.initials,
+        sessionStart: options.sessionStart || now,
+        provider: options.provider || 'legacy',
+        firebaseUid: options.firebaseUid || null,
+        idToken: options.idToken || null,
+        refreshToken: options.refreshToken || null,
+        email: options.email || user.email || null
+    };
+}
+
+function persistSession(session) {
+    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+}
+
+function readSession() {
+    try {
+        const raw = localStorage.getItem(SESSION_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed || !parsed.username || !parsed.name) return null;
+        return parsed;
+    } catch (error) {
+        return null;
+    }
+}
+
+async function authenticateLegacyUser(usernameInput, passwordInput) {
+    const validUsers = store.state.authUsers || [];
+    const user = validUsers.find(u => u.username.toLowerCase() === usernameInput.toLowerCase());
+    if (!user || !user.passwordHash) return null;
+
+    const incomingHash = await sha256Hex(passwordInput);
+    if (incomingHash !== user.passwordHash) return null;
+    return buildSafeSession(user, { provider: 'legacy' });
+}
+
+async function authenticateWithFirebaseOrLegacy(usernameInput, passwordInput) {
+    const validUsers = store.state.authUsers || [];
+    const matchedUser = validUsers.find(u => u.username.toLowerCase() === usernameInput.toLowerCase() || (u.email && u.email.toLowerCase() === usernameInput.toLowerCase()));
+
+    if (CONFIG.firebaseWebApiKey && matchedUser && matchedUser.email) {
+        const authData = await signInWithFirebaseAuth(matchedUser.email, passwordInput);
+        if (authData && authData.localId) {
+            return buildSafeSession(matchedUser, {
+                provider: 'firebase',
+                firebaseUid: authData.localId,
+                idToken: authData.idToken,
+                refreshToken: authData.refreshToken,
+                email: matchedUser.email
+            });
+        }
+    }
+
+    return authenticateLegacyUser(usernameInput, passwordInput);
+}
+
 function setupAuth() {
     const loginForm = document.getElementById('login-form');
-    const viewLogin = document.getElementById('view-login');
-    const mainHeader = document.getElementById('main-header');
-    const mainContent = document.getElementById('main-content');
     const errorMsg = document.getElementById('login-error-msg');
 
     // Check for existing session
-    const storedSession = localStorage.getItem('currentUser');
+    const storedSession = readSession();
     if (storedSession) {
-        const sessionUser = JSON.parse(storedSession);
         const validUsers = store.state.authUsers || [];
-        // verify session user still exists and password matches
-        const user = validUsers.find(u => u.username === sessionUser.username && u.password === sessionUser.password);
+        const user = validUsers.find(u => u.username === storedSession.username);
         if (user) {
-            currentUser = { ...user };
+            currentUser = { ...storedSession, ...user, passwordHash: undefined };
             store.startPresenceHeartbeat(currentUser.username);
+            store.startPresenceListener(() => updateHeaderProfile());
             updateHeaderProfile();
-            // We intentionally don't drop a new login history row for a pure refresh
         } else {
-            localStorage.removeItem('currentUser');
+            localStorage.removeItem(SESSION_KEY);
             window.location.hash = '#/login';
         }
     }
 
-    loginForm?.addEventListener('submit', (e) => {
+    loginForm?.addEventListener('submit', async (e) => {
         e.preventDefault();
         const usernameInput = document.getElementById('login-username').value.trim();
         const passwordInput = document.getElementById('login-password').value;
         const spinner = document.getElementById('login-spinner');
         const loginText = document.getElementById('login-text');
         const submitBtn = loginForm.querySelector('button[type="submit"]');
-        
+
         // Prevent double clicks
         if (submitBtn.disabled) return;
-        
 
-        
         submitBtn.disabled = true;
         spinner.classList.remove('hidden');
         loginText.textContent = 'Signing In...';
-        if(errorMsg) errorMsg.classList.add('hidden');
-        
-        setTimeout(() => {
-            const validUsers = store.state.authUsers || [];
-            const user = validUsers.find(u => u.username.toLowerCase() === usernameInput.toLowerCase() && u.password === passwordInput);
-            
-            if (user) {
+        if (errorMsg) errorMsg.classList.add('hidden');
 
-                currentUser = { ...user };
-                
-                // Track Login locally
-                const loginTime = new Date().toISOString();
-                currentUser.sessionStart = loginTime;
-                localStorage.setItem('currentUser', JSON.stringify(currentUser));
-                
-                // Github Heartbeat Start
+        try {
+            const session = await authenticateWithFirebaseOrLegacy(usernameInput, passwordInput);
+
+            if (session) {
+                currentUser = { ...session };
+                persistSession(currentUser);
+
                 store.startPresenceHeartbeat(currentUser.username);
-                
-                window.location.hash = '#/dashboard';
-                
-                updateHeaderProfile();
-                showNotification('Welcome', `Successfully signed in as ${user.name}.`, 'success');
-            } else {
+                store.startPresenceListener(() => updateHeaderProfile());
 
-                if(errorMsg) {
-                    errorMsg.textContent = 'Invalid username or password.';
-                    errorMsg.classList.remove('hidden');
-                } else {
-                    showNotification('Login Failed', 'Invalid username or password.', 'error');
-                }
+                window.location.hash = '#/dashboard';
+                updateHeaderProfile();
+                showNotification('Welcome', `Successfully signed in as ${currentUser.name}.`, 'success');
+            } else if (errorMsg) {
+                errorMsg.textContent = 'Invalid username or password.';
+                errorMsg.classList.remove('hidden');
+            } else {
+                showNotification('Login Failed', 'Invalid username or password.', 'error');
             }
-            
-            // Re-enable button
+        } catch (error) {
+            console.error(error);
+            if (errorMsg) {
+                errorMsg.textContent = 'Login failed. Please retry.';
+                errorMsg.classList.remove('hidden');
+            }
+        } finally {
             submitBtn.disabled = false;
             spinner.classList.add('hidden');
             loginText.textContent = 'Sign In';
-        }, 800);
+        }
     });
 
     document.getElementById('btn-logout')?.addEventListener('click', async (e) => {
@@ -1660,7 +1910,7 @@ function setupAuth() {
         }
         
         currentUser = null;
-        localStorage.removeItem('currentUser');
+        localStorage.removeItem(SESSION_KEY);
         
         window.location.hash = '#/login';
         document.getElementById('login-password').value = '';
@@ -1738,7 +1988,7 @@ function updateHeaderProfile() {
             return `
                 <div class="flex items-center gap-2 py-1 px-2">
                     <span class="w-2 h-2 rounded-full ${dotClass}"></span>
-                    <span class="text-xs ${textClass}">${u.name}${meLabel}</span>
+                    <span class="text-xs ${textClass}">${safe(u.name)}${meLabel}</span>
                     <span class="text-[10px] text-gray-400 ml-auto border border-gray-200 px-1.5 py-0.5 rounded-full bg-white">${isOnline ? 'Online' : 'Offline'}</span>
                 </div>
             `;
@@ -1842,10 +2092,10 @@ function setupSettingsModal() {
             if (historyData.length > 0) {
                 listEl.innerHTML = historyData.map(h => `
                     <tr class="hover:bg-gray-50">
-                        <td class="px-4 py-3 font-medium text-gray-900">${h.name}</td>
+                        <td class="px-4 py-3 font-medium text-gray-900">${safe(h.name)}</td>
                         <td class="px-4 py-3">${new Date(h.loginTime).toLocaleString()}</td>
                         <td class="px-4 py-3">${new Date(h.logoutTime).toLocaleString()}</td>
-                        <td class="px-4 py-3 text-gray-500">${h.duration}</td>
+                        <td class="px-4 py-3 text-gray-500">${safe(h.duration)}</td>
                     </tr>
                 `).join('');
             } else {
@@ -1865,7 +2115,7 @@ function setupSettingsModal() {
         btn.addEventListener('click', closeSettings);
     });
 
-    form?.addEventListener('submit', (e) => {
+    form?.addEventListener('submit', async (e) => {
         e.preventDefault();
         if (!currentUser) return;
         
@@ -1874,13 +2124,6 @@ function setupSettingsModal() {
         const confirmP = document.getElementById('confirm-password').value;
         const errorMsg = document.getElementById('password-error-msg');
         const spinner = document.getElementById('password-save-spinner');
-        
-        // Validate
-        if (currentP !== currentUser.password) {
-            errorMsg.textContent = 'Incorrect current password.';
-            errorMsg.classList.remove('hidden');
-            return;
-        }
         
         if (newP !== confirmP) {
             errorMsg.textContent = 'New passwords do not match.';
@@ -1892,34 +2135,68 @@ function setupSettingsModal() {
         spinner.classList.remove('hidden');
         document.getElementById('password-save-text').textContent = 'Updating...';
         
-        setTimeout(() => {
+        try {
             const validUsers = store.state.authUsers || [];
             const userIndex = validUsers.findIndex(u => u.username === currentUser.username);
-            
+
             if (userIndex !== -1) {
-                validUsers[userIndex].password = newP;
-                currentUser.password = newP;
-                localStorage.setItem('currentUser', JSON.stringify(currentUser));
-                
+                const currentHash = await sha256Hex(currentP);
+                if (validUsers[userIndex].passwordHash !== currentHash) {
+                    errorMsg.textContent = 'Incorrect current password.';
+                    errorMsg.classList.remove('hidden');
+                    spinner.classList.add('hidden');
+                    document.getElementById('password-save-text').textContent = 'Update Password';
+                    return;
+                }
+
+                if (currentUser.provider === 'firebase' && CONFIG.firebaseWebApiKey && currentUser.idToken) {
+                    const endpoint = `https://identitytoolkit.googleapis.com/v1/accounts:update?key=${encodeURIComponent(CONFIG.firebaseWebApiKey)}`;
+                    const response = await fetch(endpoint, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            idToken: currentUser.idToken,
+                            password: newP,
+                            returnSecureToken: true
+                        })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error('Firebase password update failed.');
+                    }
+
+                    const authData = await response.json();
+                    currentUser.idToken = authData.idToken || currentUser.idToken;
+                    currentUser.refreshToken = authData.refreshToken || currentUser.refreshToken;
+                }
+
+                validUsers[userIndex].passwordHash = await sha256Hex(newP);
+                persistSession(currentUser);
+
                 if (store.isFirebaseReady()) {
-                    store.saveToFirebase().catch(()=>{});
+                    await store.saveToFirebase();
                 } else {
                     store.saveToLocal();
                 }
-                
+
                 showNotification('Success', 'Password updated successfully.', 'success');
                 closeSettings();
             }
-            
+        } catch (error) {
+            console.error(error);
+            errorMsg.textContent = 'Failed to update password.';
+            errorMsg.classList.remove('hidden');
+        } finally {
             spinner.classList.add('hidden');
             document.getElementById('password-save-text').textContent = 'Update Password';
-        }, 500);
+        }
     });
 
     // --- Firebase Configuration ---
     const fbUrlInput = document.getElementById('firebase-url-input');
     const fbMsg = document.getElementById('firebase-msg');
     const fbBadge = document.getElementById('firebase-status-badge');
+    const fbApiKeyInput = document.getElementById('firebase-api-key-input');
 
     function updateFirebaseBadge() {
         if (!fbBadge) return;
@@ -1935,6 +2212,7 @@ function setupSettingsModal() {
     // Populate URL field when settings opens
     btnOpen.addEventListener('click', () => {
         if (fbUrlInput) fbUrlInput.value = CONFIG.firebaseUrl || '';
+        if (fbApiKeyInput) fbApiKeyInput.value = CONFIG.firebaseWebApiKey || '';
         updateFirebaseBadge();
         if (typeof lucide !== 'undefined') setTimeout(() => lucide.createIcons(), 50);
     });
@@ -1995,6 +2273,18 @@ function setupSettingsModal() {
         updateFirebaseBadge();
         showNotification('Firebase', 'Disconnected. Data will only be saved locally.', 'info');
     });
+
+    document.getElementById('btn-save-firebase-api-key')?.addEventListener('click', () => {
+        const apiKey = fbApiKeyInput?.value?.trim() || '';
+        setFirebaseWebApiKey(apiKey);
+        if (fbMsg) {
+            fbMsg.textContent = apiKey
+                ? 'Firebase Web API Key saved. Firebase Auth migration is enabled.'
+                : 'Firebase Web API Key cleared. Legacy hashed login fallback only.';
+            fbMsg.className = 'text-sm font-medium mt-1 text-blue-600';
+            fbMsg.classList.remove('hidden');
+        }
+    });
 }
 
 function setupHeaderFeatures() {
@@ -2017,9 +2307,9 @@ function setupHeaderFeatures() {
 
         if (matches.length > 0) {
             resultsContainer.innerHTML = matches.map(t => `
-                <div class="p-2 hover:bg-gray-50 cursor-pointer rounded border-b border-gray-50 border-last-none" onclick="openTaskModal(${t.id}, {viewOnly: true})">
-                    <p class="text-xs text-primary font-medium">#${t.id} &bull; ${t.client}</p>
-                    <p class="text-sm font-semibold text-gray-800 truncate">${t.task}</p>
+                <div class="p-2 hover:bg-gray-50 cursor-pointer rounded border-b border-gray-50 border-last-none" onclick="openTaskModal(${Number(t.id) || 0}, {viewOnly: true})">
+                    <p class="text-xs text-primary font-medium">#${Number(t.id) || 0} &bull; ${safe(t.client)}</p>
+                    <p class="text-sm font-semibold text-gray-800 truncate">${safe(t.task)}</p>
                 </div>
             `).join('');
         } else {
@@ -2047,15 +2337,15 @@ function updateNotifications() {
         list.innerHTML = actionableTasks.map(t => {
             const isOv = isOverdue(t.dueDate);
             return `
-            <div class="px-4 py-3 hover:bg-gray-50 cursor-pointer border-b border-gray-50 transition" onclick="openTaskModal(${t.id}, {viewOnly: true})">
+            <div class="px-4 py-3 hover:bg-gray-50 cursor-pointer border-b border-gray-50 transition" onclick="openTaskModal(${Number(t.id) || 0}, {viewOnly: true})">
                 <div class="flex items-start gap-3">
                     <div class="mt-0.5 w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${isOv ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}">
                         <i data-lucide="${isOv ? 'alert-circle' : 'corner-down-right'}" class="w-3 h-3"></i>
                     </div>
                     <div>
                         <p class="text-xs font-semibold ${isOv ? 'text-red-600' : 'text-green-600'} mb-0.5">${isOv ? 'Overdue Task' : 'Follow Up Required'}</p>
-                        <p class="text-sm text-gray-800 font-medium leading-tight mb-1">${t.task}</p>
-                        <p class="text-xs text-gray-500">Due: ${formatDate(t.dueDate)} &bull; ${t.client}</p>
+                        <p class="text-sm text-gray-800 font-medium leading-tight mb-1">${safe(t.task)}</p>
+                        <p class="text-xs text-gray-500">Due: ${formatDate(t.dueDate)} &bull; ${safe(t.client)}</p>
                     </div>
                 </div>
             </div>

@@ -55,7 +55,7 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 
-<body class="bg-gray-50 text-gray-800 font-sans antialiased overflow-hidden">
+<body class="bg-gray-50 text-gray-800 font-sans antialiased overflow-x-hidden overflow-y-auto">
 
     <!-- Notification Container -->
     <div id="notification-container" class="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none"></div>
@@ -91,7 +91,7 @@
     <header
         class="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-4 sm:px-6 fixed top-0 w-full z-40 shadow-sm hidden"
         id="main-header">
-        <div class="flex items-center gap-2 w-60">
+        <div class="flex items-center gap-2 w-auto min-w-0 sm:w-52 lg:w-60">
             <div class="bg-primary text-white p-1.5 rounded-md">
                 <i data-lucide="layout-dashboard"></i>
             </div>
@@ -133,13 +133,13 @@
         </nav>
 
         <!-- User Menu -->
-        <div class="flex items-center gap-4 justify-end w-60 relative z-[60]">
+        <div class="flex items-center gap-3 justify-end w-auto sm:w-52 lg:w-60 relative z-[60]">
             <!-- Search -->
             <div class="relative">
                 <button class="text-gray-500 hover:text-gray-700 transition" aria-label="Search" id="header-search-btn">
                     <i data-lucide="search" class="w-5 h-5"></i>
                 </button>
-                <div class="absolute right-0 mt-2 w-72 bg-white rounded-md shadow-lg border border-gray-100 hidden p-2 text-sm text-gray-500"
+                <div class="absolute right-0 mt-2 w-[92vw] max-w-72 bg-white rounded-md shadow-lg border border-gray-100 hidden p-2 text-sm text-gray-500"
                     id="header-search-panel">
                     <input type="text" id="header-search-input" placeholder="Search tasks by name or ID..."
                         class="w-full border-gray-300 border rounded px-3 py-1.5 focus:border-primary outline-none">
@@ -157,7 +157,7 @@
                     <i data-lucide="bell" class="w-5 h-5"></i>
                     <span class="absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-full" id="notification-dot"></span>
                 </button>
-                <div class="absolute right-0 mt-2 top-8 w-80 bg-white rounded-md shadow-lg border border-gray-100 hidden flex-col overflow-hidden max-h-96"
+                <div class="absolute right-0 mt-2 top-8 w-[92vw] max-w-80 bg-white rounded-md shadow-lg border border-gray-100 hidden flex-col overflow-hidden max-h-96"
                     id="header-notifications-panel">
                     <div
                         class="px-4 py-2 border-b border-gray-100 font-semibold text-gray-700 text-sm flex justify-between items-center">
@@ -221,7 +221,7 @@
     </header>
 
     <!-- Main Content Area -->
-    <main class="mt-16 h-[calc(100vh-4rem)] overflow-y-auto w-full relative hidden" id="main-content">
+    <main class="mt-16 min-h-[calc(100vh-4rem)] overflow-y-auto w-full relative hidden" id="main-content">
 
         <!-- Loading Overlay -->
         <div id="global-loader" class="absolute inset-0 bg-white/80 z-50 flex items-center justify-center">
@@ -266,13 +266,13 @@
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <!-- Max H blocks with internal scrolling -->
                 <div class="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex flex-col h-[400px]">
+                    <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex flex-col min-h-[18rem] sm:min-h-[22rem] lg:h-[400px]">
                         <h3 class="font-semibold text-gray-800 mb-4 shrink-0">Workload by Staff</h3>
                         <div class="relative flex-1 min-h-0 w-full">
                             <canvas id="chart-staff"></canvas>
                         </div>
                     </div>
-                    <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex flex-col h-[400px]">
+                    <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex flex-col min-h-[18rem] sm:min-h-[22rem] lg:h-[400px]">
                         <h3 class="font-semibold text-gray-800 mb-4 shrink-0">Client Activity</h3>
                         <div class="relative flex-1 min-h-0 w-full">
                             <canvas id="chart-client"></canvas>
@@ -281,7 +281,7 @@
                 </div>
                 <!-- Recent Activity Feed -->
                 <div
-                    class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex flex-col items-stretch lg:col-span-1 h-[400px]">
+                    class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex flex-col items-stretch lg:col-span-1 min-h-[18rem] sm:min-h-[22rem] lg:h-[400px]">
                     <h3 class="font-semibold text-gray-800 mb-4 flex items-center gap-2 shrink-0">
                         <i data-lucide="activity" class="w-4 h-4 text-gray-500"></i>
                         Recent Activity
@@ -936,7 +936,7 @@
                         <h4 class="text-base font-semibold text-gray-800 border-b border-gray-200 pb-2 mb-4 flex items-center gap-2">
                             <i data-lucide="database" class="w-4 h-4 text-gray-500"></i> Firebase Database
                         </h4>
-                        <p class="text-xs text-gray-500 mb-3">Enter your Firebase Realtime Database URL to enable multi-user data sync. The URL is stored in your browser only.</p>
+                        <p class="text-xs text-gray-500 mb-3">Enter your Firebase Realtime Database URL to enable multi-user data sync. Add your Firebase Web API key to migrate login to Firebase Auth.</p>
                         <div class="flex items-center gap-2 mb-3">
                             <span class="text-xs font-medium px-2 py-1 rounded-full" id="firebase-status-badge">Checking...</span>
                         </div>
@@ -951,6 +951,15 @@
                                 </button>
                                 <button type="button" id="btn-clear-firebase-url" class="px-4 py-2 border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 font-medium transition shadow-sm text-sm flex items-center gap-1">
                                     <i data-lucide="trash-2" class="w-4 h-4"></i> Disconnect
+                                </button>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1" for="firebase-api-key-input">Firebase Web API Key (Auth Migration)</label>
+                                <input type="password" id="firebase-api-key-input" placeholder="AIza..." class="w-full border-gray-300 border rounded-lg px-4 py-2 focus:border-primary focus:ring-1 focus:ring-primary outline-none transition text-sm">
+                            </div>
+                            <div class="flex gap-2">
+                                <button type="button" id="btn-save-firebase-api-key" class="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium transition shadow-sm text-sm flex items-center gap-1">
+                                    <i data-lucide="key-round" class="w-4 h-4"></i> Save API Key
                                 </button>
                             </div>
                             <div id="firebase-msg" class="hidden text-sm font-medium mt-1"></div>

@@ -7,7 +7,8 @@ const CONFIG = {
     // Firebase Realtime Database URL — hardcoded for production
     // Can be overridden via Settings UI (stored in localStorage)
     firebaseUrl: localStorage.getItem('werunops_firebase_url') || 'https://werun-ops-backoffice-default-rtdb.firebaseio.com',
-    dataPath: 'state' // The path in the database where state is stored
+    dataPath: 'state', // The path in the database where state is stored
+    firebaseWebApiKey: localStorage.getItem('werunops_firebase_web_api_key') || ''
 };
 
 // Helper to set the Firebase URL at runtime (called from Settings UI)
@@ -23,11 +24,20 @@ function clearFirebaseUrl() {
     localStorage.removeItem('werunops_firebase_url');
 }
 
+function setFirebaseWebApiKey(apiKey) {
+    CONFIG.firebaseWebApiKey = (apiKey || '').trim();
+    if (CONFIG.firebaseWebApiKey) {
+        localStorage.setItem('werunops_firebase_web_api_key', CONFIG.firebaseWebApiKey);
+    } else {
+        localStorage.removeItem('werunops_firebase_web_api_key');
+    }
+}
+
 const DEFAULT_STATE = {
     authUsers: [
-        { username: 'Eshwar', password: '110495', name: 'Pritheeswarar', role: 'Admin', initials: 'P' },
-        { username: 'Mubarak', password: '6544332211', name: 'Mubarak', role: 'Manager', initials: 'M' },
-        { username: 'Sudhar', password: '19091997', name: 'Sudharshan', role: 'User', initials: 'S' }
+        { username: 'Eshwar', passwordHash: 'f91b043302878951ce9258214033bd206ea0a92bb88931ba8bb6edb01b57d020', name: 'Pritheeswarar', role: 'Admin', initials: 'P' },
+        { username: 'Mubarak', passwordHash: '23fece5f1a2a4452cba0113271736a16d241201bef2fd15b72819582e13fb267', name: 'Mubarak', role: 'Manager', initials: 'M' },
+        { username: 'Sudhar', passwordHash: '56e89b1d6436fc86deea34dbb0306af59c40d29f20bc20b6efcb001cee9ae71b', name: 'Sudharshan', role: 'User', initials: 'S' }
     ],
     livePresence: {},
     loginHistory: [],
@@ -89,6 +99,10 @@ class DataStore {
     constructor() {
         this.state = null;
         this.listeners = [];
+        this.remoteEtag = null;
+        this.saveQueue = Promise.resolve();
+        this.remoteEventSource = null;
+        this.lastRemoteSyncAt = 0;
     }
 
     subscribe(listener) {
@@ -163,10 +177,97 @@ class DataStore {
         }
     }
 
+    stopRealtimeStateListener() {
+        if (this.remoteEventSource) {
+            this.remoteEventSource.close();
+            this.remoteEventSource = null;
+        }
+    }
+
+    startRealtimeStateListener(onStateUpdate) {
+        this.stopRealtimeStateListener();
+        if (!this.isFirebaseReady()) return;
+
+        const url = `${CONFIG.firebaseUrl}/${CONFIG.dataPath}.json`;
+        const es = new EventSource(url);
+        this.remoteEventSource = es;
+
+        const applyPathUpdate = (target, path, data) => {
+            if (!target) return;
+            if (!path || path === '/') {
+                this.state = data;
+                this.migrateData();
+                this.lastRemoteSyncAt = Date.now();
+                this.notify();
+                if (onStateUpdate) onStateUpdate(this.state);
+                return;
+            }
+
+            const segments = path.split('/').filter(Boolean);
+            let cursor = target;
+
+            for (let index = 0; index < segments.length - 1; index++) {
+                const key = segments[index];
+                if (cursor[key] === undefined || cursor[key] === null || typeof cursor[key] !== 'object') {
+                    cursor[key] = {};
+                }
+                cursor = cursor[key];
+            }
+
+            const finalKey = segments[segments.length - 1];
+            if (data === null) {
+                delete cursor[finalKey];
+            } else {
+                cursor[finalKey] = data;
+            }
+
+            this.migrateData();
+            this.lastRemoteSyncAt = Date.now();
+            this.notify();
+            if (onStateUpdate) onStateUpdate(this.state);
+        };
+
+        const handleStreamEvent = (event) => {
+            if (!event || !event.data) return;
+            try {
+                const payload = JSON.parse(event.data);
+                applyPathUpdate(this.state || {}, payload.path, payload.data);
+            } catch (error) {
+                console.warn('Failed to parse realtime stream event:', error);
+            }
+        };
+
+        es.addEventListener('put', handleStreamEvent);
+        es.addEventListener('patch', handleStreamEvent);
+
+        es.onerror = () => {
+            this.stopRealtimeStateListener();
+            setTimeout(() => this.startRealtimeStateListener(onStateUpdate), 2500);
+        };
+    }
+
+    queueSave(work) {
+        this.saveQueue = this.saveQueue
+            .then(() => work())
+            .catch((error) => {
+                throw error;
+            });
+        return this.saveQueue;
+    }
+
+    async ensureRemoteFreshness(maxAgeMs = 5000) {
+        if (!this.isFirebaseReady()) return;
+        if (Date.now() - this.lastRemoteSyncAt > maxAgeMs) {
+            await this.fetchFromFirebase();
+        }
+    }
+
     async init() {
         if (this.isFirebaseReady()) {
             await this.fetchFromFirebase();
+            this.startRealtimeStateListener();
         } else {
+            this.stopRealtimeStateListener();
             this.fetchFromLocal();
         }
         return this.state;
@@ -203,22 +304,26 @@ class DataStore {
     async fetchFromFirebase() {
         try {
             const url = `${CONFIG.firebaseUrl}/${CONFIG.dataPath}.json`;
-            const response = await fetch(url);
+            const response = await fetch(url, {
+                headers: { 'X-Firebase-ETag': 'true' }
+            });
 
             if (!response.ok) {
                 throw new Error(`Firebase fetch error: ${response.status}`);
             }
 
+            this.remoteEtag = response.headers.get('ETag');
             const data = await response.json();
 
             if (data) {
                 this.state = data;
                 this.migrateData();
                 localStorage.setItem('backoffice_state_backup', JSON.stringify(this.state));
+                this.lastRemoteSyncAt = Date.now();
             } else {
                 // Database is empty — initialize with default state
                 this.state = JSON.parse(JSON.stringify(DEFAULT_STATE));
-                await this.saveToFirebase();
+                await this.saveToFirebase({ forceWithoutEtag: true });
             }
         } catch (error) {
             console.error("Failed to fetch from Firebase, falling back to local:", error);
@@ -229,19 +334,47 @@ class DataStore {
         this.notify();
     }
 
-    async saveToFirebase() {
+    async saveToFirebase(options = {}) {
+        const { forceWithoutEtag = false } = options;
         try {
             const url = `${CONFIG.firebaseUrl}/${CONFIG.dataPath}.json`;
+
+            if (!forceWithoutEtag && !this.remoteEtag) {
+                const etagResponse = await fetch(url, {
+                    headers: { 'X-Firebase-ETag': 'true' }
+                });
+                if (etagResponse.ok) {
+                    this.remoteEtag = etagResponse.headers.get('ETag');
+                }
+            }
+
+            const headers = { 'Content-Type': 'application/json' };
+            if (!forceWithoutEtag && this.remoteEtag) {
+                headers['if-match'] = this.remoteEtag;
+            }
+
             const response = await fetch(url, {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
+                headers,
                 body: JSON.stringify(this.state)
             });
+
+            if (response.status === 412) {
+                const latestEtag = response.headers.get('ETag');
+                if (latestEtag) this.remoteEtag = latestEtag;
+                const conflictError = new Error('Write conflict: remote state changed by another user.');
+                conflictError.code = 'WRITE_CONFLICT';
+                throw conflictError;
+            }
 
             if (!response.ok) {
                 const errBody = await response.text();
                 throw new Error(`Firebase save error: ${response.status} - ${errBody}`);
             }
+
+            const latestEtag = response.headers.get('ETag');
+            if (latestEtag) this.remoteEtag = latestEtag;
+            this.lastRemoteSyncAt = Date.now();
 
             // Also cache locally
             localStorage.setItem('backoffice_state_backup', JSON.stringify(this.state));
@@ -261,6 +394,15 @@ class DataStore {
 
         if (!this.state.authUsers || this.state.authUsers.length === 0) {
             this.state.authUsers = DEFAULT_STATE.authUsers;
+        } else {
+            this.state.authUsers = this.state.authUsers.map(user => {
+                const cloned = { ...user };
+                if (cloned.password && !cloned.passwordHash) {
+                    cloned.passwordHash = null;
+                }
+                delete cloned.password;
+                return cloned;
+            });
         }
         if (!this.state.livePresence) this.state.livePresence = {};
         if (!this.state.loginHistory) this.state.loginHistory = [];
@@ -285,48 +427,69 @@ class DataStore {
 
     // ========== ACTION METHODS ==========
 
+    async runWithConflictRetry(mutator, retries = 1) {
+        if (!this.state) return;
+
+        const attempt = async (remainingRetries) => {
+            await this.ensureRemoteFreshness();
+            await mutator();
+
+            if (this.isFirebaseReady()) {
+                try {
+                    await this.saveToFirebase();
+                } catch (error) {
+                    if (error?.code === 'WRITE_CONFLICT' && remainingRetries > 0) {
+                        await this.fetchFromFirebase();
+                        return attempt(remainingRetries - 1);
+                    }
+                    throw error;
+                }
+            } else {
+                this.saveToLocal();
+            }
+        };
+
+        return this.queueSave(() => attempt(retries));
+    }
+
     async saveTask(taskData) {
         if (!this.state) return;
 
         const now = new Date().toISOString();
 
-        if (!taskData.id) {
-            taskData.id = this.state.config.nextTaskId++;
-            taskData.createdAt = now;
-            taskData.updatedAt = now;
-            taskData.activityLog = [
-                { action: 'Task created', user: getCurrentUser(), timestamp: now }
-            ];
-            this.state.tasks.push(taskData);
-        } else {
-            const index = this.state.tasks.findIndex(t => t.id === parseInt(taskData.id));
-            if (index !== -1) {
-                const oldTask = this.state.tasks[index];
-                taskData.id = parseInt(taskData.id);
-                taskData.createdAt = oldTask.createdAt;
+        await this.runWithConflictRetry(async () => {
+            if (!taskData.id) {
+                taskData.id = this.state.config.nextTaskId++;
+                taskData.createdAt = now;
                 taskData.updatedAt = now;
+                taskData.activityLog = [
+                    { action: 'Task created', user: getCurrentUser(), timestamp: now }
+                ];
+                this.state.tasks.push(taskData);
+            } else {
+                const index = this.state.tasks.findIndex(t => t.id === parseInt(taskData.id));
+                if (index !== -1) {
+                    const oldTask = this.state.tasks[index];
+                    taskData.id = parseInt(taskData.id);
+                    taskData.createdAt = oldTask.createdAt;
+                    taskData.updatedAt = now;
 
-                const log = oldTask.activityLog || [];
-                if (oldTask.status !== taskData.status) {
-                    log.push({ action: `Status changed to "${taskData.status}"`, user: getCurrentUser(), timestamp: now });
-                }
-                if (oldTask.staff !== taskData.staff) {
-                    log.push({ action: `Assigned to ${taskData.staff}`, user: getCurrentUser(), timestamp: now });
-                }
-                if (log.length === oldTask.activityLog?.length) {
-                    log.push({ action: 'Task updated', user: getCurrentUser(), timestamp: now });
-                }
+                    const log = oldTask.activityLog || [];
+                    if (oldTask.status !== taskData.status) {
+                        log.push({ action: `Status changed to "${taskData.status}"`, user: getCurrentUser(), timestamp: now });
+                    }
+                    if (oldTask.staff !== taskData.staff) {
+                        log.push({ action: `Assigned to ${taskData.staff}`, user: getCurrentUser(), timestamp: now });
+                    }
+                    if (log.length === oldTask.activityLog?.length) {
+                        log.push({ action: 'Task updated', user: getCurrentUser(), timestamp: now });
+                    }
 
-                taskData.activityLog = log;
-                this.state.tasks[index] = taskData;
+                    taskData.activityLog = log;
+                    this.state.tasks[index] = taskData;
+                }
             }
-        }
-
-        if (this.isFirebaseReady()) {
-            await this.saveToFirebase();
-        } else {
-            this.saveToLocal();
-        }
+        });
 
         return taskData;
     }
@@ -334,68 +497,53 @@ class DataStore {
     async updateTaskStatus(taskId, newStatus) {
         if (!this.state) return;
 
-        const index = this.state.tasks.findIndex(t => t.id === parseInt(taskId));
-        if (index !== -1) {
-            const task = this.state.tasks[index];
-            if (task.status !== newStatus) {
-                task.status = newStatus;
-                task.updatedAt = new Date().toISOString();
-                task.activityLog = task.activityLog || [];
-                task.activityLog.push({
-                    action: `Status changed to "${newStatus}" via drag`,
-                    user: getCurrentUser(),
-                    timestamp: task.updatedAt
-                });
-
-                if (this.isFirebaseReady()) {
-                    await this.saveToFirebase();
-                } else {
-                    this.saveToLocal();
+        await this.runWithConflictRetry(async () => {
+            const index = this.state.tasks.findIndex(t => t.id === parseInt(taskId));
+            if (index !== -1) {
+                const task = this.state.tasks[index];
+                if (task.status !== newStatus) {
+                    task.status = newStatus;
+                    task.updatedAt = new Date().toISOString();
+                    task.activityLog = task.activityLog || [];
+                    task.activityLog.push({
+                        action: `Status changed to "${newStatus}" via drag`,
+                        user: getCurrentUser(),
+                        timestamp: task.updatedAt
+                    });
                 }
             }
-        }
+        });
     }
 
     async deleteTasks(taskIds) {
         if (!this.state) return;
 
-        const initialLength = this.state.tasks.length;
-        this.state.tasks = this.state.tasks.filter(t => !taskIds.includes(t.id.toString()) && !taskIds.includes(t.id));
-
-        if (this.state.tasks.length !== initialLength) {
-            if (this.isFirebaseReady()) {
-                await this.saveToFirebase();
-            } else {
-                this.saveToLocal();
-            }
-        }
+        await this.runWithConflictRetry(async () => {
+            this.state.tasks = this.state.tasks.filter(t => !taskIds.includes(t.id.toString()) && !taskIds.includes(t.id));
+        });
     }
 
     async saveClient(clientData) {
         if (!this.state) return;
 
-        if (clientData.originalName) {
-            const index = this.state.config.clients.findIndex(c => c.name === clientData.originalName);
-            if (index !== -1) {
-                if (clientData.name !== clientData.originalName) {
-                    this.state.tasks.forEach(t => {
-                        if (t.client === clientData.originalName) t.client = clientData.name;
-                    });
+        await this.runWithConflictRetry(async () => {
+            if (clientData.originalName) {
+                const index = this.state.config.clients.findIndex(c => c.name === clientData.originalName);
+                if (index !== -1) {
+                    if (clientData.name !== clientData.originalName) {
+                        this.state.tasks.forEach(t => {
+                            if (t.client === clientData.originalName) t.client = clientData.name;
+                        });
+                    }
+                    const oldClient = this.state.config.clients[index];
+                    this.state.config.clients[index] = { ...oldClient, ...clientData };
+                    delete this.state.config.clients[index].originalName;
                 }
-                const oldClient = this.state.config.clients[index];
-                this.state.config.clients[index] = { ...oldClient, ...clientData };
-                delete this.state.config.clients[index].originalName;
+            } else {
+                clientData.id = this.state.config.nextClientId++;
+                this.state.config.clients.push(clientData);
             }
-        } else {
-            clientData.id = this.state.config.nextClientId++;
-            this.state.config.clients.push(clientData);
-        }
-
-        if (this.isFirebaseReady()) {
-            await this.saveToFirebase();
-        } else {
-            this.saveToLocal();
-        }
+        });
     }
 
     async deleteClient(clientName) {
@@ -406,16 +554,9 @@ class DataStore {
             throw new Error(`Cannot delete client "${clientName}" because it is currently assigned to active tasks.`);
         }
 
-        const initialLength = this.state.config.clients.length;
-        this.state.config.clients = this.state.config.clients.filter(c => c.name !== clientName);
-
-        if (this.state.config.clients.length !== initialLength) {
-            if (this.isFirebaseReady()) {
-                await this.saveToFirebase();
-            } else {
-                this.saveToLocal();
-            }
-        }
+        await this.runWithConflictRetry(async () => {
+            this.state.config.clients = this.state.config.clients.filter(c => c.name !== clientName);
+        });
     }
 }
 
