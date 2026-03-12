@@ -36,6 +36,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Hide Loading
     document.getElementById('global-loader').classList.add('hidden');
 
+    // First-run: alert if no GitHub token is configured
+    if (CONFIG.useGithub && !CONFIG.token) {
+        setTimeout(() => {
+            showNotification(
+                'GitHub Sync Not Configured',
+                'Go to Settings → GitHub Sync Configuration and paste your PAT to enable multi-user data sync.',
+                'info'
+            );
+        }, 2000);
+    }
+
     // 3. Setup form handlers
     setupFormHandlers();
 
@@ -1906,6 +1917,104 @@ function setupSettingsModal() {
             spinner.classList.add('hidden');
             document.getElementById('password-save-text').textContent = 'Update Password';
         }, 500);
+    });
+
+    // --- GitHub Token Configuration ---
+    const tokenInput = document.getElementById('github-token-input');
+    const tokenMsg = document.getElementById('github-token-msg');
+    const statusBadge = document.getElementById('github-sync-status-badge');
+    
+    function updateSyncBadge() {
+        if (!statusBadge) return;
+        if (CONFIG.token) {
+            statusBadge.textContent = 'Connected';
+            statusBadge.className = 'text-xs font-medium px-2 py-1 rounded-full bg-green-100 text-green-700';
+        } else {
+            statusBadge.textContent = 'Not Connected';
+            statusBadge.className = 'text-xs font-medium px-2 py-1 rounded-full bg-red-100 text-red-600';
+        }
+    }
+
+    // Populate token field when settings opens
+    const origOpenHandler = btnOpen._openHandler;
+    btnOpen._openHandler = true; // flag to avoid double-binding
+    const origClick = btnOpen.onclick;
+    // We need to run updateSyncBadge when settings opens. Attach to the existing click:
+    const origClickListeners = btnOpen._settingsListeners || [];
+    btnOpen.addEventListener('click', () => {
+        if (tokenInput) tokenInput.value = CONFIG.token ? '••••••••••••••••••••' : '';
+        updateSyncBadge();
+        // Re-render lucide icons for newly added icons
+        if (typeof lucide !== 'undefined') setTimeout(() => lucide.createIcons(), 50);
+    });
+
+    document.getElementById('btn-save-github-token')?.addEventListener('click', async () => {
+        const newToken = tokenInput?.value?.trim();
+        if (!newToken || newToken.includes('••••')) {
+            if (tokenMsg) {
+                tokenMsg.textContent = 'Please enter a valid token.';
+                tokenMsg.className = 'text-sm font-medium mt-1 text-red-500';
+                tokenMsg.classList.remove('hidden');
+            }
+            return;
+        }
+
+        if (tokenMsg) {
+            tokenMsg.textContent = 'Testing connection...';
+            tokenMsg.className = 'text-sm font-medium mt-1 text-blue-500';
+            tokenMsg.classList.remove('hidden');
+        }
+
+        // Test the token by making a simple API call
+        try {
+            const testUrl = `https://api.github.com/repos/${CONFIG.repo}/contents/${CONFIG.dataFile}?ref=${CONFIG.branch}`;
+            const res = await fetch(testUrl, {
+                headers: {
+                    'Authorization': `token ${newToken}`,
+                    'Accept': 'application/vnd.github.v3+json'
+                }
+            });
+
+            if (res.ok || res.status === 404) {
+                // 200 = file exists, 404 = file doesn't exist yet but auth worked
+                setGithubToken(newToken);
+                if (tokenMsg) {
+                    tokenMsg.textContent = '✅ Token is valid! Syncing data...';
+                    tokenMsg.className = 'text-sm font-medium mt-1 text-green-600';
+                }
+                updateSyncBadge();
+                // Re-init the store with live data
+                await store.init();
+                showNotification('GitHub Sync', 'Connected successfully! Data is now synced across users.', 'success');
+            } else if (res.status === 401) {
+                if (tokenMsg) {
+                    tokenMsg.textContent = '❌ Token rejected (401 Unauthorized). Check the token has "repo" scope.';
+                    tokenMsg.className = 'text-sm font-medium mt-1 text-red-500';
+                }
+            } else {
+                if (tokenMsg) {
+                    tokenMsg.textContent = `❌ Unexpected error: ${res.status}`;
+                    tokenMsg.className = 'text-sm font-medium mt-1 text-red-500';
+                }
+            }
+        } catch (err) {
+            if (tokenMsg) {
+                tokenMsg.textContent = `❌ Network error: ${err.message}`;
+                tokenMsg.className = 'text-sm font-medium mt-1 text-red-500';
+            }
+        }
+    });
+
+    document.getElementById('btn-clear-github-token')?.addEventListener('click', () => {
+        clearGithubToken();
+        if (tokenInput) tokenInput.value = '';
+        if (tokenMsg) {
+            tokenMsg.textContent = 'Token cleared. App will use local storage only.';
+            tokenMsg.className = 'text-sm font-medium mt-1 text-yellow-600';
+            tokenMsg.classList.remove('hidden');
+        }
+        updateSyncBadge();
+        showNotification('GitHub Sync', 'Token removed. Data will only be saved locally.', 'info');
     });
 }
 

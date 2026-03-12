@@ -912,7 +912,7 @@
                     <!-- Login History Section -->
                     <section>
                         <h4 class="text-base font-semibold text-gray-800 border-b border-gray-200 pb-2 mb-4 flex items-center gap-2">
-                            <i data-lucide="clock" class="w-4 h-4 text-gray-500"></i> Local Login History
+                            <i data-lucide="clock" class="w-4 h-4 text-gray-500"></i> Login History
                         </h4>
                         <div class="bg-gray-50 border border-gray-200 rounded-lg max-h-60 overflow-y-auto custom-scrollbar">
                             <table class="w-full text-sm text-left">
@@ -928,6 +928,32 @@
                                     <!-- Injected via JS -->
                                 </tbody>
                             </table>
+                        </div>
+                    </section>
+
+                    <!-- GitHub Sync Configuration Section -->
+                    <section>
+                        <h4 class="text-base font-semibold text-gray-800 border-b border-gray-200 pb-2 mb-4 flex items-center gap-2">
+                            <i data-lucide="database" class="w-4 h-4 text-gray-500"></i> GitHub Sync Configuration
+                        </h4>
+                        <p class="text-xs text-gray-500 mb-3">Enter a GitHub Personal Access Token (PAT) with <strong>repo</strong> scope to enable multi-user data sync. The token is stored in your browser only &mdash; never in the code.</p>
+                        <div class="flex items-center gap-2 mb-3">
+                            <span class="text-xs font-medium px-2 py-1 rounded-full" id="github-sync-status-badge">Checking...</span>
+                        </div>
+                        <div class="space-y-3 max-w-md">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1" for="github-token-input">Personal Access Token</label>
+                                <input type="password" id="github-token-input" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx" class="w-full border-gray-300 border rounded-lg px-4 py-2 focus:border-primary focus:ring-1 focus:ring-primary outline-none transition text-sm font-mono">
+                            </div>
+                            <div class="flex gap-2">
+                                <button type="button" id="btn-save-github-token" class="px-4 py-2 bg-primary hover:bg-primary-hover text-white rounded-lg font-medium transition shadow-sm text-sm flex items-center gap-1">
+                                    <i data-lucide="save" class="w-4 h-4"></i> Save & Test
+                                </button>
+                                <button type="button" id="btn-clear-github-token" class="px-4 py-2 border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 font-medium transition shadow-sm text-sm flex items-center gap-1">
+                                    <i data-lucide="trash-2" class="w-4 h-4"></i> Clear Token
+                                </button>
+                            </div>
+                            <div id="github-token-msg" class="hidden text-sm font-medium mt-1"></div>
                         </div>
                     </section>
 

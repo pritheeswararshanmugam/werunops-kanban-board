@@ -8,9 +8,22 @@ const CONFIG = {
     useGithub: true,
     repo: 'pritheeswararshanmugam/werunops-kanban-board',
     branch: 'main',
-    token: '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', // STOP! You MUST paste your GitHub Personal Access Token (PAT) here for multi-user sync to work
+    // Token is loaded from localStorage at runtime - NEVER hardcode it here!
+    // GitHub will auto-revoke any token committed to a public repo.
+    token: localStorage.getItem('werunops_github_token') || '',
     dataFile: 'data/state.json'
 };
+
+// Helper to set the GitHub token at runtime (called from UI prompt)
+function setGithubToken(token) {
+    CONFIG.token = token;
+    localStorage.setItem('werunops_github_token', token);
+}
+
+function clearGithubToken() {
+    CONFIG.token = '';
+    localStorage.removeItem('werunops_github_token');
+}
 
 const DEFAULT_STATE = {
     authUsers: [
@@ -252,7 +265,7 @@ class DataStore {
 
     migrateData() {
         if (!this.state) return;
-        
+
         // Ensure Phase 4 multi-user arrays exist for older state files
         if (!this.state.authUsers || this.state.authUsers.length === 0) {
             this.state.authUsers = DEFAULT_STATE.authUsers;
