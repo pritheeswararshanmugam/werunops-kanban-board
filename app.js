@@ -1595,7 +1595,10 @@ function setupAuth() {
         if(errorMsg) errorMsg.classList.add('hidden');
         
         setTimeout(() => {
+            console.log('--- DEBUG LOGIN DETAILS ---');
+            console.log('Current store.state loaded from GitHub:', store.state);
             const validUsers = store.state.authUsers || [];
+            console.log('Parsed validUsers Array:', validUsers);
             const user = validUsers.find(u => u.username.toLowerCase() === usernameInput.toLowerCase() && u.password === passwordInput);
             
             if (user) {
