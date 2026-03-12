@@ -43,7 +43,7 @@ const DEFAULT_STATE = {
             status: "In Progress",
             priority: "High",
             startDate: "2026-03-09",
-            dueDate: new Date().toISOString().split('T')[0], // Today
+            dueDate: new Date().toISOString().split('T')[0],
             waitingFor: "Supplier",
             notes: "Waiting for supplier pricing",
             createdAt: new Date(Date.now() - 86400000).toISOString(),
@@ -62,7 +62,7 @@ const DEFAULT_STATE = {
             status: "New",
             priority: "Medium",
             startDate: "",
-            dueDate: new Date(Date.now() + 86400000).toISOString().split('T')[0], // Tomorrow
+            dueDate: new Date(Date.now() + 86400000).toISOString().split('T')[0],
             waitingFor: "",
             notes: "Need to check recent material prices.",
             createdAt: new Date().toISOString(),
@@ -91,11 +91,9 @@ class DataStore {
     constructor() {
         this.state = null;
         this.listeners = [];
-        this._saving = false;  // mutex to prevent concurrent saves
-        this._lastSha = null;  // cache the last known SHA
+        this._saving = false;
     }
 
-    // Subscribe to state changes
     subscribe(listener) {
         this.listeners.push(listener);
         return () => {
@@ -112,25 +110,17 @@ class DataStore {
 
         const pingPresence = async () => {
             if (!CONFIG.useGithub || !CONFIG.token) return;
-            // Skip heartbeat save if another save is already running
-            if (this._saving) {
-                console.log('[Heartbeat] Skipping - another save is in progress');
-                return;
-            }
+            if (this._saving) return; // skip if another save is running
             try {
                 await this.fetchFromGithub();
-            } catch (e) { console.warn('Heartbeat fetch failed', e); }
+            } catch (e) { /* ignore heartbeat fetch errors */ }
             if (!this.state) return;
             if (!this.state.livePresence) this.state.livePresence = {};
-
             this.state.livePresence[username] = {
                 online: true,
                 lastSeen: new Date().toISOString()
             };
-
-            try { await this.saveToGithub(); } catch (e) {
-                console.warn('Heartbeat save failed (non-critical):', e.message);
-            }
+            try { await this.saveToGithub(); } catch (e) { /* heartbeat save is non-critical */ }
         };
 
         pingPresence();
@@ -180,37 +170,30 @@ class DataStore {
         }
     }
 
+    // Fetch the file content (raw JSON, no base64 decoding needed)
     async fetchFromGithub() {
         try {
             const url = `https://api.github.com/repos/${CONFIG.repo}/contents/${CONFIG.dataFile}?ref=${CONFIG.branch}`;
             const response = await fetch(url, {
                 headers: {
                     'Authorization': `token ${CONFIG.token}`,
-                    'Accept': 'application/vnd.github.v3+json'
+                    'Accept': 'application/vnd.github.v3.raw'
                 }
             });
 
             if (response.ok) {
-                const fileData = await response.json();
-                // Cache the SHA for saves
-                this._lastSha = fileData.sha;
-                // Decode the content
-                const decoded = decodeURIComponent(escape(atob(fileData.content)));
-                this.state = JSON.parse(decoded);
+                this.state = await response.json();
                 this.migrateData();
-                // Also cache locally
                 localStorage.setItem('backoffice_state_backup', JSON.stringify(this.state));
             } else if (response.status === 404) {
-                // File doesn't exist yet, use default
-                this._lastSha = null;
+                // File doesn't exist yet — create it with default data
                 this.state = JSON.parse(JSON.stringify(DEFAULT_STATE));
-                await this.saveToGithub(); // Create the file
+                await this.saveToGithub();
             } else {
                 throw new Error(`GitHub API error: ${response.status}`);
             }
         } catch (error) {
             console.error("Failed to fetch from GitHub, falling back to local:", error);
-            // Fallback to local backup or default
             const backup = localStorage.getItem('backoffice_state_backup');
             this.state = backup ? JSON.parse(backup) : JSON.parse(JSON.stringify(DEFAULT_STATE));
             this.migrateData();
@@ -218,16 +201,32 @@ class DataStore {
         this.notify();
     }
 
+    // Always get the latest file SHA right before saving
+    async _getFileSha() {
+        const url = `https://api.github.com/repos/${CONFIG.repo}/contents/${CONFIG.dataFile}?ref=${CONFIG.branch}`;
+        const res = await fetch(url, {
+            headers: {
+                'Authorization': `token ${CONFIG.token}`,
+                'Accept': 'application/vnd.github.v3+json'
+            }
+        });
+        if (res.ok) {
+            const data = await res.json();
+            return data.sha;
+        }
+        if (res.status === 404) return null; // file doesn't exist yet
+        throw new Error(`Failed to get file SHA: ${res.status}`);
+    }
+
     async saveToGithub(retryCount = 0) {
-        // Mutex: wait if another save is in progress
+        // Simple mutex — wait for any in-progress save to finish
         if (this._saving) {
-            // Wait up to 10 seconds for the other save to finish
             for (let i = 0; i < 20; i++) {
                 await new Promise(r => setTimeout(r, 500));
                 if (!this._saving) break;
             }
             if (this._saving) {
-                console.warn('Save timeout - another save is still running');
+                console.warn('Save timeout — falling back to local');
                 this.saveToLocal();
                 return false;
             }
@@ -235,23 +234,12 @@ class DataStore {
 
         this._saving = true;
         try {
-            // Use cached SHA if available, otherwise fetch it
-            let sha = this._lastSha;
-            if (!sha) {
-                const getUrl = `https://api.github.com/repos/${CONFIG.repo}/contents/${CONFIG.dataFile}?ref=${CONFIG.branch}`;
-                try {
-                    const getRes = await fetch(getUrl, {
-                        headers: { 'Authorization': `token ${CONFIG.token}` }
-                    });
-                    if (getRes.ok) {
-                        const getData = await getRes.json();
-                        sha = getData.sha;
-                    }
-                } catch (e) { /* File might not exist */ }
-            }
+            // ALWAYS get a fresh SHA right before saving (prevents 422 errors)
+            const sha = await this._getFileSha();
 
-            // Encode content to base64
-            const content = btoa(unescape(encodeURIComponent(JSON.stringify(this.state, null, 2))));
+            // Encode state to base64
+            const jsonStr = JSON.stringify(this.state, null, 2);
+            const content = btoa(unescape(encodeURIComponent(jsonStr)));
 
             const putUrl = `https://api.github.com/repos/${CONFIG.repo}/contents/${CONFIG.dataFile}`;
             const body = {
@@ -259,7 +247,6 @@ class DataStore {
                 content: content,
                 branch: CONFIG.branch
             };
-
             if (sha) body.sha = sha;
 
             const response = await fetch(putUrl, {
@@ -272,27 +259,25 @@ class DataStore {
             });
 
             if (response.ok) {
-                // Update cached SHA from the response
-                const result = await response.json();
-                this._lastSha = result.content.sha;
-                // Cache locally on success
                 localStorage.setItem('backoffice_state_backup', JSON.stringify(this.state));
                 this.notify();
                 return true;
-            } else if (response.status === 409 && retryCount < 3) {
-                // SHA conflict - refetch and retry
-                console.warn(`SHA conflict on save (attempt ${retryCount + 1}), refetching...`);
-                this._saving = false;
-                this._lastSha = null;
-                await this.fetchFromGithub();
-                return await this.saveToGithub(retryCount + 1);
-            } else {
-                const errBody = await response.text();
-                throw new Error(`Failed to save to GitHub: ${response.status} - ${errBody}`);
             }
+
+            // On conflict or validation error, retry
+            if ((response.status === 409 || response.status === 422) && retryCount < 3) {
+                console.warn(`Save conflict (${response.status}), retrying... (attempt ${retryCount + 1})`);
+                this._saving = false;
+                await new Promise(r => setTimeout(r, 1000));
+                return await this.saveToGithub(retryCount + 1);
+            }
+
+            // Log full error for debugging
+            const errBody = await response.text();
+            console.error(`GitHub PUT failed: ${response.status}`, errBody);
+            throw new Error(`Failed to save to GitHub: ${response.status}`);
         } catch (error) {
             console.error("Error saving to GitHub:", error);
-            // Fallback save to local so data isn't lost
             this.saveToLocal();
             throw error;
         } finally {
@@ -300,12 +285,12 @@ class DataStore {
         }
     }
 
-    // --- Action Methods ---
+    // --- Migration ---
 
     migrateData() {
         if (!this.state) return;
 
-        // Ensure Phase 4 multi-user arrays exist for older state files
+        // Ensure multi-user arrays exist for older state files
         if (!this.state.authUsers || this.state.authUsers.length === 0) {
             this.state.authUsers = DEFAULT_STATE.authUsers;
         }
@@ -325,15 +310,15 @@ class DataStore {
         if (!this.state.config.nextClientId) this.state.config.nextClientId = this.state.config.clients.length ? Math.max(...this.state.config.clients.map(c => c.id || 0)) + 1 : 1;
     }
 
+    // --- Action Methods ---
+
     async saveTask(taskData) {
         if (!this.state) return;
 
         const now = new Date().toISOString();
-        let isNew = false;
 
         if (!taskData.id) {
             // New task
-            isNew = true;
             taskData.id = this.state.config.nextTaskId++;
             taskData.createdAt = now;
             taskData.updatedAt = now;
@@ -350,7 +335,6 @@ class DataStore {
                 taskData.createdAt = oldTask.createdAt;
                 taskData.updatedAt = now;
 
-                // Track changes for activity log
                 const log = oldTask.activityLog || [];
 
                 if (oldTask.status !== taskData.status) {
@@ -359,8 +343,6 @@ class DataStore {
                 if (oldTask.staff !== taskData.staff) {
                     log.push({ action: `Assigned to ${taskData.staff}`, user: getCurrentUser(), timestamp: now });
                 }
-
-                // If it was just a general edit without specific tracked changes
                 if (log.length === oldTask.activityLog?.length) {
                     log.push({ action: 'Task updated', user: getCurrentUser(), timestamp: now });
                 }
@@ -424,10 +406,8 @@ class DataStore {
         if (!this.state) return;
 
         if (clientData.originalName) {
-            // Edit existing
             const index = this.state.config.clients.findIndex(c => c.name === clientData.originalName);
             if (index !== -1) {
-                // Update task references
                 if (clientData.name !== clientData.originalName) {
                     this.state.tasks.forEach(t => {
                         if (t.client === clientData.originalName) t.client = clientData.name;
@@ -438,7 +418,6 @@ class DataStore {
                 delete this.state.config.clients[index].originalName;
             }
         } else {
-            // Add new
             clientData.id = this.state.config.nextClientId++;
             this.state.config.clients.push(clientData);
         }
@@ -453,7 +432,6 @@ class DataStore {
     async deleteClient(clientName) {
         if (!this.state) return;
 
-        // Validation happens in UI, but we perform it here safely anyway
         const isUsed = this.state.tasks.some(t => t.client === clientName);
         if (isUsed) {
             throw new Error(`Cannot delete client "${clientName}" because it is currently assigned to active tasks.`);
