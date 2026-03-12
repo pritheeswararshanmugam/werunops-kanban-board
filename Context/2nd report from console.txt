@@ -1,0 +1,334 @@
+favicon.ico:1  GET https://pritheeswararshanmugam.github.io/favicon.ico 404 (Not Found)Understand this error
+github-api.js:169  GET https://api.github.com/repos/pritheeswararshanmugam/werunops-kanban-board/contents/data/state.json?ref=main 401 (Unauthorized)
+fetchFromGithub @ github-api.js:169
+init @ github-api.js:133
+(anonymous) @ app.js:23Understand this error
+github-api.js:189 Failed to fetch from GitHub, falling back to local: Error: GitHub API error: 401
+    at DataStore.fetchFromGithub (github-api.js:186:23)
+    at async DataStore.init (github-api.js:133:13)
+    at async HTMLDocument.<anonymous> (app.js:23:5)
+fetchFromGithub @ github-api.js:189
+await in fetchFromGithub
+init @ github-api.js:133
+(anonymous) @ app.js:23Understand this error
+app.js:1590 Login attempt: Eshwar 110495
+app.js:1602 LOGIN SUCCESS
+github-api.js:169  GET https://api.github.com/repos/pritheeswararshanmugam/werunops-kanban-board/contents/data/state.json?ref=main 401 (Unauthorized)
+fetchFromGithub @ github-api.js:169
+pingPresence @ github-api.js:101
+startPresenceHeartbeat @ github-api.js:119
+(anonymous) @ app.js:1611
+setTimeout
+(anonymous) @ app.js:1597Understand this error
+github-api.js:189 Failed to fetch from GitHub, falling back to local: Error: GitHub API error: 401
+    at DataStore.fetchFromGithub (github-api.js:186:23)
+    at async pingPresence (github-api.js:101:21)
+fetchFromGithub @ github-api.js:189
+await in fetchFromGithub
+pingPresence @ github-api.js:101
+startPresenceHeartbeat @ github-api.js:119
+(anonymous) @ app.js:1611
+setTimeout
+(anonymous) @ app.js:1597Understand this error
+github-api.js:205  GET https://api.github.com/repos/pritheeswararshanmugam/werunops-kanban-board/contents/data/state.json?ref=main 401 (Unauthorized)
+saveToGithub @ github-api.js:205
+pingPresence @ github-api.js:113
+await in pingPresence
+startPresenceHeartbeat @ github-api.js:119
+(anonymous) @ app.js:1611
+setTimeout
+(anonymous) @ app.js:1597Understand this error
+github-api.js:226  PUT https://api.github.com/repos/pritheeswararshanmugam/werunops-kanban-board/contents/data/state.json 401 (Unauthorized)
+saveToGithub @ github-api.js:226
+await in saveToGithub
+pingPresence @ github-api.js:113
+await in pingPresence
+startPresenceHeartbeat @ github-api.js:119
+(anonymous) @ app.js:1611
+setTimeout
+(anonymous) @ app.js:1597Understand this error
+github-api.js:244 Error saving to GitHub: Error: Failed to save to GitHub: 401
+    at DataStore.saveToGithub (github-api.js:236:23)
+    at async pingPresence (github-api.js:113:23)
+saveToGithub @ github-api.js:244
+await in saveToGithub
+pingPresence @ github-api.js:113
+await in pingPresence
+startPresenceHeartbeat @ github-api.js:119
+(anonymous) @ app.js:1611
+setTimeout
+(anonymous) @ app.js:1597Understand this error
+github-api.js:169  GET https://api.github.com/repos/pritheeswararshanmugam/werunops-kanban-board/contents/data/state.json?ref=main 401 (Unauthorized)
+fetchFromGithub @ github-api.js:169
+pingPresence @ github-api.js:101
+setInterval
+startPresenceHeartbeat @ github-api.js:121
+(anonymous) @ app.js:1611
+setTimeout
+(anonymous) @ app.js:1597Understand this error
+github-api.js:189 Failed to fetch from GitHub, falling back to local: Error: GitHub API error: 401
+    at DataStore.fetchFromGithub (github-api.js:186:23)
+    at async pingPresence (github-api.js:101:21)
+fetchFromGithub @ github-api.js:189
+await in fetchFromGithub
+pingPresence @ github-api.js:101
+setInterval
+startPresenceHeartbeat @ github-api.js:121
+(anonymous) @ app.js:1611
+setTimeout
+(anonymous) @ app.js:1597Understand this error
+github-api.js:205  GET https://api.github.com/repos/pritheeswararshanmugam/werunops-kanban-board/contents/data/state.json?ref=main 401 (Unauthorized)
+saveToGithub @ github-api.js:205
+pingPresence @ github-api.js:113
+setInterval
+startPresenceHeartbeat @ github-api.js:121
+(anonymous) @ app.js:1611
+setTimeout
+(anonymous) @ app.js:1597Understand this error
+github-api.js:226  PUT https://api.github.com/repos/pritheeswararshanmugam/werunops-kanban-board/contents/data/state.json 401 (Unauthorized)
+saveToGithub @ github-api.js:226
+await in saveToGithub
+pingPresence @ github-api.js:113
+setInterval
+startPresenceHeartbeat @ github-api.js:121
+(anonymous) @ app.js:1611
+setTimeout
+(anonymous) @ app.js:1597Understand this error
+github-api.js:244 Error saving to GitHub: Error: Failed to save to GitHub: 401
+    at DataStore.saveToGithub (github-api.js:236:23)
+    at async pingPresence (github-api.js:113:23)
+saveToGithub @ github-api.js:244
+await in saveToGithub
+pingPresence @ github-api.js:113
+setInterval
+startPresenceHeartbeat @ github-api.js:121
+(anonymous) @ app.js:1611
+setTimeout
+(anonymous) @ app.js:1597Understand this error
+github-api.js:169  GET https://api.github.com/repos/pritheeswararshanmugam/werunops-kanban-board/contents/data/state.json?ref=main 401 (Unauthorized)
+fetchFromGithub @ github-api.js:169
+pingPresence @ github-api.js:101
+setInterval
+startPresenceHeartbeat @ github-api.js:121
+(anonymous) @ app.js:1611
+setTimeout
+(anonymous) @ app.js:1597Understand this error
+github-api.js:189 Failed to fetch from GitHub, falling back to local: Error: GitHub API error: 401
+    at DataStore.fetchFromGithub (github-api.js:186:23)
+    at async pingPresence (github-api.js:101:21)
+fetchFromGithub @ github-api.js:189
+await in fetchFromGithub
+pingPresence @ github-api.js:101
+setInterval
+startPresenceHeartbeat @ github-api.js:121
+(anonymous) @ app.js:1611
+setTimeout
+(anonymous) @ app.js:1597Understand this error
+github-api.js:205  GET https://api.github.com/repos/pritheeswararshanmugam/werunops-kanban-board/contents/data/state.json?ref=main 401 (Unauthorized)
+saveToGithub @ github-api.js:205
+pingPresence @ github-api.js:113
+setInterval
+startPresenceHeartbeat @ github-api.js:121
+(anonymous) @ app.js:1611
+setTimeout
+(anonymous) @ app.js:1597Understand this error
+github-api.js:226  PUT https://api.github.com/repos/pritheeswararshanmugam/werunops-kanban-board/contents/data/state.json 401 (Unauthorized)
+saveToGithub @ github-api.js:226
+await in saveToGithub
+pingPresence @ github-api.js:113
+setInterval
+startPresenceHeartbeat @ github-api.js:121
+(anonymous) @ app.js:1611
+setTimeout
+(anonymous) @ app.js:1597Understand this error
+github-api.js:244 Error saving to GitHub: Error: Failed to save to GitHub: 401
+    at DataStore.saveToGithub (github-api.js:236:23)
+    at async pingPresence (github-api.js:113:23)
+saveToGithub @ github-api.js:244
+await in saveToGithub
+pingPresence @ github-api.js:113
+setInterval
+startPresenceHeartbeat @ github-api.js:121
+(anonymous) @ app.js:1611
+setTimeout
+(anonymous) @ app.js:1597Understand this error
+github-api.js:169  GET https://api.github.com/repos/pritheeswararshanmugam/werunops-kanban-board/contents/data/state.json?ref=main 401 (Unauthorized)
+fetchFromGithub @ github-api.js:169
+pingPresence @ github-api.js:101
+setInterval
+startPresenceHeartbeat @ github-api.js:121
+(anonymous) @ app.js:1611
+setTimeout
+(anonymous) @ app.js:1597Understand this error
+github-api.js:189 Failed to fetch from GitHub, falling back to local: Error: GitHub API error: 401
+    at DataStore.fetchFromGithub (github-api.js:186:23)
+    at async pingPresence (github-api.js:101:21)
+fetchFromGithub @ github-api.js:189
+await in fetchFromGithub
+pingPresence @ github-api.js:101
+setInterval
+startPresenceHeartbeat @ github-api.js:121
+(anonymous) @ app.js:1611
+setTimeout
+(anonymous) @ app.js:1597Understand this error
+github-api.js:205  GET https://api.github.com/repos/pritheeswararshanmugam/werunops-kanban-board/contents/data/state.json?ref=main 401 (Unauthorized)
+saveToGithub @ github-api.js:205
+pingPresence @ github-api.js:113
+setInterval
+startPresenceHeartbeat @ github-api.js:121
+(anonymous) @ app.js:1611
+setTimeout
+(anonymous) @ app.js:1597Understand this error
+github-api.js:226  PUT https://api.github.com/repos/pritheeswararshanmugam/werunops-kanban-board/contents/data/state.json 401 (Unauthorized)
+saveToGithub @ github-api.js:226
+await in saveToGithub
+pingPresence @ github-api.js:113
+setInterval
+startPresenceHeartbeat @ github-api.js:121
+(anonymous) @ app.js:1611
+setTimeout
+(anonymous) @ app.js:1597Understand this error
+github-api.js:244 Error saving to GitHub: Error: Failed to save to GitHub: 401
+    at DataStore.saveToGithub (github-api.js:236:23)
+    at async pingPresence (github-api.js:113:23)
+saveToGithub @ github-api.js:244
+await in saveToGithub
+pingPresence @ github-api.js:113
+setInterval
+startPresenceHeartbeat @ github-api.js:121
+(anonymous) @ app.js:1611
+setTimeout
+(anonymous) @ app.js:1597Understand this error
+github-api.js:169  GET https://api.github.com/repos/pritheeswararshanmugam/werunops-kanban-board/contents/data/state.json?ref=main 401 (Unauthorized)
+fetchFromGithub @ github-api.js:169
+pingPresence @ github-api.js:101
+setInterval
+startPresenceHeartbeat @ github-api.js:121
+(anonymous) @ app.js:1611
+setTimeout
+(anonymous) @ app.js:1597Understand this error
+github-api.js:189 Failed to fetch from GitHub, falling back to local: Error: GitHub API error: 401
+    at DataStore.fetchFromGithub (github-api.js:186:23)
+    at async pingPresence (github-api.js:101:21)
+fetchFromGithub @ github-api.js:189
+await in fetchFromGithub
+pingPresence @ github-api.js:101
+setInterval
+startPresenceHeartbeat @ github-api.js:121
+(anonymous) @ app.js:1611
+setTimeout
+(anonymous) @ app.js:1597Understand this error
+github-api.js:205  GET https://api.github.com/repos/pritheeswararshanmugam/werunops-kanban-board/contents/data/state.json?ref=main 401 (Unauthorized)
+saveToGithub @ github-api.js:205
+pingPresence @ github-api.js:113
+setInterval
+startPresenceHeartbeat @ github-api.js:121
+(anonymous) @ app.js:1611
+setTimeout
+(anonymous) @ app.js:1597Understand this error
+github-api.js:226  PUT https://api.github.com/repos/pritheeswararshanmugam/werunops-kanban-board/contents/data/state.json 401 (Unauthorized)
+saveToGithub @ github-api.js:226
+await in saveToGithub
+pingPresence @ github-api.js:113
+setInterval
+startPresenceHeartbeat @ github-api.js:121
+(anonymous) @ app.js:1611
+setTimeout
+(anonymous) @ app.js:1597Understand this error
+github-api.js:244 Error saving to GitHub: Error: Failed to save to GitHub: 401
+    at DataStore.saveToGithub (github-api.js:236:23)
+    at async pingPresence (github-api.js:113:23)
+saveToGithub @ github-api.js:244
+await in saveToGithub
+pingPresence @ github-api.js:113
+setInterval
+startPresenceHeartbeat @ github-api.js:121
+(anonymous) @ app.js:1611
+setTimeout
+(anonymous) @ app.js:1597Understand this error
+github-api.js:169  GET https://api.github.com/repos/pritheeswararshanmugam/werunops-kanban-board/contents/data/state.json?ref=main 401 (Unauthorized)
+fetchFromGithub @ github-api.js:169
+pingPresence @ github-api.js:101
+setInterval
+startPresenceHeartbeat @ github-api.js:121
+(anonymous) @ app.js:1611
+setTimeout
+(anonymous) @ app.js:1597Understand this error
+github-api.js:189 Failed to fetch from GitHub, falling back to local: Error: GitHub API error: 401
+    at DataStore.fetchFromGithub (github-api.js:186:23)
+    at async pingPresence (github-api.js:101:21)
+fetchFromGithub @ github-api.js:189
+await in fetchFromGithub
+pingPresence @ github-api.js:101
+setInterval
+startPresenceHeartbeat @ github-api.js:121
+(anonymous) @ app.js:1611
+setTimeout
+(anonymous) @ app.js:1597Understand this error
+github-api.js:205  GET https://api.github.com/repos/pritheeswararshanmugam/werunops-kanban-board/contents/data/state.json?ref=main 401 (Unauthorized)
+saveToGithub @ github-api.js:205
+pingPresence @ github-api.js:113
+setInterval
+startPresenceHeartbeat @ github-api.js:121
+(anonymous) @ app.js:1611
+setTimeout
+(anonymous) @ app.js:1597Understand this error
+github-api.js:226  PUT https://api.github.com/repos/pritheeswararshanmugam/werunops-kanban-board/contents/data/state.json 401 (Unauthorized)
+saveToGithub @ github-api.js:226
+await in saveToGithub
+pingPresence @ github-api.js:113
+setInterval
+startPresenceHeartbeat @ github-api.js:121
+(anonymous) @ app.js:1611
+setTimeout
+(anonymous) @ app.js:1597Understand this error
+github-api.js:244 Error saving to GitHub: Error: Failed to save to GitHub: 401
+    at DataStore.saveToGithub (github-api.js:236:23)
+    at async pingPresence (github-api.js:113:23)
+saveToGithub @ github-api.js:244
+await in saveToGithub
+pingPresence @ github-api.js:113
+setInterval
+startPresenceHeartbeat @ github-api.js:121
+(anonymous) @ app.js:1611
+setTimeout
+(anonymous) @ app.js:1597Understand this error
+github-api.js:169  GET https://api.github.com/repos/pritheeswararshanmugam/werunops-kanban-board/contents/data/state.json?ref=main 401 (Unauthorized)
+fetchFromGithub @ github-api.js:169
+pingPresence @ github-api.js:101
+setInterval
+startPresenceHeartbeat @ github-api.js:121
+(anonymous) @ app.js:1611
+setTimeout
+(anonymous) @ app.js:1597Understand this error
+github-api.js:189 Failed to fetch from GitHub, falling back to local: Error: GitHub API error: 401
+    at DataStore.fetchFromGithub (github-api.js:186:23)
+    at async pingPresence (github-api.js:101:21)
+fetchFromGithub @ github-api.js:189
+await in fetchFromGithub
+pingPresence @ github-api.js:101
+setInterval
+startPresenceHeartbeat @ github-api.js:121
+(anonymous) @ app.js:1611
+setTimeout
+(anonymous) @ app.js:1597Understand this error
+github-api.js:205  GET https://api.github.com/repos/pritheeswararshanmugam/werunops-kanban-board/contents/data/state.json?ref=main 401 (Unauthorized)
+saveToGithub @ github-api.js:205
+pingPresence @ github-api.js:113
+setInterval
+startPresenceHeartbeat @ github-api.js:121
+(anonymous) @ app.js:1611
+setTimeout
+(anonymous) @ app.js:1597Understand this error
+github-api.js:226  PUT https://api.github.com/repos/pritheeswararshanmugam/werunops-kanban-board/contents/data/state.json 401 (Unauthorized)
+saveToGithub @ github-api.js:226
+await in saveToGithub
+pingPresence @ github-api.js:113
+setInterval
+startPresenceHeartbeat @ github-api.js:121
+(anonymous) @ app.js:1611
+setTimeout
+(anonymous) @ app.js:1597Understand this error
+github-api.js:244 Error saving to GitHub: Error: Failed to save to GitHub: 401
+    at DataStore.saveToGithub (github-api.js:236:23)
+    at async pingPresence (github-api.js:113:23)
