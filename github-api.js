@@ -8,7 +8,7 @@ const CONFIG = {
     useGithub: true,
     repo: 'pritheeswararshanmugam/werunops-kanban-board',
     branch: 'main',
-    token: '', // STOP! You MUST paste your GitHub Personal Access Token (PAT) here for multi-user sync to work
+    token: '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', // STOP! You MUST paste your GitHub Personal Access Token (PAT) here for multi-user sync to work
     dataFile: 'data/state.json'
 };
 
@@ -99,30 +99,30 @@ class DataStore {
             if (CONFIG.useGithub && CONFIG.token) {
                 try {
                     await this.fetchFromGithub(); // Sync latest remote state
-                } catch(e) { console.warn('Heartbeat fetch failed', e); }
+                } catch (e) { console.warn('Heartbeat fetch failed', e); }
             }
-            if(!this.state) return;
-            if(!this.state.livePresence) this.state.livePresence = {};
-            
+            if (!this.state) return;
+            if (!this.state.livePresence) this.state.livePresence = {};
+
             this.state.livePresence[username] = {
                 online: true,
                 lastSeen: new Date().toISOString()
             };
-            
+
             if (CONFIG.useGithub && CONFIG.token) {
-                try { await this.saveToGithub(); } catch(e) {}
+                try { await this.saveToGithub(); } catch (e) { }
             } else {
                 this.saveToLocal();
             }
         };
 
         pingPresence();
-        if(this.presenceInterval) clearInterval(this.presenceInterval);
+        if (this.presenceInterval) clearInterval(this.presenceInterval);
         this.presenceInterval = setInterval(pingPresence, 30000);
     }
 
     stopPresenceHeartbeat() {
-        if(this.presenceInterval) {
+        if (this.presenceInterval) {
             clearInterval(this.presenceInterval);
             this.presenceInterval = null;
         }
@@ -175,6 +175,7 @@ class DataStore {
 
             if (response.ok) {
                 this.state = await response.json();
+                this.migrateData();
                 // Also cache locally
                 localStorage.setItem('backoffice_state_backup', JSON.stringify(this.state));
             } else if (response.status === 404) {
@@ -251,6 +252,14 @@ class DataStore {
 
     migrateData() {
         if (!this.state) return;
+        
+        // Ensure Phase 4 multi-user arrays exist for older state files
+        if (!this.state.authUsers || this.state.authUsers.length === 0) {
+            this.state.authUsers = DEFAULT_STATE.authUsers;
+        }
+        if (!this.state.livePresence) this.state.livePresence = {};
+        if (!this.state.loginHistory) this.state.loginHistory = [];
+
         // Migrate string clients to objects
         if (this.state.config.clients && this.state.config.clients.length > 0 && typeof this.state.config.clients[0] === 'string') {
             let nextId = 1;
