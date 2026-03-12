@@ -1,28 +1,25 @@
 /**
- * GitHub API & Data Persistence Layer
- * Handles fetching and saving data to GitHub Repository, with localStorage fallback.
+ * Firebase Realtime Database & Data Persistence Layer
+ * Handles fetching and saving data to Firebase, with localStorage fallback.
  */
 
 const CONFIG = {
-    // If true, uses GitHub API. If false, uses localStorage (for development/testing without tokens)
-    useGithub: true,
-    repo: 'pritheeswararshanmugam/werunops-kanban-board',
-    branch: 'main',
-    // Token is loaded from localStorage at runtime - NEVER hardcode it here!
-    // GitHub will auto-revoke any token committed to a public repo.
-    token: localStorage.getItem('werunops_github_token') || '',
-    dataFile: 'data/state.json'
+    // Firebase Realtime Database URL — stored in localStorage, configured via Settings
+    firebaseUrl: localStorage.getItem('werunops_firebase_url') || '',
+    dataPath: 'state' // The path in the database where state is stored
 };
 
-// Helper to set the GitHub token at runtime (called from UI prompt)
-function setGithubToken(token) {
-    CONFIG.token = token;
-    localStorage.setItem('werunops_github_token', token);
+// Helper to set the Firebase URL at runtime (called from Settings UI)
+function setFirebaseUrl(url) {
+    // Normalize: remove trailing slash
+    url = url.replace(/\/+$/, '');
+    CONFIG.firebaseUrl = url;
+    localStorage.setItem('werunops_firebase_url', url);
 }
 
-function clearGithubToken() {
-    CONFIG.token = '';
-    localStorage.removeItem('werunops_github_token');
+function clearFirebaseUrl() {
+    CONFIG.firebaseUrl = '';
+    localStorage.removeItem('werunops_firebase_url');
 }
 
 const DEFAULT_STATE = {
@@ -91,7 +88,6 @@ class DataStore {
     constructor() {
         this.state = null;
         this.listeners = [];
-        this._saving = false;
     }
 
     subscribe(listener) {
@@ -105,14 +101,17 @@ class DataStore {
         this.listeners.forEach(listener => listener(this.state));
     }
 
+    isFirebaseReady() {
+        return !!CONFIG.firebaseUrl;
+    }
+
     startPresenceHeartbeat(username) {
         if (!this.state) return;
 
         const pingPresence = async () => {
-            if (!CONFIG.useGithub || !CONFIG.token) return;
-            if (this._saving) return; // skip if another save is running
+            if (!this.isFirebaseReady()) return;
             try {
-                await this.fetchFromGithub();
+                await this.fetchFromFirebase();
             } catch (e) { /* ignore heartbeat fetch errors */ }
             if (!this.state) return;
             if (!this.state.livePresence) this.state.livePresence = {};
@@ -120,7 +119,7 @@ class DataStore {
                 online: true,
                 lastSeen: new Date().toISOString()
             };
-            try { await this.saveToGithub(); } catch (e) { /* heartbeat save is non-critical */ }
+            try { await this.saveToFirebase(); } catch (e) { /* heartbeat is non-critical */ }
         };
 
         pingPresence();
@@ -136,8 +135,8 @@ class DataStore {
     }
 
     async init() {
-        if (CONFIG.useGithub && CONFIG.token) {
-            await this.fetchFromGithub();
+        if (this.isFirebaseReady()) {
+            await this.fetchFromFirebase();
         } else {
             this.fetchFromLocal();
         }
@@ -170,30 +169,30 @@ class DataStore {
         }
     }
 
-    // Fetch the file content (raw JSON, no base64 decoding needed)
-    async fetchFromGithub() {
-        try {
-            const url = `https://api.github.com/repos/${CONFIG.repo}/contents/${CONFIG.dataFile}?ref=${CONFIG.branch}`;
-            const response = await fetch(url, {
-                headers: {
-                    'Authorization': `token ${CONFIG.token}`,
-                    'Accept': 'application/vnd.github.v3.raw'
-                }
-            });
+    // ========== FIREBASE METHODS ==========
 
-            if (response.ok) {
-                this.state = await response.json();
+    async fetchFromFirebase() {
+        try {
+            const url = `${CONFIG.firebaseUrl}/${CONFIG.dataPath}.json`;
+            const response = await fetch(url);
+
+            if (!response.ok) {
+                throw new Error(`Firebase fetch error: ${response.status}`);
+            }
+
+            const data = await response.json();
+
+            if (data) {
+                this.state = data;
                 this.migrateData();
                 localStorage.setItem('backoffice_state_backup', JSON.stringify(this.state));
-            } else if (response.status === 404) {
-                // File doesn't exist yet — create it with default data
-                this.state = JSON.parse(JSON.stringify(DEFAULT_STATE));
-                await this.saveToGithub();
             } else {
-                throw new Error(`GitHub API error: ${response.status}`);
+                // Database is empty — initialize with default state
+                this.state = JSON.parse(JSON.stringify(DEFAULT_STATE));
+                await this.saveToFirebase();
             }
         } catch (error) {
-            console.error("Failed to fetch from GitHub, falling back to local:", error);
+            console.error("Failed to fetch from Firebase, falling back to local:", error);
             const backup = localStorage.getItem('backoffice_state_backup');
             this.state = backup ? JSON.parse(backup) : JSON.parse(JSON.stringify(DEFAULT_STATE));
             this.migrateData();
@@ -201,96 +200,36 @@ class DataStore {
         this.notify();
     }
 
-    // Always get the latest file SHA right before saving
-    async _getFileSha() {
-        const url = `https://api.github.com/repos/${CONFIG.repo}/contents/${CONFIG.dataFile}?ref=${CONFIG.branch}`;
-        const res = await fetch(url, {
-            headers: {
-                'Authorization': `token ${CONFIG.token}`,
-                'Accept': 'application/vnd.github.v3+json'
-            }
-        });
-        if (res.ok) {
-            const data = await res.json();
-            return data.sha;
-        }
-        if (res.status === 404) return null; // file doesn't exist yet
-        throw new Error(`Failed to get file SHA: ${res.status}`);
-    }
-
-    async saveToGithub(retryCount = 0) {
-        // Simple mutex — wait for any in-progress save to finish
-        if (this._saving) {
-            for (let i = 0; i < 20; i++) {
-                await new Promise(r => setTimeout(r, 500));
-                if (!this._saving) break;
-            }
-            if (this._saving) {
-                console.warn('Save timeout — falling back to local');
-                this.saveToLocal();
-                return false;
-            }
-        }
-
-        this._saving = true;
+    async saveToFirebase() {
         try {
-            // ALWAYS get a fresh SHA right before saving (prevents 422 errors)
-            const sha = await this._getFileSha();
-
-            // Encode state to base64
-            const jsonStr = JSON.stringify(this.state, null, 2);
-            const content = btoa(unescape(encodeURIComponent(jsonStr)));
-
-            const putUrl = `https://api.github.com/repos/${CONFIG.repo}/contents/${CONFIG.dataFile}`;
-            const body = {
-                message: `Update state: ${new Date().toISOString()}`,
-                content: content,
-                branch: CONFIG.branch
-            };
-            if (sha) body.sha = sha;
-
-            const response = await fetch(putUrl, {
+            const url = `${CONFIG.firebaseUrl}/${CONFIG.dataPath}.json`;
+            const response = await fetch(url, {
                 method: 'PUT',
-                headers: {
-                    'Authorization': `token ${CONFIG.token}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(body)
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(this.state)
             });
 
-            if (response.ok) {
-                localStorage.setItem('backoffice_state_backup', JSON.stringify(this.state));
-                this.notify();
-                return true;
+            if (!response.ok) {
+                const errBody = await response.text();
+                throw new Error(`Firebase save error: ${response.status} - ${errBody}`);
             }
 
-            // On conflict or validation error, retry
-            if ((response.status === 409 || response.status === 422) && retryCount < 3) {
-                console.warn(`Save conflict (${response.status}), retrying... (attempt ${retryCount + 1})`);
-                this._saving = false;
-                await new Promise(r => setTimeout(r, 1000));
-                return await this.saveToGithub(retryCount + 1);
-            }
-
-            // Log full error for debugging
-            const errBody = await response.text();
-            console.error(`GitHub PUT failed: ${response.status}`, errBody);
-            throw new Error(`Failed to save to GitHub: ${response.status}`);
+            // Also cache locally
+            localStorage.setItem('backoffice_state_backup', JSON.stringify(this.state));
+            this.notify();
+            return true;
         } catch (error) {
-            console.error("Error saving to GitHub:", error);
+            console.error("Error saving to Firebase:", error);
             this.saveToLocal();
             throw error;
-        } finally {
-            this._saving = false;
         }
     }
 
-    // --- Migration ---
+    // ========== DATA MIGRATION ==========
 
     migrateData() {
         if (!this.state) return;
 
-        // Ensure multi-user arrays exist for older state files
         if (!this.state.authUsers || this.state.authUsers.length === 0) {
             this.state.authUsers = DEFAULT_STATE.authUsers;
         }
@@ -298,7 +237,7 @@ class DataStore {
         if (!this.state.loginHistory) this.state.loginHistory = [];
 
         // Migrate string clients to objects
-        if (this.state.config.clients && this.state.config.clients.length > 0 && typeof this.state.config.clients[0] === 'string') {
+        if (this.state.config && this.state.config.clients && this.state.config.clients.length > 0 && typeof this.state.config.clients[0] === 'string') {
             let nextId = 1;
             this.state.config.clients = this.state.config.clients.map(c => ({
                 id: nextId++,
@@ -307,10 +246,15 @@ class DataStore {
             }));
             this.state.config.nextClientId = nextId;
         }
-        if (!this.state.config.nextClientId) this.state.config.nextClientId = this.state.config.clients.length ? Math.max(...this.state.config.clients.map(c => c.id || 0)) + 1 : 1;
+
+        if (this.state.config && !this.state.config.nextClientId) {
+            this.state.config.nextClientId = this.state.config.clients.length
+                ? Math.max(...this.state.config.clients.map(c => c.id || 0)) + 1
+                : 1;
+        }
     }
 
-    // --- Action Methods ---
+    // ========== ACTION METHODS ==========
 
     async saveTask(taskData) {
         if (!this.state) return;
@@ -318,7 +262,6 @@ class DataStore {
         const now = new Date().toISOString();
 
         if (!taskData.id) {
-            // New task
             taskData.id = this.state.config.nextTaskId++;
             taskData.createdAt = now;
             taskData.updatedAt = now;
@@ -327,7 +270,6 @@ class DataStore {
             ];
             this.state.tasks.push(taskData);
         } else {
-            // Update existing
             const index = this.state.tasks.findIndex(t => t.id === parseInt(taskData.id));
             if (index !== -1) {
                 const oldTask = this.state.tasks[index];
@@ -336,7 +278,6 @@ class DataStore {
                 taskData.updatedAt = now;
 
                 const log = oldTask.activityLog || [];
-
                 if (oldTask.status !== taskData.status) {
                     log.push({ action: `Status changed to "${taskData.status}"`, user: getCurrentUser(), timestamp: now });
                 }
@@ -352,8 +293,8 @@ class DataStore {
             }
         }
 
-        if (CONFIG.useGithub && CONFIG.token) {
-            await this.saveToGithub();
+        if (this.isFirebaseReady()) {
+            await this.saveToFirebase();
         } else {
             this.saveToLocal();
         }
@@ -370,7 +311,6 @@ class DataStore {
             if (task.status !== newStatus) {
                 task.status = newStatus;
                 task.updatedAt = new Date().toISOString();
-
                 task.activityLog = task.activityLog || [];
                 task.activityLog.push({
                     action: `Status changed to "${newStatus}" via drag`,
@@ -378,8 +318,8 @@ class DataStore {
                     timestamp: task.updatedAt
                 });
 
-                if (CONFIG.useGithub && CONFIG.token) {
-                    await this.saveToGithub();
+                if (this.isFirebaseReady()) {
+                    await this.saveToFirebase();
                 } else {
                     this.saveToLocal();
                 }
@@ -394,8 +334,8 @@ class DataStore {
         this.state.tasks = this.state.tasks.filter(t => !taskIds.includes(t.id.toString()) && !taskIds.includes(t.id));
 
         if (this.state.tasks.length !== initialLength) {
-            if (CONFIG.useGithub && CONFIG.token) {
-                await this.saveToGithub();
+            if (this.isFirebaseReady()) {
+                await this.saveToFirebase();
             } else {
                 this.saveToLocal();
             }
@@ -422,8 +362,8 @@ class DataStore {
             this.state.config.clients.push(clientData);
         }
 
-        if (CONFIG.useGithub && CONFIG.token) {
-            await this.saveToGithub();
+        if (this.isFirebaseReady()) {
+            await this.saveToFirebase();
         } else {
             this.saveToLocal();
         }
@@ -441,8 +381,8 @@ class DataStore {
         this.state.config.clients = this.state.config.clients.filter(c => c.name !== clientName);
 
         if (this.state.config.clients.length !== initialLength) {
-            if (CONFIG.useGithub && CONFIG.token) {
-                await this.saveToGithub();
+            if (this.isFirebaseReady()) {
+                await this.saveToFirebase();
             } else {
                 this.saveToLocal();
             }
@@ -450,9 +390,14 @@ class DataStore {
     }
 }
 
-// Mock auth
+// Auth helper
 function getCurrentUser() {
-    return "Mubarak"; // Hardcoded for prototype
+    try {
+        const u = JSON.parse(localStorage.getItem('currentUser'));
+        return u ? u.name : 'Unknown';
+    } catch (e) {
+        return 'Unknown';
+    }
 }
 
 const store = new DataStore();

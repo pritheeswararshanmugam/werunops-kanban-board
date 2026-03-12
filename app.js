@@ -36,12 +36,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Hide Loading
     document.getElementById('global-loader').classList.add('hidden');
 
-    // First-run: alert if no GitHub token is configured
-    if (CONFIG.useGithub && !CONFIG.token) {
+    // First-run: alert if no Firebase URL is configured
+    if (!CONFIG.firebaseUrl) {
         setTimeout(() => {
             showNotification(
-                'GitHub Sync Not Configured',
-                'Go to Settings → GitHub Sync Configuration and paste your PAT to enable multi-user data sync.',
+                'Firebase Not Configured',
+                'Go to Settings → Firebase Database and paste your Firebase Realtime Database URL to enable multi-user sync.',
                 'info'
             );
         }, 2000);
@@ -1904,8 +1904,8 @@ function setupSettingsModal() {
                 currentUser.password = newP;
                 localStorage.setItem('currentUser', JSON.stringify(currentUser));
                 
-                if (CONFIG.useGithub && CONFIG.token) {
-                    store.saveToGithub().catch(()=>{});
+                if (store.isFirebaseReady()) {
+                    store.saveToFirebase().catch(()=>{});
                 } else {
                     store.saveToLocal();
                 }
@@ -1919,102 +1919,84 @@ function setupSettingsModal() {
         }, 500);
     });
 
-    // --- GitHub Token Configuration ---
-    const tokenInput = document.getElementById('github-token-input');
-    const tokenMsg = document.getElementById('github-token-msg');
-    const statusBadge = document.getElementById('github-sync-status-badge');
-    
-    function updateSyncBadge() {
-        if (!statusBadge) return;
-        if (CONFIG.token) {
-            statusBadge.textContent = 'Connected';
-            statusBadge.className = 'text-xs font-medium px-2 py-1 rounded-full bg-green-100 text-green-700';
+    // --- Firebase Configuration ---
+    const fbUrlInput = document.getElementById('firebase-url-input');
+    const fbMsg = document.getElementById('firebase-msg');
+    const fbBadge = document.getElementById('firebase-status-badge');
+
+    function updateFirebaseBadge() {
+        if (!fbBadge) return;
+        if (CONFIG.firebaseUrl) {
+            fbBadge.textContent = 'Connected';
+            fbBadge.className = 'text-xs font-medium px-2 py-1 rounded-full bg-green-100 text-green-700';
         } else {
-            statusBadge.textContent = 'Not Connected';
-            statusBadge.className = 'text-xs font-medium px-2 py-1 rounded-full bg-red-100 text-red-600';
+            fbBadge.textContent = 'Not Connected';
+            fbBadge.className = 'text-xs font-medium px-2 py-1 rounded-full bg-red-100 text-red-600';
         }
     }
 
-    // Populate token field when settings opens
-    const origOpenHandler = btnOpen._openHandler;
-    btnOpen._openHandler = true; // flag to avoid double-binding
-    const origClick = btnOpen.onclick;
-    // We need to run updateSyncBadge when settings opens. Attach to the existing click:
-    const origClickListeners = btnOpen._settingsListeners || [];
+    // Populate URL field when settings opens
     btnOpen.addEventListener('click', () => {
-        if (tokenInput) tokenInput.value = CONFIG.token ? '••••••••••••••••••••' : '';
-        updateSyncBadge();
-        // Re-render lucide icons for newly added icons
+        if (fbUrlInput) fbUrlInput.value = CONFIG.firebaseUrl || '';
+        updateFirebaseBadge();
         if (typeof lucide !== 'undefined') setTimeout(() => lucide.createIcons(), 50);
     });
 
-    document.getElementById('btn-save-github-token')?.addEventListener('click', async () => {
-        const newToken = tokenInput?.value?.trim();
-        if (!newToken || newToken.includes('••••')) {
-            if (tokenMsg) {
-                tokenMsg.textContent = 'Please enter a valid token.';
-                tokenMsg.className = 'text-sm font-medium mt-1 text-red-500';
-                tokenMsg.classList.remove('hidden');
+    document.getElementById('btn-save-firebase-url')?.addEventListener('click', async () => {
+        const url = fbUrlInput?.value?.trim();
+        if (!url || !url.startsWith('https://')) {
+            if (fbMsg) {
+                fbMsg.textContent = 'Please enter a valid Firebase URL (starts with https://)';
+                fbMsg.className = 'text-sm font-medium mt-1 text-red-500';
+                fbMsg.classList.remove('hidden');
             }
             return;
         }
 
-        if (tokenMsg) {
-            tokenMsg.textContent = 'Testing connection...';
-            tokenMsg.className = 'text-sm font-medium mt-1 text-blue-500';
-            tokenMsg.classList.remove('hidden');
+        if (fbMsg) {
+            fbMsg.textContent = 'Testing connection...';
+            fbMsg.className = 'text-sm font-medium mt-1 text-blue-500';
+            fbMsg.classList.remove('hidden');
         }
 
-        // Test the token by making a simple API call
         try {
-            const testUrl = `https://api.github.com/repos/${CONFIG.repo}/contents/${CONFIG.dataFile}?ref=${CONFIG.branch}`;
-            const res = await fetch(testUrl, {
-                headers: {
-                    'Authorization': `token ${newToken}`,
-                    'Accept': 'application/vnd.github.v3+json'
-                }
-            });
+            // Test by reading from Firebase
+            const testUrl = `${url.replace(/\/+$/, '')}/.json?shallow=true`;
+            const res = await fetch(testUrl);
 
-            if (res.ok || res.status === 404) {
-                // 200 = file exists, 404 = file doesn't exist yet but auth worked
-                setGithubToken(newToken);
-                if (tokenMsg) {
-                    tokenMsg.textContent = '✅ Token is valid! Syncing data...';
-                    tokenMsg.className = 'text-sm font-medium mt-1 text-green-600';
+            if (res.ok) {
+                setFirebaseUrl(url);
+                if (fbMsg) {
+                    fbMsg.textContent = '✅ Connected! Syncing data...';
+                    fbMsg.className = 'text-sm font-medium mt-1 text-green-600';
                 }
-                updateSyncBadge();
-                // Re-init the store with live data
+                updateFirebaseBadge();
                 await store.init();
-                showNotification('GitHub Sync', 'Connected successfully! Data is now synced across users.', 'success');
-            } else if (res.status === 401) {
-                if (tokenMsg) {
-                    tokenMsg.textContent = '❌ Token rejected (401 Unauthorized). Check the token has "repo" scope.';
-                    tokenMsg.className = 'text-sm font-medium mt-1 text-red-500';
-                }
+                showNotification('Firebase', 'Connected successfully! Data is now synced across users.', 'success');
             } else {
-                if (tokenMsg) {
-                    tokenMsg.textContent = `❌ Unexpected error: ${res.status}`;
-                    tokenMsg.className = 'text-sm font-medium mt-1 text-red-500';
+                if (fbMsg) {
+                    fbMsg.textContent = `❌ Firebase responded with error: ${res.status}. Check the URL and database rules.`;
+                    fbMsg.className = 'text-sm font-medium mt-1 text-red-500';
                 }
             }
         } catch (err) {
-            if (tokenMsg) {
-                tokenMsg.textContent = `❌ Network error: ${err.message}`;
-                tokenMsg.className = 'text-sm font-medium mt-1 text-red-500';
+            if (fbMsg) {
+                fbMsg.textContent = `❌ Network error: ${err.message}`;
+                fbMsg.className = 'text-sm font-medium mt-1 text-red-500';
             }
         }
     });
 
-    document.getElementById('btn-clear-github-token')?.addEventListener('click', () => {
-        clearGithubToken();
-        if (tokenInput) tokenInput.value = '';
-        if (tokenMsg) {
-            tokenMsg.textContent = 'Token cleared. App will use local storage only.';
-            tokenMsg.className = 'text-sm font-medium mt-1 text-yellow-600';
-            tokenMsg.classList.remove('hidden');
+    document.getElementById('btn-clear-firebase-url')?.addEventListener('click', () => {
+        clearFirebaseUrl();
+        if (fbUrlInput) fbUrlInput.value = '';
+        if (fbMsg) {
+            fbMsg.textContent = 'Disconnected. App will use local storage only.';
+            fbMsg.className = 'text-sm font-medium mt-1 text-yellow-600';
+            fbMsg.classList.remove('hidden');
         }
-        updateSyncBadge();
-        showNotification('GitHub Sync', 'Token removed. Data will only be saved locally.', 'info');
+        updateFirebaseBadge();
+        showNotification('Firebase', 'Disconnected. Data will only be saved locally.', 'info');
     });
 }
 
