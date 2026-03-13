@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, PlainTextResponse
 
@@ -135,6 +136,26 @@ def root(request: Request):
 @app.get("/api/v1/health")
 def health(request: Request):
     return build_response({"status": "ok"}, request)
+
+@app.post("/api/v1/testing/reset-state", response_model=APIResponse)
+def testing_reset_state(request: Request):
+    if store.state_driver != "file":
+        raise HTTPException(status_code=400, detail="State reset is supported only in file mode")
+
+    seed_path = store.state_file.with_name("state_store.seed.json")
+    if not seed_path.exists():
+        raise HTTPException(status_code=404, detail="Seed state file not found")
+
+    store.state_file.write_text(seed_path.read_text(encoding="utf-8"), encoding="utf-8")
+    store._load_state()
+    return build_response(
+        {
+            "reset": True,
+            "tasks": len(store.tasks),
+            "clients": len(store.clients),
+        },
+        request,
+    )
 
 
 @app.get("/api/v1")
@@ -1221,7 +1242,7 @@ def update_task(task_id: int, payload: TaskUpdate, request: Request, user: UserP
         raise HTTPException(status_code=404, detail="Task not found")
     ensure_task_not_locked_by_other(task_id, user)
     if task.version != payload.version:
-        raise HTTPException(status_code=409, detail={"code": "TASK_CONFLICT", "latest": task.model_dump()})
+        raise HTTPException(status_code=409, detail={"code": "TASK_CONFLICT", "latest": jsonable_encoder(task.model_dump())})
 
     updated = task.model_copy(update={**payload.model_dump(exclude={"version"}), "version": task.version + 1, "updatedAt": datetime.now(UTC)})
     updated.activityLog.append(ActivityEntry(action="Task updated", user=user.name, timestamp=datetime.now(UTC)))
@@ -1237,7 +1258,7 @@ def patch_task_status(task_id: int, payload: TaskStatusPatch, request: Request, 
         raise HTTPException(status_code=404, detail="Task not found")
     ensure_task_not_locked_by_other(task_id, user)
     if task.version != payload.version:
-        raise HTTPException(status_code=409, detail={"code": "TASK_CONFLICT", "latest": task.model_dump()})
+        raise HTTPException(status_code=409, detail={"code": "TASK_CONFLICT", "latest": jsonable_encoder(task.model_dump())})
 
     now = datetime.now(UTC)
     updated = task.model_copy(update={"status": payload.status, "version": task.version + 1, "updatedAt": now})

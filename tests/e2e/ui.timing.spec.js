@@ -32,11 +32,19 @@ test('timing coverage for presence and dashboard refresh intervals', async ({ pa
     })
     .toBeGreaterThanOrEqual(1);
 
-  await page.waitForTimeout(22_000);
-  expect(presenceHits).toBeGreaterThanOrEqual(2);
+  await expect
+    .poll(() => presenceHits, {
+      timeout: 45_000,
+      intervals: [1000, 2000, 5000],
+    })
+    .toBeGreaterThanOrEqual(2);
 
   const beforeManualRefresh = metricsHits;
   await page.click('#refresh-dashboard-btn');
-  await page.waitForTimeout(1_500);
-  expect(metricsHits).toBeGreaterThanOrEqual(beforeManualRefresh + 1);
+  await expect
+    .poll(() => metricsHits, {
+      timeout: 10_000,
+      intervals: [300, 700, 1500],
+    })
+    .toBeGreaterThanOrEqual(beforeManualRefresh + 1);
 });

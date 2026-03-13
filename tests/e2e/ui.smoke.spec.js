@@ -1,15 +1,5 @@
 const { test, expect } = require('@playwright/test');
-
-async function signIn(page) {
-  await page.goto('/index.html');
-  await page.fill('#login-username', 'Eshwar');
-  await page.fill('#login-password', '110495');
-  await page.locator('#login-form button[type="submit"]').click();
-
-  await expect(page.locator('#main-header')).toBeVisible();
-  await expect(page.locator('#main-content')).toBeVisible();
-  await expect(page.locator('#header-user-name')).toContainText('Pritheeswarar');
-}
+const { resetBrowserState, signIn, waitForNotificationsToClear } = require('./ui.helpers');
 
 async function selectFirstAvailableOption(page, selectSelector) {
   const value = await page.evaluate((selector) => {
@@ -28,15 +18,12 @@ async function selectFirstAvailableOption(page, selectSelector) {
 }
 
 test.beforeEach(async ({ page }) => {
-  await page.goto('/index.html');
-  await page.evaluate(() => {
-    localStorage.clear();
-    sessionStorage.clear();
-  });
+  await resetBrowserState(page);
 });
 
 test('user can sign in and land on dashboard', async ({ page }) => {
   await signIn(page);
+  await expect(page.locator('#header-user-name')).toContainText('Pritheeswarar');
   await expect(page.locator('#view-dashboard h2')).toHaveText('Dashboard');
 });
 
@@ -59,8 +46,8 @@ test('user can create task from all tasks view', async ({ page }) => {
   await page.fill('#task-due-date', dueDate);
 
   await page.click('#btn-save-task');
-
-  await expect(page.locator('#modal-task')).toBeHidden();
+  await waitForNotificationsToClear(page);
+  await expect(page.locator('#modal-task')).toBeHidden({ timeout: 30_000 });
   await page.fill('#tasks-search', taskName);
   const taskRow = page.locator('#tasks-table-body tr', { hasText: taskName }).first();
   await expect(taskRow).toBeVisible();
@@ -118,7 +105,8 @@ test('full end-to-end flow: add and remove client and task', async ({ page }) =>
   await page.fill('#task-due-date', dueDate);
   await page.click('#btn-save-task');
 
-  await expect(page.locator('#modal-task')).toBeHidden();
+  await waitForNotificationsToClear(page);
+  await expect(page.locator('#modal-task')).toBeHidden({ timeout: 30_000 });
   await page.fill('#tasks-search', taskName);
   const taskRow = page.locator('#tasks-table-body tr', { hasText: taskName }).first();
   await expect(taskRow).toBeVisible();

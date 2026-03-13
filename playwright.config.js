@@ -10,6 +10,7 @@ module.exports = defineConfig({
     timeout: 15_000,
   },
   fullyParallel: false,
+  workers: 1,
   retries: isCI ? 2 : 0,
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
