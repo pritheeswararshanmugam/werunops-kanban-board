@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import hashlib
 import os
+import re
 import secrets
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -33,12 +34,26 @@ class InMemoryStore:
         self.supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or ""
         self.supabase_table = (os.getenv("SUPABASE_STATE_TABLE") or "werunops_state").strip()
         self.supabase_row_id = int(os.getenv("SUPABASE_STATE_ROW_ID") or "1")
+        self.firebase_url = (os.getenv("FIREBASE_DATABASE_URL") or "").rstrip("/")
+        self.firebase_auth_secret = os.getenv("FIREBASE_AUTH_SECRET") or ""
+        raw_path = (os.getenv("FIREBASE_STATE_PATH") or "werunops_state").strip("/")
+        # Restrict path to safe characters to prevent path traversal.
+        self.firebase_state_path = raw_path if re.fullmatch(r"[A-Za-z0-9_\-/]+", raw_path) else "werunops_state"
 
         if not self.state_driver:
-            self.state_driver = "supabase" if (self.supabase_url and self.supabase_key) else "file"
+            if self.firebase_url and self.firebase_auth_secret:
+                self.state_driver = "firebase"
+            elif self.supabase_url and self.supabase_key:
+                self.state_driver = "supabase"
+            else:
+                self.state_driver = "file"
 
         if self.state_driver == "supabase" and (not self.supabase_url or not self.supabase_key):
             # Fall back to file mode if Supabase credentials are missing.
+            self.state_driver = "file"
+
+        if self.state_driver == "firebase" and not self.firebase_url:
+            # Fall back to file mode if Firebase URL is missing.
             self.state_driver = "file"
 
         self.users: dict[str, dict[str, Any]] = {
@@ -171,6 +186,33 @@ class InMemoryStore:
             if response.status_code >= 400:
                 raise RuntimeError(f"Supabase save failed with HTTP {response.status_code}: {response.text}")
 
+    def _firebase_endpoint(self) -> str:
+        return f"{self.firebase_url}/{self.firebase_state_path}.json"
+
+    def _firebase_params(self) -> dict[str, str]:
+        params: dict[str, str] = {}
+        if self.firebase_auth_secret:
+            params["auth"] = self.firebase_auth_secret
+        return params
+
+    def _load_state_from_firebase(self) -> dict[str, Any] | None:
+        endpoint = self._firebase_endpoint()
+        with httpx.Client(timeout=15.0) as client:
+            response = client.get(endpoint, params=self._firebase_params())
+            if response.status_code >= 400:
+                raise RuntimeError(f"Firebase load failed with HTTP {response.status_code}")
+            data: Any = response.json()
+            if isinstance(data, dict):
+                return cast(dict[str, Any], data)
+            return None
+
+    def _save_state_to_firebase(self, payload: dict[str, Any]) -> None:
+        endpoint = self._firebase_endpoint()
+        with httpx.Client(timeout=20.0) as client:
+            response = client.put(endpoint, json=payload, params=self._firebase_params())
+            if response.status_code >= 400:
+                raise RuntimeError(f"Firebase save failed with HTTP {response.status_code}")
+
     @staticmethod
     def _now() -> datetime:
         return datetime.now(UTC)
@@ -280,6 +322,9 @@ class InMemoryStore:
         if self.state_driver == "supabase":
             self._save_state_to_supabase(payload)
             return
+        if self.state_driver == "firebase":
+            self._save_state_to_firebase(payload)
+            return
         self.state_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
     def _load_state(self) -> None:
@@ -288,6 +333,11 @@ class InMemoryStore:
             if raw is None:
                 self.save_state()
                 raw = self._load_state_from_supabase() or {}
+        elif self.state_driver == "firebase":
+            raw = self._load_state_from_firebase()
+            if raw is None:
+                self.save_state()
+                raw = self._load_state_from_firebase() or {}
         else:
             if not self.state_file.exists():
                 self.save_state()
