@@ -1,0 +1,21 @@
+# Python artifacts
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+venv/
+
+# Local editor/runtime outputs
+.pytest_cache/
+*.log
+
+# Node/Playwright artifacts
+node_modules/
+playwright-report/
+test-results/
+playwright/.cache/
+
+# OS files
+.DS_Store
+Thumbs.db

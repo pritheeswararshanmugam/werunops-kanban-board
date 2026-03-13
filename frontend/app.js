@@ -10,6 +10,25 @@ const SESSION_KEY = 'currentUser';
 let renderQueued = false;
 let pendingRenderState = null;
 let lastDashboardFingerprint = '';
+let sessionHeartbeatTimer = null;
+let sessionActivityBound = false;
+let sessionActiveSecondsBucket = 0;
+let sessionIdleSecondsBucket = 0;
+let lastActivityAt = Date.now();
+let lastHeartbeatAt = Date.now();
+let dashboardOpsInFlight = null;
+let dashboardOpsLastFetchAt = 0;
+let currentLockedTaskId = null;
+let taskLockRefreshTimer = null;
+const undoStack = [];
+const redoStack = [];
+let historyReplay = false;
+const selectedTaskIds = new Set();
+const APP_RUNTIME_CONFIG = (typeof window !== 'undefined' && window.WERUNOPS_CONFIG)
+    ? window.WERUNOPS_CONFIG
+    : {};
+const ALLOW_USER_ENDPOINT_CONFIG = APP_RUNTIME_CONFIG.allowUserEndpointConfig === true;
+const SHOW_SESSION_OPS_IN_DASHBOARD = APP_RUNTIME_CONFIG.showSessionOpsInDashboard !== false;
 
 function escapeHTML(value) {
     return String(value ?? '')
@@ -47,6 +66,159 @@ function scheduleRender(state) {
     });
 }
 
+function cloneTask(task) {
+    return task ? JSON.parse(JSON.stringify(task)) : null;
+}
+
+function updateUndoRedoButtons() {
+    const undoBtn = document.getElementById('btn-undo');
+    const redoBtn = document.getElementById('btn-redo');
+    if (undoBtn) undoBtn.disabled = undoStack.length === 0;
+    if (redoBtn) redoBtn.disabled = redoStack.length === 0;
+}
+
+function pushHistoryEntry(entry) {
+    if (historyReplay) return;
+    undoStack.push(entry);
+    if (undoStack.length > 100) undoStack.shift();
+    redoStack.length = 0;
+    updateUndoRedoButtons();
+}
+
+async function replayHistoryEntry(entry, direction = 'undo') {
+    historyReplay = true;
+    try {
+        if (entry.type === 'create') {
+            if (direction === 'undo') {
+                await store.deleteTasks([entry.task.id]);
+            } else {
+                await store.restoreTaskSnapshot(entry.task);
+            }
+        }
+
+        if (entry.type === 'update') {
+            if (direction === 'undo') {
+                await store.restoreTaskSnapshot(entry.before);
+            } else {
+                await store.restoreTaskSnapshot(entry.after);
+            }
+        }
+
+        if (entry.type === 'status') {
+            if (direction === 'undo') {
+                await store.updateTaskStatus(entry.taskId, entry.beforeStatus);
+            } else {
+                await store.updateTaskStatus(entry.taskId, entry.afterStatus);
+            }
+        }
+
+        if (entry.type === 'delete') {
+            if (direction === 'undo') {
+                for (const task of entry.tasks) {
+                    await store.restoreTaskSnapshot(task);
+                }
+            } else {
+                await store.deleteTasks(entry.tasks.map(task => task.id));
+            }
+        }
+    } finally {
+        historyReplay = false;
+    }
+}
+
+async function undoLastMutation() {
+    const entry = undoStack.pop();
+    if (!entry) return;
+    try {
+        await replayHistoryEntry(entry, 'undo');
+        redoStack.push(entry);
+        showNotification('Undo', 'Last task change reverted.', 'success');
+    } catch (error) {
+        undoStack.push(entry);
+        showNotification('Undo Failed', 'Could not revert the last change.', 'error');
+    }
+    updateUndoRedoButtons();
+}
+
+async function redoLastMutation() {
+    const entry = redoStack.pop();
+    if (!entry) return;
+    try {
+        await replayHistoryEntry(entry, 'redo');
+        undoStack.push(entry);
+        showNotification('Redo', 'Change applied again.', 'success');
+    } catch (error) {
+        redoStack.push(entry);
+        showNotification('Redo Failed', 'Could not re-apply the change.', 'error');
+    }
+    updateUndoRedoButtons();
+}
+
+function getTaskLockInfo(taskId) {
+    if (!store?.state?.taskLocks) return null;
+    const lock = store.state.taskLocks[parseInt(taskId)];
+    if (!lock) return null;
+    if (lock.lockedBy === currentUser?.username) return null;
+    return lock;
+}
+
+function refreshOfflineSyncControls() {
+    const status = store.getOfflineQueueStatus ? store.getOfflineQueueStatus() : { pendingCount: 0, failedCount: 0 };
+    const pendingCount = Number(status.pendingCount || 0);
+    const failedCount = Number(status.failedCount || 0);
+
+    const bannerText = document.getElementById('offline-banner-text');
+    const retryBannerBtn = document.getElementById('btn-retry-offline-sync');
+    const discardBannerBtn = document.getElementById('btn-discard-offline-failed');
+
+    if (bannerText) {
+        if (!navigator.onLine) {
+            bannerText.textContent = `Offline mode active. ${pendingCount} change(s) queued for sync.`;
+        } else if (failedCount > 0) {
+            bannerText.textContent = `${failedCount} change(s) failed to sync. Retry or discard failed actions.`;
+        } else {
+            bannerText.textContent = 'Offline mode active. Changes are saved locally and will sync when online.';
+        }
+    }
+
+    if (retryBannerBtn) retryBannerBtn.classList.toggle('hidden', failedCount === 0);
+    if (discardBannerBtn) discardBannerBtn.classList.toggle('hidden', failedCount === 0);
+
+    const queueCountEl = document.getElementById('settings-offline-queue-count');
+    const failedCountEl = document.getElementById('settings-offline-failed-count');
+    if (queueCountEl) queueCountEl.textContent = String(pendingCount);
+    if (failedCountEl) failedCountEl.textContent = String(failedCount);
+
+    const retrySettingsBtn = document.getElementById('btn-settings-retry-failed-sync');
+    const discardSettingsBtn = document.getElementById('btn-settings-discard-failed-sync');
+    if (retrySettingsBtn) retrySettingsBtn.disabled = failedCount === 0;
+    if (discardSettingsBtn) discardSettingsBtn.disabled = failedCount === 0;
+}
+
+async function retryFailedOfflineSync() {
+    if (!store.retryFailedOfflineQueue) return;
+    store.retryFailedOfflineQueue();
+    refreshOfflineSyncControls();
+    if (!navigator.onLine) {
+        showNotification('Still Offline', 'Queued failed actions. Sync will retry when connection is restored.', 'info');
+        return;
+    }
+    const result = await store.flushOfflineQueue?.().catch(() => null);
+    refreshOfflineSyncControls();
+    if (result?.failed > 0) {
+        showNotification('Partial Sync', `${result.failed} action(s) still failed.`, 'warning');
+    } else {
+        showNotification('Sync Complete', 'Failed actions were replayed successfully.', 'success');
+    }
+}
+
+function discardFailedOfflineSync() {
+    if (!store.discardFailedOfflineQueue) return;
+    store.discardFailedOfflineQueue();
+    refreshOfflineSyncControls();
+    showNotification('Failed Actions Cleared', 'Discarded failed offline actions.', 'warning');
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
     // 1. Initialize UI Elements
     initNavigation();
@@ -63,7 +235,59 @@ document.addEventListener('DOMContentLoaded', async () => {
     await store.init();
 
     // 3. Setup Auth now that store is ready
-    setupAuth();
+    await setupAuth();
+
+    window.addEventListener('werunops-auth-invalid', () => {
+        if (!currentUser) return;
+        store.stopPresenceHeartbeat();
+        store.stopTaskLockListener();
+        stopSessionActivityTracking();
+        currentUser = null;
+        localStorage.removeItem(SESSION_KEY);
+        window.location.hash = '#/login';
+        showNotification('Session Expired', 'Please sign in again.', 'warning');
+    });
+
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('sw.js').catch(() => {});
+    }
+
+    const offlineBanner = document.getElementById('offline-banner');
+    const updateOfflineUI = async () => {
+        if (!offlineBanner) return;
+        if (navigator.onLine) {
+            offlineBanner.classList.add('hidden');
+            const result = await store.flushOfflineQueue?.().catch(() => null);
+            if (result?.failed > 0) {
+                offlineBanner.classList.remove('hidden');
+                showNotification('Sync Attention Needed', `${result.failed} offline action(s) need retry or discard.`, 'warning');
+            }
+        } else {
+            offlineBanner.classList.remove('hidden');
+        }
+        refreshOfflineSyncControls();
+    };
+    window.addEventListener('online', () => { updateOfflineUI(); });
+    window.addEventListener('offline', () => { updateOfflineUI(); });
+
+    document.getElementById('btn-retry-offline-sync')?.addEventListener('click', () => retryFailedOfflineSync());
+    document.getElementById('btn-discard-offline-failed')?.addEventListener('click', () => discardFailedOfflineSync());
+
+    updateOfflineUI();
+
+    document.getElementById('btn-undo')?.addEventListener('click', () => undoLastMutation());
+    document.getElementById('btn-redo')?.addEventListener('click', () => redoLastMutation());
+    document.addEventListener('keydown', (event) => {
+        if (event.ctrlKey && event.key.toLowerCase() === 'z' && !event.shiftKey) {
+            event.preventDefault();
+            undoLastMutation();
+        }
+        if ((event.ctrlKey && event.key.toLowerCase() === 'y') || (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'z')) {
+            event.preventDefault();
+            redoLastMutation();
+        }
+    });
+    updateUndoRedoButtons();
 
     // Start realtime state stream for multi-user consistency
     store.startRealtimeStateListener();
@@ -71,10 +295,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Subscribe to state changes to update UI
     store.subscribe((state) => {
         scheduleRender(state);
+        refreshOfflineSyncControls();
     });
 
     // Initial Render
     scheduleRender(store.state);
+    refreshOfflineSyncControls();
 
     // Hide Loading
     document.getElementById('global-loader').classList.add('hidden');
@@ -95,6 +321,25 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // 4. Show a welcome notification
     showNotification('Success', 'Connected to data source successfully.', 'success');
+
+    window.addEventListener('beforeunload', () => {
+        if (!store.isBackendReady() || !currentUser?.accessToken || !currentUser?.sessionId) return;
+        const headers = {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${currentUser.accessToken}`
+        };
+        fetch(`${CONFIG.backendApiBase}/sessions/${currentUser.sessionId}/heartbeat`, {
+            method: 'POST',
+            keepalive: true,
+            headers,
+            body: JSON.stringify({ activeSeconds: sessionActiveSecondsBucket, idleSeconds: sessionIdleSecondsBucket })
+        }).catch(() => {});
+        fetch(`${CONFIG.backendApiBase}/sessions/${currentUser.sessionId}/end`, {
+            method: 'POST',
+            keepalive: true,
+            headers
+        }).catch(() => {});
+    });
 });
 
 // --- View Rendering Engine ---
@@ -256,6 +501,92 @@ function isOverdue(dateString) {
     return date < today;
 }
 
+function formatDurationCompact(totalSeconds) {
+    const safeSeconds = Math.max(0, Number(totalSeconds) || 0);
+    const hours = Math.floor(safeSeconds / 3600);
+    const minutes = Math.floor((safeSeconds % 3600) / 60);
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    return `${minutes}m`;
+}
+
+function renderDashboardHoursWidget(hoursByUser = {}) {
+    const container = document.getElementById('dashboard-hours-logged');
+    if (!container) return;
+
+    const entries = Object.entries(hoursByUser).sort((a, b) => (b[1] || 0) - (a[1] || 0));
+    if (!entries.length) {
+        container.innerHTML = '<p class="text-gray-500">No one has logged session time today.</p>';
+        return;
+    }
+
+    container.innerHTML = entries
+        .map(([user, seconds]) => {
+            const label = safe(user);
+            const value = safe(formatDurationCompact(seconds));
+            return `<div class="flex items-center justify-between rounded-md border border-gray-100 px-3 py-2"><span class="text-gray-700">${label}</span><span class="font-semibold text-gray-900">${value}</span></div>`;
+        })
+        .join('');
+}
+
+function renderDashboardHeatmap(hourMap = {}) {
+    const container = document.getElementById('dashboard-hours-heatmap');
+    if (!container) return;
+
+    const values = [];
+    for (let hour = 0; hour < 24; hour++) {
+        values.push(Number(hourMap[String(hour)] || 0));
+    }
+    const maxValue = Math.max(...values, 0);
+
+    if (maxValue === 0) {
+        container.innerHTML = '<p class="text-gray-500 col-span-6">No activity heatmap available.</p>';
+        return;
+    }
+
+    container.innerHTML = values
+        .map((value, hour) => {
+            const intensity = Math.max(0.15, value / maxValue);
+            const bg = `rgba(37, 99, 235, ${intensity.toFixed(2)})`;
+            const textClass = intensity > 0.5 ? 'text-white' : 'text-gray-700';
+            return `<div class="rounded px-2 py-2 text-center font-medium ${textClass}" style="background:${bg}" title="${hour}:00 - ${formatDurationCompact(value)}">${String(hour).padStart(2, '0')}</div>`;
+        })
+        .join('');
+}
+
+async function refreshDashboardOperationalData(force = false) {
+    if (!store.isBackendReady() || !currentUser?.accessToken) return;
+    const now = Date.now();
+    if (!force && now - dashboardOpsLastFetchAt < 20000) return;
+    if (dashboardOpsInFlight) return dashboardOpsInFlight;
+
+    dashboardOpsInFlight = (async () => {
+        try {
+            const token = currentUser.accessToken;
+            const [metricsRes, summaryRes] = await Promise.all([
+                backendApiFetch('/dashboard/metrics', {}, token),
+                backendApiFetch('/reports/sessions/summary', {}, token)
+            ]);
+
+            if (metricsRes?.ok) {
+                const metricsPayload = await metricsRes.json();
+                renderDashboardHoursWidget(metricsPayload?.data?.todayDurationSecondsByUser || {});
+            }
+
+            if (summaryRes?.ok) {
+                const summaryPayload = await summaryRes.json();
+                renderDashboardHeatmap(summaryPayload?.data?.heatmapDurationSecondsByHour || {});
+            }
+            dashboardOpsLastFetchAt = Date.now();
+        } catch (error) {
+            console.warn('Dashboard operational data refresh failed:', error);
+        } finally {
+            dashboardOpsInFlight = null;
+        }
+    })();
+
+    return dashboardOpsInFlight;
+}
+
 function showNotification(title, message, type = 'info') {
     const container = document.getElementById('notification-container');
     const toast = document.createElement('div');
@@ -348,6 +679,15 @@ function renderDashboard(state) {
 
     // 3. Activity Feed
     renderActivityFeed(tasks);
+
+    const sessionAnalyticsSection = document.getElementById('dashboard-session-analytics');
+    if (sessionAnalyticsSection) {
+        sessionAnalyticsSection.classList.toggle('hidden', !SHOW_SESSION_OPS_IN_DASHBOARD);
+    }
+
+    if (SHOW_SESSION_OPS_IN_DASHBOARD && store.isBackendReady() && currentUser?.accessToken) {
+        refreshDashboardOperationalData(false);
+    }
 }
 
 function createMetricCard(title, value, icon, iconBgClass) {
@@ -725,7 +1065,7 @@ function renderKanban(state) {
             ghostClass: 'sortable-ghost',
             delay: window.innerWidth < 768 ? 200 : 0, // delay on mobile to allow scrolling
             delayOnTouchOnly: true,
-            onEnd: function (evt) {
+            onEnd: async function (evt) {
                 const itemEl = evt.item;  // dragged HTMLElement
                 const toCol = evt.to;    // target list
 
@@ -733,7 +1073,27 @@ function renderKanban(state) {
                 const taskId = itemEl.getAttribute('data-id');
 
                 if (taskId && newStatus && evt.from !== toCol) {
-                    store.updateTaskStatus(taskId, newStatus);
+                    try {
+                        const beforeTask = store.state.tasks.find(item => parseInt(item.id) === parseInt(taskId));
+                        const beforeStatus = beforeTask?.status;
+                        await store.updateTaskStatus(taskId, newStatus);
+                        if (beforeStatus && beforeStatus !== newStatus) {
+                            pushHistoryEntry({
+                                type: 'status',
+                                taskId: parseInt(taskId),
+                                beforeStatus,
+                                afterStatus: newStatus
+                            });
+                        }
+                    } catch (error) {
+                        if (error?.detail?.code === 'TASK_LOCKED') {
+                            showNotification('Task Locked', error.detail.message || 'Another user is editing this task.', 'warning');
+                            await store.fetchTaskLocks().catch(() => {});
+                        } else {
+                            showNotification('Update Failed', 'Unable to change task status right now.', 'error');
+                        }
+                        await store.fetchFromBackend(true).catch(() => {});
+                    }
                 }
             },
         });
@@ -752,12 +1112,18 @@ function createKanbanCard(task) {
     const safeStaff = safe(task.staff || 'Unknown');
     const safeWaitingFor = safe(task.waitingFor || '');
     const safeStaffInitial = safe((task.staff || 'U').charAt(0));
+    const lock = getTaskLockInfo(task.id);
+    const lockBadge = lock
+        ? `<div class="absolute top-2 left-2 text-[10px] px-2 py-1 rounded-full bg-red-50 text-red-600 border border-red-200">Editing: ${safe(lock.lockedByName || lock.lockedBy)}</div>`
+        : '';
+    const lockClass = lock ? 'opacity-75 border-red-200' : '';
 
     return `
-        <div class="bg-white p-3 rounded-lg shadow-sm hover:shadow-md cursor-grab active:cursor-grabbing border items-center border-l-4 border-y-gray-200 border-r-gray-200 ${priorityColor} transition group relative" data-id="${safeTaskId}" onclick="openTaskModal(${safeTaskId})">
+        <div class="bg-white p-3 rounded-lg shadow-sm hover:shadow-md cursor-grab active:cursor-grabbing border items-center border-l-4 border-y-gray-200 border-r-gray-200 ${priorityColor} ${lockClass} transition group relative" data-id="${safeTaskId}" onclick="openTaskModal(${safeTaskId})">
+            ${lockBadge}
             
             <!-- Quick actions on hover -->
-            <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition flex gap-1 bg-white rounded-md shadow-sm border border-gray-100 p-0.5 z-10">
+            <div class="absolute ${lock ? 'top-10' : 'top-2'} right-2 opacity-0 group-hover:opacity-100 transition flex gap-1 bg-white rounded-md shadow-sm border border-gray-100 p-0.5 z-10">
                 <button class="p-1 text-gray-400 hover:text-primary rounded" onclick="event.stopPropagation(); openTaskModal(${safeTaskId})"><i data-lucide="edit-2" class="w-3.5 h-3.5"></i></button>
             </div>
 
@@ -830,9 +1196,17 @@ function renderAllTasksList(state) {
 
     document.getElementById('tasks-count-display').textContent = `Showing ${tasks.length} task${tasks.length !== 1 ? 's' : ''}`;
 
+    const visibleTaskIds = new Set(tasks.map(task => Number(task.id) || 0));
+    Array.from(selectedTaskIds).forEach(taskId => {
+        if (!visibleTaskIds.has(taskId)) {
+            selectedTaskIds.delete(taskId);
+        }
+    });
+
     let html = '';
     tasks.forEach(task => {
         const safeTaskId = Number(task.id) || 0;
+        const isChecked = selectedTaskIds.has(safeTaskId) ? 'checked' : '';
         const safeClient = safe(task.client);
         const safeProject = safe(task.project || '-');
         const safeTaskName = safe(task.task);
@@ -844,7 +1218,7 @@ function renderAllTasksList(state) {
         html += `
             <tr class="hover:bg-gray-50 transition border-b border-gray-100 group">
                 <td class="px-4 py-3 whitespace-nowrap">
-                    <input type="checkbox" class="task-checkbox rounded border-gray-300 text-primary cursor-pointer w-4 h-4 focus:ring-primary" value="${safeTaskId}">
+                    <input type="checkbox" class="task-checkbox rounded border-gray-300 text-primary cursor-pointer w-4 h-4 focus:ring-primary" value="${safeTaskId}" ${isChecked}>
                 </td>
                 <td class="px-4 py-3 whitespace-nowrap font-mono text-xs text-gray-500">
                     #${safeTaskId}
@@ -929,7 +1303,6 @@ function renderAllTasksList(state) {
 
     // Checkbox logic
     const selectAll = document.getElementById('selectAllTasks');
-    const bulkActionBtn = document.getElementById('btn-bulk-actions');
 
     // Clear old listener
     const newSelectAll = selectAll.cloneNode(true);
@@ -938,10 +1311,23 @@ function renderAllTasksList(state) {
     newSelectAll.addEventListener('change', (e) => {
         document.querySelectorAll('.task-checkbox').forEach(cb => {
             cb.checked = e.target.checked;
+            const taskId = parseInt(cb.value);
+            if (Number.isFinite(taskId)) {
+                if (e.target.checked) selectedTaskIds.add(taskId);
+                else selectedTaskIds.delete(taskId);
+            }
             updateRowHighlight(cb);
         });
         updateBulkActionsState();
     });
+
+    const allChecked = tasks.length > 0 && tasks.every(task => selectedTaskIds.has(Number(task.id) || 0));
+    const someChecked = tasks.some(task => selectedTaskIds.has(Number(task.id) || 0));
+    newSelectAll.checked = allChecked;
+    newSelectAll.indeterminate = someChecked && !allChecked;
+
+    document.querySelectorAll('.task-checkbox').forEach(cb => updateRowHighlight(cb));
+    updateBulkActionsState();
 
     // Delegated listener for individual checkboxes
     tbody.removeEventListener('change', handleCheckboxChange);
@@ -950,6 +1336,11 @@ function renderAllTasksList(state) {
 
 function handleCheckboxChange(e) {
     if (e.target.classList.contains('task-checkbox')) {
+        const taskId = parseInt(e.target.value);
+        if (Number.isFinite(taskId)) {
+            if (e.target.checked) selectedTaskIds.add(taskId);
+            else selectedTaskIds.delete(taskId);
+        }
         updateRowHighlight(e.target);
         updateBulkActionsState();
 
@@ -969,7 +1360,7 @@ function updateRowHighlight(checkbox) {
 }
 
 function updateBulkActionsState() {
-    const checkedCount = document.querySelectorAll('.task-checkbox:checked').length;
+    const checkedCount = selectedTaskIds.size;
     const btn = document.getElementById('btn-bulk-actions');
     btn.disabled = checkedCount === 0;
     if (checkedCount === 0) {
@@ -1167,8 +1558,23 @@ function createTodayCard(task) {
 // Global action handler
 window.markAsComplete = async function (taskId) {
     if (confirm('Mark this task as completed?')) {
-        await store.updateTaskStatus(taskId, 'Completed');
-        showNotification('Task Completed', `Task #${taskId} has been marked as completed.`, 'success');
+        const task = store.state.tasks.find(item => parseInt(item.id) === parseInt(taskId));
+        const previousStatus = task?.status;
+        try {
+            await store.updateTaskStatus(taskId, 'Completed');
+            if (previousStatus && previousStatus !== 'Completed') {
+                pushHistoryEntry({
+                    type: 'status',
+                    taskId: parseInt(taskId),
+                    beforeStatus: previousStatus,
+                    afterStatus: 'Completed'
+                });
+            }
+            showNotification('Task Completed', `Task #${taskId} has been marked as completed.`, 'success');
+        } catch (error) {
+            const message = error?.detail?.message || 'Unable to update this task now.';
+            showNotification('Update Failed', message, 'warning');
+        }
     }
 }
 
@@ -1242,9 +1648,14 @@ function setupFormHandlers() {
     document.getElementById('refresh-dashboard-btn').addEventListener('click', () => {
         document.getElementById('global-loader').classList.remove('hidden');
         store.init().then(() => {
+            refreshDashboardOperationalData(true);
             document.getElementById('global-loader').classList.add('hidden');
             showNotification('Refreshed', 'Dashboard data has been synchronized.', 'success');
         });
+    });
+
+    document.getElementById('btn-export-sessions-csv')?.addEventListener('click', async () => {
+        document.getElementById('btn-settings-export-sessions')?.click();
     });
 
     // Bulk actions
@@ -1264,13 +1675,24 @@ function setupFormHandlers() {
             e.preventDefault();
             document.getElementById('bulk-actions-menu').classList.add('hidden');
             const type = e.target.getAttribute('data-action');
-
-            const selectedIds = Array.from(document.querySelectorAll('.task-checkbox:checked')).map(cb => parseInt(cb.value));
+            const selectedIds = Array.from(selectedTaskIds.values());
 
             if (type === 'delete' && selectedIds.length > 0) {
                 if (confirm(`Are you sure you want to delete ${selectedIds.length} tasks?`)) {
-                    await store.deleteTasks(selectedIds);
-                    showNotification('Deleted', `${selectedIds.length} tasks deleted successfully.`, 'success');
+                    const deletedSnapshots = store.state.tasks
+                        .filter(task => selectedIds.includes(parseInt(task.id)))
+                        .map(task => cloneTask(task));
+                    try {
+                        await store.deleteTasks(selectedIds);
+                        selectedIds.forEach(id => selectedTaskIds.delete(id));
+                        if (deletedSnapshots.length) {
+                            pushHistoryEntry({ type: 'delete', tasks: deletedSnapshots });
+                        }
+                        showNotification('Deleted', `${selectedIds.length} tasks deleted successfully.`, 'success');
+                    } catch (error) {
+                        const message = error?.detail?.message || 'Bulk delete failed due to a conflict.';
+                        showNotification('Delete Failed', message, 'warning');
+                    }
                 }
             }
         });
@@ -1348,8 +1770,17 @@ function setupFormHandlers() {
 
 window.deleteSingleTask = async function (taskId) {
     if (confirm(`Are you sure you want to delete Task #${taskId}?`)) {
-        await store.deleteTasks([taskId]);
-        showNotification('Deleted', `Task #${taskId} deleted successfully.`, 'success');
+        const snapshot = cloneTask(store.state.tasks.find(task => parseInt(task.id) === parseInt(taskId)));
+        try {
+            await store.deleteTasks([taskId]);
+            if (snapshot) {
+                pushHistoryEntry({ type: 'delete', tasks: [snapshot] });
+            }
+            showNotification('Deleted', `Task #${taskId} deleted successfully.`, 'success');
+        } catch (error) {
+            const message = error?.detail?.message || 'Could not delete task right now.';
+            showNotification('Delete Failed', message, 'warning');
+        }
     }
 }
 
@@ -1415,13 +1846,30 @@ function initModals() {
 
         const formData = new FormData(form);
         const taskData = Object.fromEntries(formData.entries());
+        const existingTask = taskData.id
+            ? cloneTask(store.state.tasks.find(item => parseInt(item.id) === parseInt(taskData.id)))
+            : null;
 
         try {
-            await store.saveTask(taskData);
+            const savedTask = await store.saveTask(taskData);
+
+            if (savedTask && !existingTask) {
+                pushHistoryEntry({ type: 'create', task: cloneTask(savedTask) });
+            }
+
+            if (savedTask && existingTask) {
+                const latest = cloneTask(store.state.tasks.find(item => parseInt(item.id) === parseInt(savedTask.id)));
+                pushHistoryEntry({ type: 'update', before: existingTask, after: latest || cloneTask(savedTask) });
+            }
+
             closeTaskModal();
             showNotification('Success', `Task successfully saved.`, 'success');
         } catch (error) {
-            showNotification('Error', 'Failed to save task. Please try again.', 'error');
+            if (error?.detail?.code === 'TASK_LOCKED') {
+                showNotification('Task Locked', error.detail.message || 'Another user is editing this task.', 'warning');
+            } else {
+                showNotification('Error', 'Failed to save task. Please try again.', 'error');
+            }
             console.error(error);
         } finally {
             submitBtn.disabled = false;
@@ -1492,11 +1940,20 @@ function initModals() {
     });
 }
 
-window.openTaskModal = function (taskId = null, defaults = {}) {
+window.openTaskModal = async function (taskId = null, defaults = {}) {
     const modalBackdrop = document.getElementById('modal-backdrop');
     const taskModal = document.getElementById('modal-task');
     const form = document.getElementById('task-form');
     form.reset();
+
+    if (currentLockedTaskId && (!taskId || parseInt(taskId) !== parseInt(currentLockedTaskId))) {
+        await store.releaseTaskLock(currentLockedTaskId);
+        currentLockedTaskId = null;
+    }
+    if (taskLockRefreshTimer) {
+        clearInterval(taskLockRefreshTimer);
+        taskLockRefreshTimer = null;
+    }
 
     const fields = ['task-client', 'task-project', 'task-name', 'task-staff', 'task-status', 'task-priority', 'task-start-date', 'task-due-date', 'task-waiting', 'task-notes'];
     fields.forEach(f => {
@@ -1517,6 +1974,20 @@ window.openTaskModal = function (taskId = null, defaults = {}) {
     document.getElementById('task-parent-id').value = '';
 
     if (taskId) {
+        if (!defaults.viewOnly && store.isBackendReady()) {
+            try {
+                await store.acquireTaskLock(taskId, 75);
+                currentLockedTaskId = parseInt(taskId);
+                taskLockRefreshTimer = setInterval(() => {
+                    store.acquireTaskLock(taskId, 75).catch(() => {});
+                }, 30000);
+            } catch (error) {
+                defaults.viewOnly = true;
+                const lockMessage = error?.detail?.message || 'Another user is editing this task right now.';
+                showNotification('Task Locked', lockMessage, 'warning');
+            }
+        }
+
         // Edit mode
         document.getElementById('modal-task-title').textContent = 'Edit Task';
         document.getElementById('modal-task-id').textContent = `#${taskId}`;
@@ -1656,6 +2127,15 @@ function closeTaskModal() {
         taskModal.classList.add('hidden');
         document.body.classList.remove('modal-open');
     }, 300); // match duration-300
+
+    if (currentLockedTaskId) {
+        store.releaseTaskLock(currentLockedTaskId).catch(() => {});
+        currentLockedTaskId = null;
+    }
+    if (taskLockRefreshTimer) {
+        clearInterval(taskLockRefreshTimer);
+        taskLockRefreshTimer = null;
+    }
 }
 
 window.openClientModal = function (clientName = null) {
@@ -1771,11 +2251,25 @@ function buildSafeSession(user, options = {}) {
         initials: user.initials,
         sessionStart: options.sessionStart || now,
         provider: options.provider || 'legacy',
+        accessToken: options.accessToken || null,
         firebaseUid: options.firebaseUid || null,
         idToken: options.idToken || null,
         refreshToken: options.refreshToken || null,
         email: options.email || user.email || null
     };
+}
+
+async function backendApiFetch(path, options = {}, token = null) {
+    if (!CONFIG.backendApiBase) return null;
+    const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+    if (token) {
+        headers.Authorization = `Bearer ${token}`;
+    }
+    const response = await fetch(`${CONFIG.backendApiBase}${path}`, {
+        ...options,
+        headers
+    });
+    return response;
 }
 
 function persistSession(session) {
@@ -1804,7 +2298,50 @@ async function authenticateLegacyUser(usernameInput, passwordInput) {
     return buildSafeSession(user, { provider: 'legacy' });
 }
 
+async function authenticateWithBackend(usernameInput, passwordInput) {
+    if (!store.isBackendReady()) return null;
+
+    const response = await backendApiFetch('/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({
+            username: usernameInput,
+            password: passwordInput,
+            deviceInfo: { browser: navigator.userAgent, device: 'Web' }
+        })
+    });
+
+    if (!response || !response.ok) return null;
+    const payload = await response.json();
+    const data = payload?.data;
+    if (!data?.profile || !data?.accessToken) return null;
+
+    const session = buildSafeSession(data.profile, {
+        provider: 'backend',
+        accessToken: data.accessToken
+    });
+
+    const sessionResponse = await backendApiFetch(
+        '/sessions/start',
+        {
+            method: 'POST',
+            body: JSON.stringify({ browser: navigator.userAgent, device: 'Web' })
+        },
+        data.accessToken
+    );
+
+    if (sessionResponse && sessionResponse.ok) {
+        const sessionPayload = await sessionResponse.json();
+        session.sessionId = sessionPayload?.data?.id || null;
+    }
+
+    return session;
+}
+
 async function authenticateWithFirebaseOrLegacy(usernameInput, passwordInput) {
+    if (store.isBackendReady()) {
+        return authenticateWithBackend(usernameInput, passwordInput);
+    }
+
     const validUsers = store.state.authUsers || [];
     const matchedUser = validUsers.find(u => u.username.toLowerCase() === usernameInput.toLowerCase() || (u.email && u.email.toLowerCase() === usernameInput.toLowerCase()));
 
@@ -1824,23 +2361,122 @@ async function authenticateWithFirebaseOrLegacy(usernameInput, passwordInput) {
     return authenticateLegacyUser(usernameInput, passwordInput);
 }
 
-function setupAuth() {
+function bindSessionActivityListeners() {
+    if (sessionActivityBound) return;
+    const markActive = () => {
+        lastActivityAt = Date.now();
+    };
+
+    ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll'].forEach(eventName => {
+        window.addEventListener(eventName, markActive, { passive: true });
+    });
+    document.addEventListener('visibilitychange', markActive, { passive: true });
+    sessionActivityBound = true;
+}
+
+async function flushSessionHeartbeat(force = false) {
+    if (!store.isBackendReady() || !currentUser?.accessToken || !currentUser?.sessionId) return;
+
+    const now = Date.now();
+    const elapsedSeconds = Math.max(1, Math.floor((now - lastHeartbeatAt) / 1000));
+    lastHeartbeatAt = now;
+
+    const isIdle = (now - lastActivityAt) > 15 * 60 * 1000;
+    if (isIdle) {
+        sessionIdleSecondsBucket += elapsedSeconds;
+    } else {
+        sessionActiveSecondsBucket += elapsedSeconds;
+    }
+
+    const shouldSend = force || (sessionActiveSecondsBucket + sessionIdleSecondsBucket >= 60);
+    if (!shouldSend) return;
+
+    const payload = {
+        activeSeconds: sessionActiveSecondsBucket,
+        idleSeconds: sessionIdleSecondsBucket
+    };
+
+    sessionActiveSecondsBucket = 0;
+    sessionIdleSecondsBucket = 0;
+
+    try {
+        await backendApiFetch(`/sessions/${currentUser.sessionId}/heartbeat`, {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        }, currentUser.accessToken);
+    } catch (error) {
+        console.warn('Session heartbeat failed:', error);
+    }
+}
+
+function startSessionActivityTracking() {
+    if (!store.isBackendReady() || !currentUser?.sessionId) return;
+    bindSessionActivityListeners();
+
+    lastActivityAt = Date.now();
+    lastHeartbeatAt = Date.now();
+    sessionActiveSecondsBucket = 0;
+    sessionIdleSecondsBucket = 0;
+
+    if (sessionHeartbeatTimer) clearInterval(sessionHeartbeatTimer);
+    sessionHeartbeatTimer = setInterval(() => {
+        flushSessionHeartbeat(false);
+    }, 15000);
+}
+
+function stopSessionActivityTracking() {
+    if (sessionHeartbeatTimer) {
+        clearInterval(sessionHeartbeatTimer);
+        sessionHeartbeatTimer = null;
+    }
+    sessionActiveSecondsBucket = 0;
+    sessionIdleSecondsBucket = 0;
+}
+
+async function validateBackendSessionToken(session) {
+    if (!session?.accessToken) return false;
+    try {
+        const response = await backendApiFetch('/auth/me', {}, session.accessToken);
+        return !!(response && response.ok);
+    } catch (error) {
+        return false;
+    }
+}
+
+async function setupAuth() {
     const loginForm = document.getElementById('login-form');
     const errorMsg = document.getElementById('login-error-msg');
 
     // Check for existing session
     const storedSession = readSession();
     if (storedSession) {
-        const validUsers = store.state.authUsers || [];
-        const user = validUsers.find(u => u.username === storedSession.username);
-        if (user) {
-            currentUser = { ...storedSession, ...user, passwordHash: undefined };
-            store.startPresenceHeartbeat(currentUser.username);
-            store.startPresenceListener(() => updateHeaderProfile());
-            updateHeaderProfile();
+        if (store.isBackendReady()) {
+            const validBackendSession = await validateBackendSessionToken(storedSession);
+            if (!validBackendSession) {
+                localStorage.removeItem(SESSION_KEY);
+                currentUser = null;
+                window.location.hash = '#/login';
+            } else {
+                currentUser = { ...storedSession };
+                store.fetchFromBackend(true).catch(() => {});
+                store.startPresenceHeartbeat(currentUser.username);
+                store.startPresenceListener(() => updateHeaderProfile());
+                store.startTaskLockListener();
+                startSessionActivityTracking();
+                updateHeaderProfile();
+            }
         } else {
-            localStorage.removeItem(SESSION_KEY);
-            window.location.hash = '#/login';
+            const validUsers = store.state.authUsers || [];
+            const user = validUsers.find(u => u.username === storedSession.username);
+            if (user) {
+                currentUser = { ...storedSession, ...user, passwordHash: undefined };
+                store.startPresenceHeartbeat(currentUser.username);
+                store.startPresenceListener(() => updateHeaderProfile());
+                updateHeaderProfile();
+            } else {
+                localStorage.removeItem(SESSION_KEY);
+                window.location.hash = '#/login';
+            }
         }
     }
 
@@ -1867,8 +2503,14 @@ function setupAuth() {
                 currentUser = { ...session };
                 persistSession(currentUser);
 
+                if (store.isBackendReady()) {
+                    await store.fetchFromBackend();
+                    store.startTaskLockListener();
+                }
+
                 store.startPresenceHeartbeat(currentUser.username);
                 store.startPresenceListener(() => updateHeaderProfile());
+                startSessionActivityTracking();
 
                 window.location.hash = '#/dashboard';
                 updateHeaderProfile();
@@ -1895,12 +2537,30 @@ function setupAuth() {
     document.getElementById('btn-logout')?.addEventListener('click', async (e) => {
         e.preventDefault();
         
-        if (currentUser && currentUser.sessionStart) {
+        if (!store.isBackendReady() && currentUser && currentUser.sessionStart) {
             logSessionHistory(currentUser.username, currentUser.name, currentUser.sessionStart);
         }
         
         store.stopPresenceHeartbeat();
-        if(store.state && store.state.livePresence && currentUser) {
+        store.stopTaskLockListener();
+        if (currentLockedTaskId) {
+            await store.releaseTaskLock(currentLockedTaskId);
+            currentLockedTaskId = null;
+        }
+        if (taskLockRefreshTimer) {
+            clearInterval(taskLockRefreshTimer);
+            taskLockRefreshTimer = null;
+        }
+        await flushSessionHeartbeat(true);
+        stopSessionActivityTracking();
+        if (store.isBackendReady() && currentUser?.accessToken) {
+            try {
+                if (currentUser.sessionId) {
+                    await backendApiFetch(`/sessions/${currentUser.sessionId}/end`, { method: 'POST' }, currentUser.accessToken);
+                }
+                await backendApiFetch('/auth/logout', { method: 'POST' }, currentUser.accessToken);
+            } catch (error) { }
+        } else if (store.state && store.state.livePresence && currentUser) {
             store.state.livePresence[currentUser.username] = { online: false, lastSeen: new Date().toISOString() };
             if (store.isFirebaseReady()) {
                 try { await store.saveToFirebase(); } catch(err) {}
@@ -1963,6 +2623,13 @@ function updateHeaderProfile() {
     if (nameEl) nameEl.textContent = currentUser.name;
     if (roleEl) roleEl.textContent = currentUser.role;
     if (avatarEl) avatarEl.textContent = currentUser.initials;
+
+    const adminPortalBtn = document.getElementById('btn-open-admin-portal');
+    if (adminPortalBtn) {
+        const isAdmin = String(currentUser.role || '').toLowerCase() === 'admin';
+        const canOpenPortal = isAdmin && store.isBackendReady() && !!currentUser.accessToken;
+        adminPortalBtn.classList.toggle('hidden', !canOpenPortal);
+    }
     
     const presenceList = document.getElementById('header-presence-list');
     if (presenceList) {
@@ -1996,11 +2663,62 @@ function updateHeaderProfile() {
     }
 }
 
+function openAdminPortal() {
+    if (!currentUser || String(currentUser.role || '').toLowerCase() !== 'admin') {
+        showNotification('Access Denied', 'Admin role is required to open backend portal.', 'warning');
+        return;
+    }
+    if (!store.isBackendReady() || !currentUser.accessToken) {
+        showNotification('Backend Not Connected', 'Connect backend API to open admin portal.', 'warning');
+        return;
+    }
+
+    const baseApi = (CONFIG.backendApiBase || '').replace(/\/+$/, '');
+    const url = `${baseApi}/admin/portal`;
+
+    const portalWindow = window.open('', '_blank', 'noopener');
+
+    fetch(url, {
+        headers: { Authorization: `Bearer ${currentUser.accessToken}` }
+    })
+        .then(async (response) => {
+            if (!response.ok) {
+                if (response.status === 401 || response.status === 403) {
+                    window.dispatchEvent(new CustomEvent('werunops-auth-invalid', { detail: { status: response.status } }));
+                }
+                throw new Error(`Admin portal request failed (${response.status})`);
+            }
+            const html = await response.text();
+
+            if (portalWindow) {
+                portalWindow.document.open();
+                portalWindow.document.write(html);
+                portalWindow.document.close();
+            } else {
+                // Popup blocked: open portal content in the current tab.
+                document.open();
+                document.write(html);
+                document.close();
+            }
+        })
+        .catch(() => {
+            if (portalWindow) portalWindow.close();
+            showNotification('Portal Error', 'Unable to open backend admin portal.', 'error');
+        });
+}
+
 function setupProfileModal() {
     const modalProfile = document.getElementById('modal-profile');
     const btnOpen = document.getElementById('btn-open-profile');
     const form = document.getElementById('profile-form');
+    const adminPortalBtn = document.getElementById('btn-open-admin-portal');
     if (!modalProfile || !btnOpen) return;
+
+    adminPortalBtn?.addEventListener('click', (e) => {
+        e.preventDefault();
+        document.getElementById('header-user-panel')?.classList.add('hidden');
+        openAdminPortal();
+    });
 
     function closeProfile() {
         const modalBox = modalProfile.querySelector('.bg-white');
@@ -2012,7 +2730,7 @@ function setupProfileModal() {
         }, 300);
     }
 
-    btnOpen.addEventListener('click', (e) => {
+    btnOpen.addEventListener('click', async (e) => {
         e.preventDefault();
         document.getElementById('header-user-panel').classList.add('hidden');
         if (currentUser) {
@@ -2074,7 +2792,7 @@ function setupSettingsModal() {
         }, 300);
     }
 
-    btnOpen.addEventListener('click', (e) => {
+    btnOpen.addEventListener('click', async (e) => {
         e.preventDefault();
         document.getElementById('header-user-panel').classList.add('hidden');
         
@@ -2087,7 +2805,28 @@ function setupSettingsModal() {
         
         // Populate History
         const listEl = document.getElementById('login-history-list');
-        const historyData = store.state.loginHistory || [];
+        let historyData = store.state.loginHistory || [];
+
+        if (store.isBackendReady() && currentUser?.accessToken) {
+            try {
+                const sessionsResponse = await backendApiFetch('/sessions', {}, currentUser.accessToken);
+                if (sessionsResponse?.ok) {
+                    const payload = await sessionsResponse.json();
+                    const sessions = payload?.data || [];
+                    historyData = sessions.map(session => ({
+                        name: session.username,
+                        loginTime: session.loginTime,
+                        logoutTime: session.logoutTime || session.loginTime,
+                        duration: formatDurationCompact(session.durationSeconds || 0)
+                    }));
+                }
+            } catch (error) {
+                console.warn('Failed to fetch backend sessions for settings:', error);
+            }
+        }
+
+        refreshOfflineSyncControls();
+
         if (listEl) {
             if (historyData.length > 0) {
                 listEl.innerHTML = historyData.map(h => `
@@ -2136,6 +2875,28 @@ function setupSettingsModal() {
         document.getElementById('password-save-text').textContent = 'Updating...';
         
         try {
+            if (store.isBackendReady() && currentUser?.accessToken) {
+                const response = await backendApiFetch('/auth/change-password', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        currentPassword: currentP,
+                        newPassword: newP
+                    })
+                }, currentUser.accessToken);
+
+                if (!response || !response.ok) {
+                    errorMsg.textContent = 'Failed to update password on backend.';
+                    errorMsg.classList.remove('hidden');
+                    spinner.classList.add('hidden');
+                    document.getElementById('password-save-text').textContent = 'Update Password';
+                    return;
+                }
+
+                showNotification('Success', 'Password updated successfully.', 'success');
+                closeSettings();
+                return;
+            }
+
             const validUsers = store.state.authUsers || [];
             const userIndex = validUsers.findIndex(u => u.username === currentUser.username);
 
@@ -2197,6 +2958,15 @@ function setupSettingsModal() {
     const fbMsg = document.getElementById('firebase-msg');
     const fbBadge = document.getElementById('firebase-status-badge');
     const fbApiKeyInput = document.getElementById('firebase-api-key-input');
+    const backendApiInput = document.getElementById('backend-api-base-input');
+    const backendApiMsg = document.getElementById('backend-api-msg');
+    const firebaseSection = document.getElementById('settings-firebase-section');
+    const backendSection = document.getElementById('settings-backend-section');
+
+    if (!ALLOW_USER_ENDPOINT_CONFIG) {
+        if (firebaseSection) firebaseSection.classList.add('hidden');
+        if (backendSection) backendSection.classList.add('hidden');
+    }
 
     function updateFirebaseBadge() {
         if (!fbBadge) return;
@@ -2213,6 +2983,7 @@ function setupSettingsModal() {
     btnOpen.addEventListener('click', () => {
         if (fbUrlInput) fbUrlInput.value = CONFIG.firebaseUrl || '';
         if (fbApiKeyInput) fbApiKeyInput.value = CONFIG.firebaseWebApiKey || '';
+        if (backendApiInput) backendApiInput.value = CONFIG.backendApiBase || '';
         updateFirebaseBadge();
         if (typeof lucide !== 'undefined') setTimeout(() => lucide.createIcons(), 50);
     });
@@ -2284,6 +3055,107 @@ function setupSettingsModal() {
             fbMsg.className = 'text-sm font-medium mt-1 text-blue-600';
             fbMsg.classList.remove('hidden');
         }
+    });
+
+    document.getElementById('btn-save-backend-api')?.addEventListener('click', async () => {
+        const url = backendApiInput?.value?.trim() || '';
+        if (!url.startsWith('http://') && !url.startsWith('https://')) {
+            if (backendApiMsg) {
+                backendApiMsg.textContent = 'Please enter a valid backend API URL.';
+                backendApiMsg.className = 'text-sm font-medium mt-1 text-red-500';
+                backendApiMsg.classList.remove('hidden');
+            }
+            return;
+        }
+
+        setBackendApiBase(url);
+        if (backendApiMsg) {
+            backendApiMsg.textContent = 'Backend API base saved. Sign in again to activate backend mode.';
+            backendApiMsg.className = 'text-sm font-medium mt-1 text-green-600';
+            backendApiMsg.classList.remove('hidden');
+        }
+    });
+
+    document.getElementById('btn-clear-backend-api')?.addEventListener('click', () => {
+        clearBackendApiBase();
+        if (backendApiInput) backendApiInput.value = '';
+        if (backendApiMsg) {
+            backendApiMsg.textContent = 'Backend API disconnected.';
+            backendApiMsg.className = 'text-sm font-medium mt-1 text-yellow-600';
+            backendApiMsg.classList.remove('hidden');
+        }
+    });
+
+    document.getElementById('btn-settings-export-state')?.addEventListener('click', async () => {
+        try {
+            let data = null;
+            if (store.isBackendReady() && currentUser?.accessToken) {
+                const response = await backendApiFetch('/state/export', {}, currentUser.accessToken);
+                data = response?.ok ? (await response.json())?.data : null;
+            } else {
+                data = store.state;
+            }
+
+            const blob = new Blob([JSON.stringify(data || {}, null, 2)], { type: 'application/json' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `werunops-state-${new Date().toISOString().split('T')[0]}.json`;
+            a.click();
+            window.URL.revokeObjectURL(url);
+            showNotification('Export Complete', 'Full data exported as JSON.', 'success');
+        } catch (error) {
+            showNotification('Export Failed', 'Unable to export full data.', 'error');
+        }
+    });
+
+    document.getElementById('btn-settings-export-sessions')?.addEventListener('click', async () => {
+        if (store.isBackendReady() && currentUser?.accessToken) {
+            try {
+                const response = await fetch(`${CONFIG.backendApiBase}/exports/sessions.csv`, {
+                    headers: { Authorization: `Bearer ${currentUser.accessToken}` }
+                });
+                if (!response.ok) throw new Error('Failed to download CSV');
+                const csv = await response.text();
+                const blob = new Blob([csv], { type: 'text/csv' });
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `werunops-sessions-${new Date().toISOString().split('T')[0]}.csv`;
+                a.click();
+                window.URL.revokeObjectURL(url);
+                showNotification('Export Complete', 'Session history CSV downloaded.', 'success');
+            } catch (error) {
+                showNotification('Export Failed', 'Unable to download session history CSV.', 'error');
+            }
+            return;
+        }
+
+        const rows = (store.state.loginHistory || []).map(item => ({
+            username: item.username || '',
+            name: item.name || '',
+            loginTime: item.loginTime || '',
+            logoutTime: item.logoutTime || '',
+            duration: item.duration || ''
+        }));
+        const header = 'username,name,loginTime,logoutTime,duration\n';
+        const body = rows.map(row => [row.username, row.name, row.loginTime, row.logoutTime, row.duration].map(value => `"${String(value).replace(/"/g, '""')}"`).join(',')).join('\n');
+        const blob = new Blob([header + body], { type: 'text/csv' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `werunops-login-history-${new Date().toISOString().split('T')[0]}.csv`;
+        a.click();
+        window.URL.revokeObjectURL(url);
+        showNotification('Export Complete', 'Login history exported from local data.', 'success');
+    });
+
+    document.getElementById('btn-settings-retry-failed-sync')?.addEventListener('click', async () => {
+        await retryFailedOfflineSync();
+    });
+
+    document.getElementById('btn-settings-discard-failed-sync')?.addEventListener('click', () => {
+        discardFailedOfflineSync();
     });
 }
 

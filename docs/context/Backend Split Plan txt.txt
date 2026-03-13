@@ -1,0 +1,1654 @@
+WeRunOps Back-Office Operations Management System
+Complete Requirements Document (Version 2.0)
+Project Name: WeRunOps Kanban Board
+Version: 2.0 (Updated post-development)
+Date: March 12, 2026
+Status: Live (Production Issues Identified)
+Team: 3 users - Pritheeswarar, Eshwar, Sudharshan
+Deployment: GitHub Pages (pritheeswararshanmugam.github.io/werunops-kanban-board)
+
+Executive Summary
+A real-time collaborative task management system designed for roofing operations coordination across India (Coimbatore) and Australia. The application successfully replaced Excel-based workflows but revealed critical architectural limitations during production deployment.
+Current System Status
+? Working Features:
+* Task creation, editing, deletion (CRUD)
+* Client management (add, remove)
+* Multi-browser access
+* Firebase real-time sync (post-GitHub migration)
+* Basic Kanban board visualization
+? Critical Issues Identified:
+* No login session tracking or reporting
+* No real-time user presence indicators
+* Periodic full-page auto-refresh (unprofessional UX)
+* Firebase configuration reset on cache clear
+* No long-term data retention strategy (5+ years)
+* Multi-user sync delays and conflicts
+
+1. Project Background & Evolution
+Initial Requirements (March 10, 2026)
+* Replace Excel spreadsheet workflow
+* Support 3 concurrent users
+* Zero hosting cost (GitHub Pages)
+* Mobile-responsive design
+Production Reality (March 11-12, 2026)
+Technical Stack Migration:
+Attempt 1: GitHub Contents API ? 422 errors (SHA conflicts, base64 issues)
+Attempt 2: localStorage only ? No multi-user sync
+Solution: Firebase Realtime Database ? Working but limited
+Deployment Issues:
+1. Repo visibility change (private?public) broke GitHub Actions
+2. Jekyll workflow incompatible with static HTML/JS app
+3. 401 Unauthorized errors on configure-pages@v5
+4. Token permissions required regeneration
+
+2. User Roles & Authentication
+Users
+NameRoleLocationAccess LevelPritheeswararAdmin/UserCoimbatoreFullEshwar (Mubarak)UserCoimbatoreFullSudharshanUserAustraliaFull
+Authentication System
+Current Implementation:
+// Hardcoded users in app.js
+const validUsers = [
+{username: 'Pritheeswarar', password: '123456'},
+{username: 'Eshwar', password: '110495'},
+{username: 'Sudhar', password: '654321'}
+];
+Critical Limitations:
+* Passwords stored in plain text (client-side source code)
+* No password hashing
+* No session management
+* No "Remember Me" functionality
+* No password reset mechanism
+Required Improvements:
+1. Server-side authentication (Firebase Auth)
+2. Password hashing (bcrypt/SHA-256)
+3. JWT token-based sessions
+4. OAuth integration (GitHub/Google)
+5. Role-based permissions (future scalability)
+
+3. Data Architecture
+Firebase Realtime Database Structure
+{
+"werunops": {
+"state": {
+"tasks": [
+{
+"id": 1,
+"client": "JS Roofing",
+"project": "House 12",
+"task": "Create PO fascia",
+"staff": "Mubarak",
+"status": "In Progress",
+"priority": "High",
+"startDate": "2026-03-09",
+"dueDate": "2026-03-10",
+"waitingFor": "Supplier",
+"notes": "Waiting for supplier pricing",
+"createdAt": "2026-03-09T10:30:00Z",
+"updatedAt": "2026-03-10T14:20:00Z",
+"createdBy": "Pritheeswarar",
+"activityLog": [
+{
+"action": "created",
+"user": "Pritheeswarar",
+"timestamp": "2026-03-09T10:30:00Z"
+},
+{
+"action": "status_changed",
+"from": "New",
+"to": "In Progress",
+"user": "Mubarak",
+"timestamp": "2026-03-09T14:20:00Z"
+}
+]
+}
+],
+"config": {
+"clients": [
+{"id": 1, "name": "JS Roofing", "contact": "John", "email": "john@jsroofing.com", "phone": "555-0100"},
+{"id": 2, "name": "A to Z Roofing", "contact": "Alex", "email": "alex@atozroofing.com", "phone": "555-0200"}
+],
+"staff": ["Mubarak", "Eswar"],
+"statuses": ["New", "In Progress", "Waiting Client", "Waiting Supplier", "Follow Up", "Completed"],
+"priorities": ["High", "Medium", "Low"]
+},
+"livePresence": {
+"Pritheeswarar": {
+"online": true,
+"lastSeen": "2026-03-12T12:54:00Z",
+"browser": "Chrome",
+"ip": "103.x.x.x"
+}
+},
+"loginHistory": [
+{
+"username": "Eshwar",
+"loginTime": "2026-03-12T10:00:00Z",
+"logoutTime": "2026-03-12T12:30:00Z",
+"duration": "2h 30m",
+"browser": "Brave",
+"ip": "103.x.x.x"
+}
+]
+}
+}
+}
+Data Persistence Issues
+Current Problems:
+1. Firebase Config Dependency
+o Config hardcoded in firebase-config.js
+o Cache clear ? Manual re-configuration required
+o No environment variable support (static site)
+2. No Backup Strategy
+o Single Firebase project
+o No automated exports
+o No version history beyond Firebase retention
+3. Data Retention Concerns
+o Firebase free tier: 1GB storage, 10GB/month bandwidth
+o No guaranteed 5+ year retention
+o No compliance with data archival requirements
+Recommended Solutions:
+Option 1: Supabase (PostgreSQL + Realtime)
+* 500MB database (free)
+* Native auth with row-level security
+* SQL queries for complex reporting
+* Automatic backups
+* 10-year retention compliant
+Option 2: Firebase + Cloud Functions
+* Scheduled exports to Google Cloud Storage
+* Automated backups (daily/weekly)
+* BigQuery integration for analytics
+* Upgrade to paid plan for guarantees
+Option 3: Hybrid (Firebase + GitHub)
+* Firebase for real-time operations
+* Daily export to GitHub repo (backup)
+* Git history = version control
+* Free unlimited storage
+
+4. Critical Missing Features
+4.1 Login Session Tracking
+Current State: None
+Required Implementation:
+// Session tracking structure
+{
+"loginHistory": [
+{
+"id": "sess_12345",
+"username": "Eshwar",
+"loginTime": "2026-03-12T10:00:00Z",
+"logoutTime": "2026-03-12T12:30:00Z",
+"duration": 9000, // seconds
+"browser": "Brave 1.64",
+"device": "Windows 10",
+"ip": "103.x.x.x",
+"location": "Coimbatore, TN",
+"activeTime": 7200, // actual activity seconds
+"idleTime": 1800
+}
+]
+}
+Features Required:
+1. Session Start/End Recording
+o Login timestamp
+o Explicit logout timestamp
+o Browser close detection (beforeunload)
+2. Activity Monitoring
+o Mouse movement tracking
+o Keyboard activity detection
+o Idle timeout (15 minutes)
+o Active/idle time calculation
+3. Session Reports
+o User: "Sudharshan"
+o Date Range: "Mar 1-10, 2026"
+o Output: "Total: 25h 30m (Active: 22h 15m, Idle: 3h 15m)"
+o Export: CSV/PDF
+4. Dashboard Widget
+o Today's logged hours per user
+o Week comparison chart
+o Longest/shortest sessions
+o Peak activity hours heatmap
+4.2 Real-Time User Presence
+Current State: Non-existent
+Problem:
+* Pritheeswarar (Chrome) logs in ? Sudharshan (Brave) sees nothing
+* No "online now" indicators
+* Requires manual refresh
+Required Implementation:
+// Firebase presence system
+const presenceRef = firebase.database().ref('presence/' + userId);
+// When user connects
+presenceRef.set({
+online: true,
+lastSeen: firebase.database.ServerValue.TIMESTAMP,
+browser: navigator.userAgent,
+location: 'Coimbatore'
+});
+// On disconnect
+presenceRef.onDisconnect().set({
+online: false,
+lastSeen: firebase.database.ServerValue.TIMESTAMP
+});
+// Listen to all presence
+firebase.database().ref('presence').on('value', (snapshot) => {
+// Update UI with online users
+});
+UI Components:
+1. Header User List
+????????????????????????????????????????
+? ?? Pritheeswarar (You) ?
+? ?? Eshwar • Active now ?
+? ?? Sudharshan • Last seen 2h ago ?
+????????????????????????????????????????
+2. Task Assignment Indicators
+Assigned to: Mubarak ?? (online)
+3. Collaboration Warnings
+?? Eshwar is currently editing this task
+4.3 Auto-Refresh Issue
+Current Problem:
+// Unprofessional implementation
+setInterval(() => {
+location.reload(); // Full page reload every X seconds
+}, 30000);
+Impact:
+* Loses user input mid-typing
+* Resets scroll position
+* Disrupts workflow
+* Poor UX perception
+Correct Implementation:
+// Firebase real-time listeners (already correct approach)
+firebase.database().ref('werunops/state/tasks').on('value', (snapshot) => {
+// Only update changed data
+updateTasksUI(snapshot.val());
+});
+// Show non-disruptive update notification
+function showUpdateAvailable() {
+// Toast notification: "New updates available. Refresh?"
+// User clicks ? smooth data reload without page refresh
+}
+Rule: Never use location.reload() or window.location.href for data sync in a real-time app.
+
+5. Technology Stack (Updated)
+Current Implementation
+Frontend:
+* Vanilla JavaScript (ES6+)
+* HTML5 semantic markup
+* Tailwind CSS 3.4.17 (CDN)
+* Custom CSS design system
+Real-Time Sync:
+* Firebase Realtime Database 10.13.1
+* Firebase SDK (ES Modules from CDN)
+Deployment:
+* GitHub Pages
+* Custom workflow (static site)
+Dependencies:
+* Lucide Icons 0.577.0
+* Chart.js 4.5.1
+* SortableJS 1.15.7 (drag-drop)
+File Structure
+werunops-kanban-board/
+??? index.html # Main app (SPA)
+??? styles.css # Design system + custom styles
+??? app.js # Application logic (3,000+ lines)
+??? firebase-db.js # Firebase integration
+??? firebase-config.js # Firebase credentials (?? exposed)
+??? data/
+? ??? state.json # (Deprecated - was for GitHub API)
+??? .github/
+? ??? workflows/
+? ??? pages.yml # Deployment workflow
+??? README.md
+Security Concerns
+Current Vulnerabilities:
+1. Firebase API keys exposed in client code
+2. User passwords in plain text (source code)
+3. No input sanitization
+4. No CSRF protection
+5. No rate limiting
+Mitigation Required:
+// Firebase security rules
+{
+"rules": {
+"werunops": {
+".read": "auth != null",
+".write": "auth != null"
+}
+}
+}
+
+6. User Interface Requirements
+6.1 Dashboard View
+Current Status: Partially implemented
+Missing Components:
+* Session hours widget
+* User activity heatmap
+* Export functionality
+Layout:
+??????????????????????????????????????????????????????
+? DASHBOARD [Export] [??] ?
+??????????????????????????????????????????????????????
+? ????????????????????????????????????????? ?
+? ?Open: 11 ?Progress ?Complete ? Overdue ? ?
+? ? ?? ? 3 ?? ? 1 ?? ? 0 ?? ? ?
+? ????????????????????????????????????????? ?
+? ?
+? ???????????????????????????????????????????????? ?
+? ? Tasks by Status ? Workload by Staff ? ?
+? ? [Donut Chart] ? [Horizontal Bar] ? ?
+? ???????????????????????????????????????????????? ?
+? ?
+? ???????????????????????????????????????????????????
+? ? ?? Today's Hours Logged ??
+? ? • Pritheeswarar: 3h 45m ?? ??
+? ? • Eshwar: 2h 30m ?? ??
+? ? • Sudharshan: Not logged in ?? ??
+? ???????????????????????????????????????????????????
+??????????????????????????????????????????????????????
+6.2 Kanban Board
+Current Implementation: Working
+Improvements Needed:
+* Real-time cursors (show who's dragging)
+* Conflict resolution (two users drag same card)
+* Undo/redo functionality
+* Card templates
+6.3 Settings Panel
+Current State: Basic client/staff management
+Required Additions:
+????????????????????????????????????????
+? ?? SETTINGS [?] ?
+????????????????????????????????????????
+? ?? Account ?
+? • Change Password ?
+? • Two-Factor Authentication ?
+? • Active Sessions (3) ?
+? ?
+? ?? Data & Privacy ?
+? • Export All Data (JSON/CSV) ?
+? • Download Login History ?
+? • Clear Local Cache ?
+? • GDPR Data Request ?
+? ?
+? ?? Notifications ?
+? ? Email: Task assigned to me ?
+? ? Browser: Due date reminders ?
+? ? Slack: Daily summary ?
+? ?
+? ?? Appearance ?
+? Theme: ? Auto ? Light ? Dark ?
+? Density: ? Comfortable ? Compact ?
+? ?
+? ?? Advanced ?
+? • Firebase Connection Status ?
+? • Sync Logs ?
+? • Debug Mode ?
+? • API Diagnostics ?
+????????????????????????????????????????
+
+7. Performance Requirements
+Current Metrics (Need Improvement)
+MetricCurrentTargetStatusInitial Load~3s<2s?Task List Render~800ms<500ms?Firebase Read~200ms<100ms??Firebase Write~300ms<150ms??Kanban Drag FPS~45fps60fps??
+Optimization Strategies
+1. Code Splitting
+// Load charts only on Dashboard view
+const loadCharts = async () => {
+const ChartJS = await import('https://cdn.jsdelivr.net/npm/chart.js');
+return ChartJS;
+};
+2. Lazy Loading
+// Virtual scrolling for large task lists
+const virtualScroll = new VirtualScroller({
+itemHeight: 80,
+buffer: 5
+});
+3. Firebase Optimization
+// Index frequently queried fields
+{
+"rules": {
+"tasks": {
+".indexOn": ["status", "staff", "dueDate"]
+}
+}
+}
+4. Caching Strategy
+// Service Worker for offline support
+self.addEventListener('install', (event) => {
+event.waitUntil(
+caches.open('werunops-v1').then((cache) => {
+return cache.addAll([
+'/index.html',
+'/styles.css',
+'/app.js'
+]);
+})
+);
+});
+
+8. Mobile Responsiveness
+Current Status
+Tested: ? Not thoroughly tested
+Issues Identified:
+* Kanban board horizontal scroll clunky on mobile
+* Modal forms extend beyond viewport
+* Touch targets too small (<44px)
+* No swipe gestures
+Required Mobile Adaptations
+Breakpoints:
+/* Mobile First 
+
+/.kanban-board {/ Mobile: Vertical stack */
+flex-direction: column;
+}
+@media (min-width: 768px) {
+/* Tablet: 2 columns */
+.kanban-board {
+display: grid;
+grid-template-columns: repeat(2, 1fr);
+}
+}
+@media (min-width: 1024px) {
+/* Desktop: Horizontal scroll */
+.kanban-board {
+flex-direction: row;
+overflow-x: auto;
+}
+}
+Touch Interactions:
+// Swipe to delete task
+const hammer = new Hammer(taskCard);
+hammer.on('swipeleft', () => {
+showDeleteConfirmation(task);
+});
+
+9. Testing & Quality Assurance
+Manual Testing Checklist
+Functional Testing:
+* [x] Create task
+* [x] Edit task
+* [x] Delete task
+* [x] Drag task between columns
+* [x] Multi-browser sync (Chrome ? Brave)
+* [ ] Offline mode
+* [ ] Conflict resolution
+* [ ] Session timeout
+* [ ] Password reset
+Cross-Browser Testing:
+* [x] Chrome 145+ (Windows)
+* [ ] Firefox (latest)
+* [ ] Safari (macOS/iOS)
+* [x] Brave (Chromium-based)
+* [ ] Edge (Chromium)
+Device Testing:
+* [ ] iPhone 12/13/14 (iOS 14+)
+* [ ] Samsung Galaxy S21+ (Android 11+)
+* [ ] iPad Pro (iPadOS 15+)
+* [ ] Desktop (1920×1080, 2560×1440, 4K)
+Automated Testing (Future)
+// Jest unit tests
+describe('Task Management', () => {
+test('creates new task', () => {
+const task = createTask({
+client: 'JS Roofing',
+task: 'Test Task'
+});
+expect(task.id).toBeDefined();
+});
+});
+// Cypress E2E tests
+describe('Kanban Board', () => {
+it('drags task to In Progress', () => {
+cy.visit('/');
+cy.get('[data-task="1"]').drag('[data-column="in-progress"]');
+cy.get('[data-column="in-progress"]').should('contain', 'Task #1');
+});
+});
+
+10. Deployment & DevOps
+GitHub Pages Workflow (Fixed)
+.github/workflows/pages.yml
+name: Deploy WeRunOps to GitHub Pages
+on:
+push:
+branches: ["main"]
+workflow_dispatch:
+permissions:
+contents: read
+pages: write
+id-token: write
+concurrency:
+group: "pages"
+cancel-in-progress: false
+jobs:
+deploy:
+environment:
+name: github-pages
+url: ${{ steps.deployment.outputs.page_url }}
+runs-on: ubuntu-latest
+steps:
+- name: Checkout
+uses: actions/checkout@v4
+with:
+fetch-depth: 0
+  - name: Setup Pages
+    uses: actions/configure-pages@v5
+
+  - name: Upload artifact
+    uses: upload-pages-artifact@v3
+    with:
+      path: '.'
+
+  - name: Deploy to GitHub Pages
+    id: deployment
+    uses: actions/deploy-pages@v4
+
+Environment Configuration
+Problem: Firebase config exposed in source
+Solution Options:
+1. GitHub Secrets (Requires build step)
+* name: Inject Firebase Config
+run: |
+sed -i "s/API_KEY_PLACEHOLDER/${{ secrets.FIREBASE_API_KEY }}/g" firebase-config.js
+2. Netlify Environment Variables
+[build.environment]
+FIREBASE_API_KEY = "AIza..."
+FIREBASE_AUTH_DOMAIN = "werunops.firebaseapp.com"
+3. Firebase Hosting (Best for Firebase apps)
+firebase init hosting
+firebase deploy
+Monitoring & Analytics
+Current: None
+Required:
+// Google Analytics 4
+gtag('config', 'G-XXXXXXXXXX');
+// Custom events
+gtag('event', 'task_created', {
+'client': task.client,
+'priority': task.priority
+});
+// Error tracking (Sentry)
+Sentry.init({
+dsn: "https://xxx@sentry.io/xxx",
+beforeSend(event) {
+// Filter sensitive data
+return event;
+}
+});
+
+11. Security & Compliance
+Current Security Status: ?? CRITICAL ISSUES
+Vulnerabilities:
+1. ? Fixed: GitHub Actions 401 (token permissions)
+2. ? Active: Plain text passwords
+3. ? Active: Firebase config exposed
+4. ? Active: No input sanitization
+5. ? Active: No rate limiting
+6. ? Active: XSS vulnerability in task notes
+Immediate Security Fixes
+// 1. Input sanitization
+function sanitizeInput(input) {
+const div = document.createElement('div');
+div.textContent = input;
+return div.innerHTML;
+}
+// 2. Firebase security rules
+{
+"rules": {
+".read": "auth != null",
+".write": "auth != null &&
+newData.child('createdBy').val() === auth.uid"
+}
+}
+// 3. Rate limiting
+const rateLimiter = {
+requests: {},
+limit: 100, // per minute
+check(userId) {
+const now = Date.now();
+if (!this.requests[userId]) {
+this.requests[userId] = [];
+}
+this.requests[userId] = this.requests[userId]
+.filter(time => now - time < 60000);
+if (this.requests[userId].length >= this.limit) {
+  throw new Error('Rate limit exceeded');
+}
+this.requests[userId].push(now);
+
+}
+};
+Data Privacy (GDPR Compliance)
+Requirements:
+* User data export (JSON/CSV)
+* Right to deletion
+* Data processing consent
+* Cookie policy
+* Privacy policy page
+
+12. Cost Analysis
+Current Costs (March 2026)
+ServicePlanCostNotesGitHub PagesFree?0Unlimited static hostingFirebase Realtime DBSpark (Free)?01GB storage, 10GB bandwidthDomain (Optional)-?0Using github.io subdomainTotal Monthly?0
+Scaling Costs (Projected)
+Firebase Blaze Plan (Pay-as-you-go):
+Storage: ?0.10/GB/month (after 1GB)
+Bandwidth: ?0.06/GB (after 10GB/month)
+Operations: ?0.30/100K (after 50K/day)
+Estimated at 10 users: ?200-500/month
+Estimated at 50 users: ?1,500-3,000/month
+Alternative: Supabase (Recommended)
+FeatureFirebase FreeSupabase FreeWinnerDatabase1GB500MBFirebaseAuth?? NativeSupabaseReal-time?? PostgreSQLSupabaseBackups?? DailySupabaseSQL Queries??SupabaseRow-level SecurityLimited?SupabaseCost at 50 users~?3K?0 (stays free)Supabase
+
+13. Migration Roadmap
+Phase 1: Critical Fixes (Week 1)
+* [ ] Implement login session tracking
+* [ ] Add real-time user presence
+* [ ] Remove auto-refresh behavior
+* [ ] Add password hashing
+* [ ] Implement Firebase Auth
+Phase 2: Data Persistence (Week 2)
+* [ ] Setup automated daily backups
+* [ ] Implement export functionality
+* [ ] Add version history
+* [ ] Create data archival strategy
+Phase 3: UI/UX Improvements (Week 3)
+* [ ] Mobile responsiveness fixes
+* [ ] Add session hours dashboard
+* [ ] Implement offline mode
+* [ ] Add undo/redo functionality
+Phase 4: Performance & Security (Week 4)
+* [ ] Code splitting implementation
+* [ ] Service Worker caching
+* [ ] Input sanitization
+* [ ] Rate limiting
+* [ ] Security audit
+Phase 5: Advanced Features (Week 5-6)
+* [ ] Slack integration
+* [ ] Email notifications
+* [ ] Advanced analytics
+* [ ] File attachments
+* [ ] Comments system
+
+14. Lessons Learned
+Technical Challenges
+1. GitHub API is NOT a Database
+o 422 errors on every save attempt
+o SHA requirement creates race conditions
+o Base64 encoding overhead
+o Rate limits (5,000 requests/hour)
+o Conclusion: Use proper database (Firebase/Supabase)
+2. Static Site Limitations
+o No server-side logic
+o No environment variables
+o Credentials exposure risk
+o No backend validation
+o Conclusion: Consider Netlify Functions or Vercel Edge
+3. Real-Time Sync Complexity
+o Conflict resolution needed
+o Optimistic UI updates
+o Offline queue management
+o Network error handling
+o Conclusion: Use battle-tested SDKs (Firebase, Supabase)
+Development Best Practices
+Do:
+? Use Firebase/Supabase for real-time apps
+? Implement proper authentication from day 1
+? Test on actual mobile devices
+? Set up error tracking (Sentry)
+? Version control all changes
+? Document API decisions
+Don't:
+? Use GitHub Contents API as database
+? Hardcode credentials
+? Skip input validation
+? Assume desktop-only usage
+? Use full-page reloads for sync
+? Store passwords in plain text
+
+15. Future Enhancements
+Short-Term (3 months)
+* Push notifications (PWA)
+* Keyboard shortcuts
+* Dark mode
+* Task templates
+* Bulk operations
+Medium-Term (6 months)
+* Mobile native app (React Native)
+* Slack/Teams integration
+* Advanced analytics dashboard
+* File attachments (Firebase Storage)
+* Custom fields per client
+Long-Term (12 months)
+* AI-powered task suggestions
+* Voice commands (Web Speech API)
+* Multi-language support
+* White-label customization
+* Enterprise SSO
+
+16. Support & Maintenance
+Weekly Tasks
+* Monitor Firebase usage metrics
+* Review error logs (Sentry)
+* Check user feedback
+* Database backup verification
+* Performance monitoring
+Monthly Tasks
+* Security audit
+* Dependency updates (npm outdated)
+* Feature request review
+* Analytics review
+* Cost optimization
+Quarterly Tasks
+* Major version updates
+* Penetration testing
+* User training sessions
+* Documentation updates
+* Disaster recovery drill
+
+17. Team Contacts
+Project Owner
+* Name: Pritheeswarar Shanmugam
+* Location: Chennai, Tamil Nadu, India
+* Role: Admin, Developer, Product Owner
+Development Team
+* Pritheeswarar (Coimbatore)
+* Eshwar/Mubarak (Coimbatore)
+* Sudharshan (Australia)
+Tech Stack Expertise Required
+* Firebase Realtime Database
+* Vanilla JavaScript (ES6+)
+* GitHub Actions
+* Tailwind CSS
+* Progressive Web Apps
+
+18. Success Metrics
+Key Performance Indicators
+Usage Metrics:
+* Daily Active Users: Target 3/3 (100%)
+* Tasks Created/Day: Baseline TBD
+* Average Session Duration: Target >30 min
+* Mobile vs Desktop: Track ratio
+Performance Metrics:
+* Page Load Time: <2s
+* Time to Interactive: <3s
+* First Contentful Paint: <1s
+* Error Rate: <0.5%
+Business Metrics:
+* Excel workflow eliminated: ?
+* Cross-location collaboration: ?
+* Task completion rate: Measure
+* Overdue task reduction: Measure
+
+19. Risk Assessment
+RiskProbabilityImpactMitigationFirebase outageLowHighImplement offline mode, local cacheData lossLowCriticalDaily automated backups to GitHubSecurity breachMediumCriticalFirebase Auth, input sanitizationBrowser compatibilityLowMediumPolyfills, fallbacksMobile performanceMediumHighCode splitting, lazy loadingUser adoptionLowMediumTraining, documentationCost overrunLowLowMonitor Firebase usage, cap limitsDeveloper bus factorHighHighDocumentation, code comments
+
+20. Backend/Frontend Split Architecture Plan
+Executive Summary
+The WeRunOps application has reached a critical inflection point where architectural decisions will determine long-term viability. Current client-heavy monolithic SPA architecture creates fundamental limitations in security, analytics, and operational control. This document outlines comprehensive requirements for splitting into a proper 3-tier architecture.
+Decision Rationale: Backend is mandatory, not optional. The current Firebase-only approach cannot deliver session analytics, proper authentication, or production-grade security without server-side infrastructure.
+
+21. Architecture Analysis
+21.1 Current Architecture Limitations
+Critical Deficiencies Requiring Backend:
+LimitationBusiness ImpactNo Session AnalyticsCannot track "Sudharshan worked 28 hours Mar 1-10". Zero operational visibility.Manual Firebase ConfigEvery browser cache clear = manual re-entry. Non-scalable.Client-Side SecurityCredentials in source code. No rate limiting. No audit logs.No Login/Logout TrackingCannot generate time-based reports for billing/compliance.Firebase Rate Limits100 concurrent connections (free tier). Cannot scale beyond 10 users.Data Retention UncertaintyFirebase free tier has no SLA for 5-10 year retention.
+Table 1: Current architecture blocks core business requirements
+Architectural Pattern Assessment:
+PatternCurrent StateRequired StateData LayerFirebase only (NoSQL)PostgreSQL for analytics + Firebase for realtimeAuth LayerClient-side hash comparisonServer-side JWT with RLSBusiness LogicAll in browser (5000+ lines)API layer with validationSession ManagementlocalStorage onlyServer-tracked with analyticsConfigurationManual browser-basedServer environment variables
+21.2 Why Frontend-Only Cannot Work
+Technical Impossibilities:
+1. Session Duration Calculation
+o Requires: Server-side timestamp storage + delta calculation
+o Client-only: Can be manipulated, lost on clear cache
+o Verdict: Impossible client-only
+2. Cross-Browser Presence
+o Requires: WebSocket server or polling endpoint
+o Client-only: Firebase presence system exists but requires backend for analytics
+o Verdict: Partially possible, limited without backend
+3. Login Hours Report
+o Requires: SQL aggregation queries (SUM(duration), GROUP BY user)
+o Client-only: Cannot run complex queries on Firebase JSON structure
+o Verdict: Impossible client-only
+4. Secure Credential Storage
+o Requires: Server-side password hashing validation
+o Client-only: Exposed in source code (current state)
+o Verdict: Insecure without backend
+
+22. Proposed Architecture: 3-Tier Split
+22.1 Architecture Diagram
+???????????????????????????????????????????????????????????????????
+? FRONTEND LAYER ?
+? (GitHub Pages - Free) ?
+???????????????????????????????????????????????????????????????????
+? ?
+? ????????????????????????????????????????????????????????? ?
+? ? index.html ? app.js ? styles.css ? supabase.js ? ?
+? ? (Shell) ? (UI Logic) ? (Design) ? (Realtime) ? ?
+? ????????????????????????????????????????????????????????? ?
+? ? HTTP/WebSocket ?
+???????????????????????????????????????????????????????????????????
+???????????????????????????????????????????????????????????????????
+? BACKEND LAYER ?
+? (Vercel Serverless - Free) ?
+???????????????????????????????????????????????????????????????????
+? ?
+? ???????????????????????????????????????????????????????????? ?
+? ? /api/auth ? /api/tasks ? /api/ ? /api/analytics ? ?
+? ? ? ? clients ? ? ?
+? ? • Login ? • CRUD ? • Manage ? • Session reports ? ?
+? ? • Logout ? • Validate ? • List ? • Hours calculation ? ?
+? ? • Session ? • Search ? • Delete ? • Export CSV ? ?
+? ???????????????????????????????????????????????????????????? ?
+? ? SQL Queries ?
+???????????????????????????????????????????????????????????????????
+???????????????????????????????????????????????????????????????????
+? DATA LAYER ?
+? (Supabase PostgreSQL - Free) ?
+???????????????????????????????????????????????????????????????????
+? ?
+? ??????????????????????????????????????????????????????????? ?
+? ? users ? sessions ? tasks ? clients ? online_users? ?
+? ? ? ? ? ? ? ?
+? ? • Auth ? • Login/ ? • CRUD ? • Config ? • Presence ? ?
+? ? • Roles ? Logout ? • Status ? • Active ? • Heartbeat ? ?
+? ? • Hash ? • Hours ? • Notes ? ? ? ?
+? ??????????????????????????????????????????????????????????? ?
+? ?
+? + Row-Level Security (RLS) policies ?
+? + Realtime subscriptions (WebSocket) ?
+? + Automated daily backups ?
+???????????????????????????????????????????????????????????????????
+22.2 Responsibility Matrix
+LayerResponsibilitiesTechnologyFrontendUI rendering, user interactions, realtime displayVanilla JS, TailwindBackendAuth, validation, business logic, analyticsVercel FunctionsDatabaseData persistence, queries, realtime syncSupabase Postgres
+Table 2: Clear separation of concerns
+
+23. Database Schema Design
+23.1 Schema Requirements
+Design Principles:
+1. Normalization: 3NF for data integrity
+2. Performance: Indexes on frequently queried columns
+3. Security: RLS policies for multi-tenancy
+4. Auditability: Timestamps on all tables
+5. Scalability: Foreign keys with cascading rules
+23.2 Core Tables
+Users Table
+CREATE TABLE users (
+id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+username TEXT UNIQUE NOT NULL CHECK (char_length(username) >= 3),
+password_hash TEXT NOT NULL, -- bcrypt or SHA256
+email TEXT UNIQUE,
+role TEXT DEFAULT 'user' CHECK (role IN ('admin', 'user')),
+is_active BOOLEAN DEFAULT true,
+created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+last_login TIMESTAMP WITH TIME ZONE
+);
+-- Indexes
+CREATE INDEX idx_users_username ON users(username);
+CREATE INDEX idx_users_active ON users(is_active) WHERE is_active = true;
+-- RLS Policies
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can view own data" ON users FOR SELECT USING (auth.uid() = id);
+CREATE POLICY "Admins can view all" ON users FOR SELECT USING (auth.jwt() ->> 'role' = 'admin');
+Sessions Table (Core Requirement)
+CREATE TABLE sessions (
+id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+login_time TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+logout_time TIMESTAMP WITH TIME ZONE,
+duration_minutes INTEGER GENERATED ALWAYS AS (
+CASE
+WHEN logout_time IS NULL THEN NULL
+ELSE EXTRACT(EPOCH FROM (logout_time - login_time))/60
+END
+) STORED,
+ip_address INET,
+user_agent TEXT,
+browser TEXT,
+location TEXT, -- City/Country from IP
+session_token TEXT UNIQUE, -- JWT token reference
+is_active BOOLEAN DEFAULT true
+);
+-- Indexes for analytics queries
+CREATE INDEX idx_sessions_user_id ON sessions(user_id);
+CREATE INDEX idx_sessions_login_time ON sessions(login_time DESC);
+CREATE INDEX idx_sessions_active ON sessions(is_active) WHERE is_active = true;
+-- Composite index for date range queries
+CREATE INDEX idx_sessions_user_date ON sessions(user_id, login_time);
+Tasks Table
+CREATE TABLE tasks (
+id SERIAL PRIMARY KEY,
+client_id INTEGER REFERENCES clients(id) ON DELETE RESTRICT,
+project TEXT NOT NULL,
+task_name TEXT NOT NULL CHECK (char_length(task_name) >= 3),
+staff TEXT NOT NULL, -- Future: REFERENCES users(username)
+status TEXT NOT NULL CHECK (status IN (
+'New', 'In Progress', 'Waiting Client',
+'Waiting Supplier', 'Follow Up', 'Completed'
+)),
+priority TEXT NOT NULL CHECK (priority IN ('High', 'Medium', 'Low')),
+start_date DATE,
+due_date DATE NOT NULL,
+waiting_for TEXT,
+notes TEXT,
+created_by UUID REFERENCES users(id),
+created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+-- Indexes for filtering/sorting
+CREATE INDEX idx_tasks_status ON tasks(status);
+CREATE INDEX idx_tasks_staff ON tasks(staff);
+CREATE INDEX idx_tasks_due_date ON tasks(due_date);
+CREATE INDEX idx_tasks_client ON tasks(client_id);
+-- Full-text search
+CREATE INDEX idx_tasks_search ON tasks USING GIN(
+to_tsvector('english', task_name || ' ' || COALESCE(notes, ''))
+);
+-- Auto-update timestamp trigger
+CREATE OR REPLACE FUNCTION update_updated_at()
+RETURNS TRIGGER AS BEGINNEW.updated_a t=NOW();RETURNNEW;END; LANGUAGE plpgsql;
+CREATE TRIGGER tasks_updated_at
+BEFORE UPDATE ON tasks
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at();
+Clients Table
+CREATE TABLE clients (
+id SERIAL PRIMARY KEY,
+name TEXT UNIQUE NOT NULL,
+contact TEXT,
+email TEXT CHECK (email ~* '[1]+@[A-Za-z0-9.-]+.[A-Z|a-z]{2,}$'),
+phone TEXT,
+is_active BOOLEAN DEFAULT true,
+created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+-- Prevent deletion if tasks exist
+CREATE OR REPLACE FUNCTION prevent_client_deletion()
+RETURNS TRIGGER AS BEGINIFEXISTS(SELECT1FROMtasksWHEREclient_i d=OLD.id)THENRAISEEXCEPTION^' Cannotdeleteclientwithactivetasks^';ENDIF;RETURNOLD;END; LANGUAGE plpgsql;
+CREATE TRIGGER prevent_client_delete
+BEFORE DELETE ON clients
+FOR EACH ROW
+EXECUTE FUNCTION prevent_client_deletion();
+Online Presence Table (Realtime)
+CREATE TABLE online_users (
+user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+last_seen TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+browser TEXT,
+location TEXT
+);
+-- Auto-expire stale presence (15 minutes)
+CREATE OR REPLACE FUNCTION cleanup_stale_presence()
+RETURNS void AS BEGINDELETEFROMonline_u sersWHERElast_s een<NOW()-INTERVAL^' 15minutes^';END; LANGUAGE plpgsql;
+-- Scheduled job (Supabase pg_cron extension)
+SELECT cron.schedule(
+'cleanup-presence',
+'* * * * *', -- Every minute
+SELECTcleanup_s tale_p resence()
+);
+23.3 Analytics Views
+Session Hours Summary (Pre-calculated)
+CREATE MATERIALIZED VIEW user_session_summary AS
+SELECT
+u.username,
+u.email,
+COUNT(s.id) as total_sessions,
+SUM(s.duration_minutes) as total_minutes,
+AVG(s.duration_minutes) as avg_session_minutes,
+MAX(s.login_time) as last_login,
+MIN(s.login_time) as first_login
+FROM users u
+LEFT JOIN sessions s ON u.id = s.user_id AND s.logout_time IS NOT NULL
+GROUP BY u.id, u.username, u.email;
+-- Refresh strategy
+CREATE INDEX ON user_session_summary(username);
+REFRESH MATERIALIZED VIEW CONCURRENTLY user_session_summary;
+Daily Activity Report
+CREATE VIEW daily_activity AS
+SELECT
+DATE(login_time) as date,
+user_id,
+u.username,
+COUNT(*) as sessions_count,
+SUM(duration_minutes) as total_minutes,
+ROUND(SUM(duration_minutes)/60.0, 2) as total_hours
+FROM sessions s
+JOIN users u ON s.user_id = u.id
+WHERE logout_time IS NOT NULL
+GROUP BY DATE(login_time), user_id, u.username
+ORDER BY date DESC;
+23.4 Data Migration Strategy
+Phase 1: Schema Creation
+1. Create Supabase project
+2. Run all table creation scripts
+3. Verify foreign key constraints
+4. Test RLS policies
+Phase 2: Data Export from Firebase
+-- Export current Firebase JSON to CSV format
+-- Import using Supabase SQL Editor:
+COPY clients(name, contact, email, phone)
+FROM '/path/to/clients.csv'
+DELIMITER ',' CSV HEADER;
+COPY tasks(client_id, project, task_name, staff, status, priority, start_date, due_date, notes)
+FROM '/path/to/tasks.csv'
+DELIMITER ',' CSV HEADER;
+-- Migrate users (with password hash preservation)
+INSERT INTO users(username, password_hash, created_at)
+VALUES
+('Pritheeswarar', 'sha256_hash_here', '2026-03-09'),
+('Eshwar', 'sha256_hash_here', '2026-03-09'),
+('Sudhar', 'sha256_hash_here', '2026-03-09');
+Phase 3: Validation
+* Row count verification
+* Data type validation
+* Foreign key integrity check
+* Sample query testing
+
+24. Backend API Specification
+24.1 Authentication Endpoints
+POST /api/auth/login
+Request:
+{
+"username": "Sudhar",
+"password": "654321"
+}
+Response (Success):
+{
+"success": true,
+"token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+"user": {
+"id": "uuid-here",
+"username": "Sudhar",
+"role": "user"
+},
+"session_id": "session-uuid"
+}
+Backend Logic:
+1. Query user by username
+2. Verify password hash (bcrypt compare)
+3. Generate JWT token (expiry: 24h)
+4. Insert session record with login timestamp
+5. Update user.last_login
+6. Return token + user data
+POST /api/auth/logout
+Request Headers:
+Authorization: Bearer <token>
+Response:
+{
+"success": true,
+"session_duration": "2h 30m"
+}
+Backend Logic:
+1. Verify JWT token
+2. Extract session_id from token
+3. Update session.logout_time = NOW()
+4. Calculate duration (triggers stored generated column)
+5. Invalidate token (add to blacklist table if needed)
+24.2 Task Management Endpoints
+GET /api/tasks
+Query Parameters:
+* status: Filter by status
+* staff: Filter by assigned staff
+* client_id: Filter by client
+* search: Full-text search
+* overdue: Boolean (due_date < today)
+* limit: Pagination limit
+* offset: Pagination offset
+Response:
+{
+"tasks": [
+{
+"id": 1,
+"client": "JS Roofing",
+"project": "House 12",
+"task_name": "Create PO fascia",
+"staff": "Mubarak",
+"status": "In Progress",
+"priority": "High",
+"due_date": "2026-03-15",
+"notes": "Waiting for supplier",
+"created_at": "2026-03-09T10:30:00Z"
+}
+],
+"total": 45,
+"page": 1,
+"limit": 20
+}
+POST /api/tasks
+Request:
+{
+"client_id": 1,
+"project": "House 15",
+"task_name": "Install gutters",
+"staff": "Eswar",
+"status": "New",
+"priority": "Medium",
+"due_date": "2026-03-20",
+"notes": "Materials arrived"
+}
+Backend Validation:
+* Required fields present
+* client_id exists in clients table
+* status/priority valid enum values
+* due_date not in past
+* task_name minimum 3 characters
+Response:
+{
+"success": true,
+"task": {
+"id": 46,
+"client_id": 1,
+...
+}
+}
+PUT /api/tasks/:id
+Request (Partial Update):
+{
+"status": "Completed",
+"notes": "Finished installation"
+}
+Backend Logic:
+1. Verify task exists
+2. Validate changed fields
+3. Update only provided fields
+4. Auto-update updated_at trigger
+5. Return updated task
+DELETE /api/tasks/:id
+Response:
+{
+"success": true,
+"deleted_id": 46
+}
+24.3 Analytics Endpoints (New Capability)
+GET /api/analytics/sessions
+Query Parameters:
+* user: Username or "all"
+* start_date: ISO date (2026-03-01)
+* end_date: ISO date (2026-03-10)
+* format: "json" or "csv"
+Response:
+{
+"user": "Sudharshan",
+"period": {
+"start": "2026-03-01",
+"end": "2026-03-10"
+},
+"summary": {
+"total_sessions": 15,
+"total_hours": 28.5,
+"avg_session_hours": 1.9,
+"longest_session": "3h 15m",
+"shortest_session": "45m"
+},
+"daily_breakdown": [
+{
+"date": "2026-03-01",
+"sessions": 2,
+"hours": 3.5
+},
+...
+],
+"sessions": [
+{
+"id": "session-uuid",
+"login_time": "2026-03-01T09:00:00Z",
+"logout_time": "2026-03-01T11:30:00Z",
+"duration": "2h 30m",
+"browser": "Brave"
+}
+]
+}
+SQL Query (Backend):
+SELECT
+s.id,
+s.login_time,
+s.logout_time,
+s.duration_minutes,
+s.browser,
+u.username
+FROM sessions s
+JOIN users u ON s.user_id = u.id
+WHERE u.username = $1
+AND s.login_time >= $2
+AND s.login_time <= $3
+AND s.logout_time IS NOT NULL
+ORDER BY s.login_time DESC;
+GET /api/analytics/dashboard
+Response (Summary Metrics):
+{
+"today": {
+"users_online": 2,
+"users_logged_in_today": 3,
+"total_hours_today": 12.5,
+"tasks_created_today": 8,
+"tasks_completed_today": 5
+},
+"week": {
+"total_sessions": 45,
+"total_hours": 98.5,
+"avg_daily_hours": 14.1
+},
+"top_performers": [
+{"username": "Eshwar", "hours": 35.5},
+{"username": "Pritheeswarar", "hours": 32.0},
+{"username": "Sudhar", "hours": 31.0}
+]
+}
+24.4 Realtime Presence API
+POST /api/presence/heartbeat
+Request:
+{
+"user_id": "uuid",
+"browser": "Chrome 145",
+"location": "Coimbatore"
+}
+Backend Logic (Upsert):
+INSERT INTO online_users (user_id, last_seen, browser, location)
+VALUES ($1, NOW(), $2, $3)
+ON CONFLICT (user_id)
+DO UPDATE SET
+last_seen = NOW(),
+browser = EXCLUDED.browser,
+location = EXCLUDED.location;
+GET /api/presence/online
+Response:
+{
+"online_users": [
+{
+"username": "Pritheeswarar",
+"last_seen": "2026-03-12T13:15:00Z",
+"browser": "Chrome",
+"location": "Coimbatore"
+},
+{
+"username": "Eshwar",
+"last_seen": "2026-03-12T13:14:00Z",
+"browser": "Brave",
+"location": "Coimbatore"
+}
+],
+"total": 2
+}
+
+25. Frontend Integration Changes
+25.1 Code Refactoring Requirements
+Current Monolithic app.js (5000+ lines) ? Modular Structure
+Old FileNew FileResponsibilityapp.js (5000 lines)app.js (500 lines)Main entry, routingapi-client.jsBackend API callsui-dashboard.jsDashboard renderingui-kanban.jsKanban board logicui-tasks.jsTask list viewrealtime.jsSupabase subscriptionsfirebase-db.js(removed)Replaced by api-client.jsfirebase-config.js(removed)Backend env variables
+Table 3: Code reorganization for maintainability
+25.2 API Client Layer (New)
+api-client.js (Abstraction)
+Core Functions Required:
+// Authentication
+async login(username, password)
+async logout()
+async refreshToken()
+// Tasks
+async getTasks(filters)
+async createTask(taskData)
+async updateTask(id, updates)
+async deleteTask(id)
+// Analytics
+async getSessionReport(username, startDate, endDate)
+async getDashboardMetrics()
+// Presence
+async sendHeartbeat()
+async getOnlineUsers()
+Implementation Strategy:
+1. Centralized error handling
+2. Automatic token refresh (401 retry)
+3. Request/response interceptors
+4. Loading state management
+5. Offline queue for failed requests
+25.3 Realtime Subscription Changes
+Current (Firebase SDK):
+firebase.database().ref('tasks').on('value', callback);
+New (Supabase JS Client):
+supabase
+.channel('tasks')
+.on('postgres_changes', {
+event: '*',
+schema: 'public',
+table: 'tasks'
+}, (payload) => {
+if (payload.eventType === 'INSERT') handleNewTask(payload.new);
+if (payload.eventType === 'UPDATE') handleTaskUpdate(payload.new);
+if (payload.eventType === 'DELETE') handleTaskDelete(payload.old);
+})
+.subscribe();
+Presence Heartbeat (Frontend):
+// Send every 30 seconds
+setInterval(async () => {
+await fetch('/api/presence/heartbeat', {
+method: 'POST',
+headers: {
+'Authorization': Bearer ${getToken()},
+'Content-Type': 'application/json'
+},
+body: JSON.stringify({
+user_id: currentUser.id,
+browser: navigator.userAgent,
+location: 'Coimbatore' // From IP geolocation API
+})
+});
+}, 30000);
+25.4 New UI Components
+Session Analytics Dashboard Tab
+Requirements:
+1. Date range picker (start/end)
+2. User selector dropdown
+3. Summary cards (total hours, sessions, avg)
+4. Daily breakdown chart (Chart.js bar chart)
+5. Sessions table (sortable, exportable)
+6. Export CSV button
+
+26. Hosting & Deployment Strategy
+26.1 Service Selection Criteria
+RequirementGitHub PagesVercelSupabaseCost?0 (unlimited)?0 (100GB/mo)?0 (500MB DB)DeploymentGit pushGit pushSQL migrationCustom Domain? Yes? YesN/A (API)SSL Certificate? Auto? Auto? AutoBuild ProcessNone (static)Next.js/NodeN/AEnvironment Vars? No? Yes? YesAPI Routes? No? Serverless? PostgREST
+Table 4: Service capabilities comparison
+26.2 Deployment Architecture
+Production Stack:
+Frontend: GitHub Pages (pritheeswararshanmugam.github.io/werunops)
+Backend: Vercel (werunops-api.vercel.app)
+Database: Supabase (werunops.supabase.co)
+Environment Variables (Vercel):
+SUPABASE_URL=https://werunops.supabase.co
+SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+SUPABASE_SERVICE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9... (secret)
+JWT_SECRET=random-secret-string-here
+FRONTEND_URL=https://pritheeswararshanmugam.github.io/werunops
+CORS Configuration (Vercel vercel.json):
+{
+"headers": [
+{
+"source": "/api/(.*)",
+"headers": [
+{ "key": "Access-Control-Allow-Origin", "value": "https://pritheeswararshanmugam.github.io" },
+{ "key": "Access-Control-Allow-Methods", "value": "GET,POST,PUT,DELETE,OPTIONS" },
+{ "key": "Access-Control-Allow-Headers", "value": "Authorization,Content-Type" }
+]
+}
+]
+}
+26.3 CI/CD Pipeline
+GitHub Actions Workflow (Frontend):
+Already configured for GitHub Pages deployment. No changes needed.
+Vercel Auto-Deployment:
+Automatic on git push to main branch. Configuration:
+1. Connect GitHub repo to Vercel
+2. Set environment variables in Vercel dashboard
+3. Enable auto-deploy on push
+Database Migration Strategy:
+-- migrations/001_initial_schema.sql
+-- migrations/002_add_sessions_table.sql
+-- migrations/003_add_indexes.sql
+-- Run via Supabase CLI:
+supabase db push
+Version control: Store all migrations in Git repository.
+
+27. Security Implementation
+27.1 Authentication Flow
+Step-by-Step Process:
+1. User Login (Frontend)
+o Collect username/password
+o POST to /api/auth/login
+o Receive JWT token
+2. Token Storage (Frontend)
+o Store in localStorage.token
+o Set expiry timestamp
+o Include in all API requests
+3. Token Verification (Backend)
+o Extract from Authorization: Bearer <token> header
+o Verify signature using JWT_SECRET
+o Check expiry timestamp
+o Return 401 if invalid
+4. Session Tracking (Backend)
+o On login: INSERT into sessions table
+o On logout: UPDATE logout_time
+o On token refresh: Extend session
+27.2 Row-Level Security Policies
+Users Table:
+-- Users can only view their own data
+CREATE POLICY "Users view own data" ON users
+FOR SELECT
+USING (auth.uid() = id);
+-- Admins can view all users
+CREATE POLICY "Admins view all" ON users
+FOR SELECT
+USING (auth.jwt() ->> 'role' = 'admin');
+Tasks Table:
+-- All authenticated users can view tasks
+CREATE POLICY "Authenticated users view tasks" ON tasks
+FOR SELECT
+USING (auth.role() = 'authenticated');
+-- Users can only edit tasks assigned to them or created by them
+CREATE POLICY "Users edit own tasks" ON tasks
+FOR UPDATE
+USING (
+staff = (SELECT username FROM users WHERE id = auth.uid())
+OR created_by = auth.uid()
+);
+-- Only admins can delete tasks
+CREATE POLICY "Admins delete tasks" ON tasks
+FOR DELETE
+USING (auth.jwt() ->> 'role' = 'admin');
+Sessions Table:
+-- Users can only view their own sessions
+CREATE POLICY "Users view own sessions" ON sessions
+FOR SELECT
+USING (user_id = auth.uid());
+-- Admins can view all sessions (for reports)
+CREATE POLICY "Admins view all sessions" ON sessions
+FOR SELECT
+USING (auth.jwt() ->> 'role' = 'admin');
+27.3 Input Validation & Sanitization
+Backend Validation Schema (Example using Zod):
+const createTaskSchema = z.object({
+client_id: z.number().int().positive(),
+project: z.string().min(1).max(200),
+task_name: z.string().min(3).max(500),
+staff: z.string().min(1).max(100),
+status: z.enum(['New', 'In Progress', 'Waiting Client', 'Waiting Supplier', 'Follow Up', 'Completed']),
+priority: z.enum(['High', 'Medium', 'Low']),
+due_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+notes: z.string().max(5000).optional()
+});
+// Usage in API route
+const validated = createTaskSchema.parse(req.body);
+XSS Prevention:
+* All user input escaped in SQL queries (parameterized queries)
+* Frontend: Sanitize before rendering (DOMPurify library)
+* Backend: Strip HTML tags from notes field
+SQL Injection Prevention:
+* Use parameterized queries only (Supabase client handles this)
+* Never concatenate user input into SQL strings
+27.4 Rate Limiting
+Vercel Edge Middleware:
+// middleware.js
+import { Ratelimit } from '@upstash/ratelimit';
+import { Redis } from '@upstash/redis';
+const ratelimit = new Ratelimit({
+redis: Redis.fromEnv(),
+limiter: Ratelimit.slidingWindow(100, '1 m'), // 100 requests per minute
+});
+export async function middleware(request) {
+const ip = request.ip ?? '127.0.0.1';
+const { success } = await ratelimit.limit(ip);
+if (!success) {
+return new Response('Rate limit exceeded', { status: 429 });
+}
+return NextResponse.next();
+}
+Alternative (Simpler):
+* Supabase built-in rate limiting (10 requests/second per IP)
+* No additional configuration needed
+
+28. Cost Analysis & Scalability
+28.1 Free Tier Limits
+ServiceFree TierCurrent UsageHeadroomGitHub PagesUnlimited static files, 100GB bandwidth/mo~5MB files, <1GB/mo99% availableVercel100GB bandwidth, 100GB-hrs compute, 1000 builds/mo~0.5GB/mo, 30 builds/mo95% availableSupabase500MB DB, 2GB file storage, 5GB bandwidth, 50K realtime msgs/day~50MB DB, ~1GB/mo bandwidth90% available
+Table 5: Service utilization at 3 users
+28.2 Scaling Projections
+10 Users (Expected Growth):
+* Database: ~150MB (300 rows per user)
+* Bandwidth: ~3GB/month
+* Realtime: ~5K messages/day
+* Cost: Still ?0
+50 Users (Hypothetical):
+* Database: ~750MB (approaching 500MB limit)
+* Bandwidth: ~15GB/month (Supabase: 5GB free)
+* Realtime: ~25K messages/day
+* Cost: Supabase Pro plan required (?1,590/month or $20/month)
+Cost Triggers:
+ThresholdServiceFree LimitPaid Plan CostDatabase > 500MBSupabase500MB?1,590/mo (8GB)Bandwidth > 100GBVercel100GB?1,590/mo (1TB)Realtime > 50K/daySupabase50K msgsIncluded in Pro
+Recommendation: Stay free for 3-10 users indefinitely. Re-evaluate at 20+ users.
+28.3 Performance Targets
+MetricTargetMeasurementAPI Response Time<200ms (p95)Vercel AnalyticsDatabase Query<100ms (p95)Supabase DashboardFrontend Load<2s (LCP)LighthouseRealtime Latency<500msCustom trackingSession Report Generation<3sBackend timing
+Table 6: Performance benchmarks
+
+29. Implementation Timeline
+29.1 7-Day Sprint Plan
+Day 1: Backend Foundation (4 hours)
+* [x] Create Supabase project
+* [x] Run schema creation scripts
+* [x] Test RLS policies
+* [x] Create Vercel project
+* [x] Setup environment variables
+Day 2: API Development (6 hours)
+* [ ] Implement /api/auth/login endpoint
+* [ ] Implement /api/auth/logout endpoint
+* [ ] Implement /api/tasks CRUD endpoints
+* [ ] Implement /api/analytics/sessions endpoint
+* [ ] Test all endpoints with Postman
+Day 3: Data Migration (3 hours)
+* [ ] Export Firebase data to CSV
+* [ ] Import users, clients, tasks to Supabase
+* [ ] Verify data integrity
+* [ ] Update foreign keys
+Day 4: Frontend Refactoring (6 hours)
+* [ ] Create api-client.js abstraction
+* [ ] Replace Firebase calls with API calls
+* [ ] Add Supabase JS client for realtime
+* [ ] Update authentication flow
+* [ ] Test login/logout
+Day 5: Realtime & Presence (4 hours)
+* [ ] Implement presence heartbeat
+* [ ] Add online user indicators in header
+* [ ] Test multi-browser presence
+* [ ] Verify task realtime updates
+Day 6: Analytics Dashboard (5 hours)
+* [ ] Create new "Analytics" tab in UI
+* [ ] Build session report interface
+* [ ] Add date range picker
+* [ ] Integrate Chart.js charts
+* [ ] Add CSV export
+Day 7: Testing & Deployment (4 hours)
+* [ ] End-to-end testing all flows
+* [ ] Mobile responsiveness check
+* [ ] Deploy backend to Vercel
+* [ ] Deploy frontend to GitHub Pages
+* [ ] User acceptance testing
+Total Effort: 32 hours (4 days at 8 hours/day)
+29.2 Risk Mitigation
+Risk 1: Data Loss During Migration
+* Mitigation: Keep Firebase running in parallel for 1 week
+* Rollback plan: Revert frontend to Firebase calls
+Risk 2: API Performance Issues
+* Mitigation: Load test with 100 concurrent users before launch
+* Fallback: Implement caching layer (Redis)
+Risk 3: User Adoption Resistance
+* Mitigation: Zero UI changes for users
+* Training: 5-minute demo video showing new Analytics tab
+Risk 4: CORS Issues
+* Mitigation: Configure CORS properly in vercel.json before deployment
+* Test: Cross-origin requests from GitHub Pages domain
+
+30. Success Criteria
+30.1 Functional Requirements (Must-Have)
+* [ ] Users can login with existing credentials
+* [ ] Session tracking records login/logout times
+* [ ] Session reports show hours worked per user
+* [ ] Realtime presence shows who is online
+* [ ] All existing features work (tasks, kanban, clients)
+* [ ] Data persists correctly in Supabase
+* [ ] Export session data to CSV
+30.2 Non-Functional Requirements
+Performance:
+* [ ] API response time <200ms (p95)
+* [ ] Frontend load time <2s
+* [ ] No full-page auto-refresh needed
+* [ ] Realtime updates <500ms latency
+Security:
+* [ ] Passwords hashed (bcrypt/SHA256)
+* [ ] JWT token authentication
+* [ ] RLS policies enforced
+* [ ] Input validation on all endpoints
+Reliability:
+* [ ] 99.9% uptime (Vercel/Supabase SLA)
+* [ ] Automated daily backups
+* [ ] Error logging (Sentry integration)
+Usability:
+* [ ] Zero UI changes for existing users
+* [ ] New Analytics tab intuitive
+* [ ] Mobile responsive
+* [ ] Offline mode graceful fallback
+30.3 Business Metrics
+Operational Visibility:
+* [ ] Can answer "How many hours did Sudharshan work last week?"
+* [ ] Can generate monthly timesheets
+* [ ] Can track login patterns (peak hours)
+* [ ] Can identify inactive users
+Cost Efficiency:
+* [ ] Total monthly cost: ?0
+* [ ] Scalable to 10 users without cost increase
+* [ ] Exit strategy defined if scaling beyond free tier
+
+31. Conclusion & Recommendations
+31.1 Architecture Decision Record
+Decision: Split WeRunOps into 3-tier architecture (Frontend + Backend + Database)
+Rationale:
+1. Session Analytics Impossible Client-Only - Core business requirement
+2. Security Requires Server-Side Auth - Current credentials exposed
+3. Scalability Needs Proper Database - Firebase free tier limits
+4. Operational Control Requires Backend - Configuration, logging, monitoring
+Alternatives Considered:
+OptionProsConsVerdictKeep Firebase-onlyNo migration effortCannot deliver analytics? RejectedAdd Firebase FunctionsStays in Firebase ecosystemMore expensive, limited?? PartialSupabase + VercelFull SQL, free tier, scalableMigration effort? Selected
+31.2 Implementation Approach
+Recommended: Phased rollout with parallel systems
+Week 1: Backend development + testing
+Week 2: Frontend integration + parallel Firebase
+Week 3: User testing + data validation
+Week 4: Full cutover + Firebase deprecation
+Rollback Strategy:
+* Keep Firebase credentials active for 1 month
+* Frontend feature flag to toggle backends
+* Automated sync Firebase ? Supabase during transition
+31.3 Post-Migration Roadmap
+Immediate Next Features (Week 5-8):
+1. Email notifications (Supabase Auth email templates)
+2. Advanced task filtering (SQL full-text search)
+3. Task comments and attachments (Supabase Storage)
+4. Custom dashboards per user (saved filters)
+Long-Term (3-6 months):
+1. Mobile native app (React Native + same backend)
+2. Slack integration (webhooks to backend)
+3. AI task suggestions (OpenAI API + task history)
+4. Multi-workspace support (organizations table)
+31.4 Final Recommendation
+Proceed with Backend Split - It's Not Optional
+The current architecture is fundamentally incapable of delivering:
+* Login hours tracking and reports
+* Secure authentication without exposed credentials
+* Scalable realtime presence beyond 10 users
+* 5-10 year data retention guarantees
+Backend is mandatory, not a "nice to have."
+Proposed Stack (Vercel + Supabase) Justification:
+? Meets all functional requirements
+? Zero cost at current scale (3 users)
+? Proven production reliability
+? Extensive documentation and community
+? Built-in security (RLS, JWT)
+? Clear scaling path
+Implementation Risk: Low
+Time Investment: 32 hours
+Return on Investment: Infinite (unlocks core business value)
+Approval Recommended: Proceed with 7-day implementation sprint.
+
+References
+[1] Supabase Documentation. Supabase Inc., 2026. https://supabase.com/docs
+[2] Vercel Serverless Functions Guide. Vercel Inc., 2026. https://vercel.com/docs/functions
+[3] PostgreSQL Row-Level Security. PostgreSQL Global Development Group, 2026. https://postgresql.org/docs/current/ddl-rowsecurity.html
+[4] JWT Best Practices. IETF RFC 8725, 2020. https://tools.ietf.org/html/rfc8725
+[5] OWASP API Security Top 10. OWASP Foundation, 2023. https://owasp.org/API-Security/
+[6] Firebase Migration Guide to Supabase. Supabase Inc., 2025. https://supabase.com/docs/guides/migrations/firebase
+
+1. A-Za-z0-9._%+- ??

@@ -134,6 +134,16 @@
 
         <!-- User Menu -->
         <div class="flex items-center gap-3 justify-end w-auto sm:w-52 lg:w-60 relative z-[60]">
+            <!-- Undo / Redo -->
+            <div class="hidden sm:flex items-center gap-1">
+                <button id="btn-undo" class="text-gray-500 hover:text-gray-700 transition disabled:opacity-40" aria-label="Undo" title="Undo (Ctrl+Z)" disabled>
+                    <i data-lucide="undo-2" class="w-5 h-5"></i>
+                </button>
+                <button id="btn-redo" class="text-gray-500 hover:text-gray-700 transition disabled:opacity-40" aria-label="Redo" title="Redo (Ctrl+Y)" disabled>
+                    <i data-lucide="redo-2" class="w-5 h-5"></i>
+                </button>
+            </div>
+
             <!-- Search -->
             <div class="relative">
                 <button class="text-gray-500 hover:text-gray-700 transition" aria-label="Search" id="header-search-btn">
@@ -203,6 +213,8 @@
                     <div class="py-1">
                         <a href="#" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" id="btn-open-profile"><i
                                 data-lucide="user" class="w-4 h-4 inline mr-2 text-gray-400"></i> Profile</a>
+                        <a href="#" class="hidden px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" id="btn-open-admin-portal"><i
+                            data-lucide="shield-check" class="w-4 h-4 inline mr-2 text-gray-400"></i> Admin Portal</a>
                         <a href="#" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" id="btn-open-settings"><i
                                 data-lucide="settings" class="w-4 h-4 inline mr-2 text-gray-400"></i> Settings</a>
                     </div>
@@ -221,6 +233,13 @@
     </header>
 
     <!-- Main Content Area -->
+    <div id="offline-banner" class="hidden fixed top-16 inset-x-0 z-30 bg-amber-100 text-amber-800 border-b border-amber-200 text-sm px-4 py-2">
+        <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-center gap-2">
+            <span id="offline-banner-text">Offline mode active. Changes are saved locally and will sync when online.</span>
+            <button id="btn-retry-offline-sync" type="button" class="hidden px-2 py-1 text-xs rounded border border-amber-300 bg-white hover:bg-amber-50">Retry Failed Sync</button>
+            <button id="btn-discard-offline-failed" type="button" class="hidden px-2 py-1 text-xs rounded border border-amber-300 bg-white hover:bg-amber-50">Discard Failed</button>
+        </div>
+    </div>
     <main class="mt-16 min-h-[calc(100vh-4rem)] overflow-y-auto w-full relative hidden" id="main-content">
 
         <!-- Loading Overlay -->
@@ -245,6 +264,25 @@
             <!-- Metrics Cards -->
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8" id="dashboard-metrics">
                 <!-- Injected via JS -->
+            </div>
+
+            <!-- Session Hours + Activity Heatmap -->
+            <div id="dashboard-session-analytics" class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+                <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+                    <div class="flex items-center justify-between mb-3">
+                        <h3 class="font-semibold text-gray-800">Today's Hours Logged</h3>
+                        <button id="btn-export-sessions-csv" class="text-xs px-2.5 py-1.5 border border-gray-300 rounded-md hover:bg-gray-50 transition">Export CSV</button>
+                    </div>
+                    <div id="dashboard-hours-logged" class="space-y-2 text-sm text-gray-600">
+                        <p class="text-gray-500">No session data yet.</p>
+                    </div>
+                </div>
+                <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+                    <h3 class="font-semibold text-gray-800 mb-3">Peak Activity Hours</h3>
+                    <div id="dashboard-hours-heatmap" class="grid grid-cols-6 gap-2 text-xs text-gray-600">
+                        <p class="text-gray-500 col-span-6">No activity heatmap available.</p>
+                    </div>
+                </div>
             </div>
 
             <!-- Charts Grid -->
@@ -886,7 +924,7 @@
                 <div class="flex-1 overflow-y-auto p-6 md:p-8 space-y-8 custom-scrollbar">
                     
                     <!-- Change Password Section -->
-                    <section>
+                    <section id="settings-firebase-section">
                         <h4 class="text-base font-semibold text-gray-800 border-b border-gray-200 pb-2 mb-4">Change Password</h4>
                         <form id="password-form" class="space-y-4 max-w-md">
                             <div>
@@ -910,7 +948,7 @@
                     </section>
 
                     <!-- Login History Section -->
-                    <section>
+                    <section id="settings-backend-section">
                         <h4 class="text-base font-semibold text-gray-800 border-b border-gray-200 pb-2 mb-4 flex items-center gap-2">
                             <i data-lucide="clock" class="w-4 h-4 text-gray-500"></i> Login History
                         </h4>
@@ -966,12 +1004,56 @@
                         </div>
                     </section>
 
+                    <!-- Backend API Configuration -->
+                    <section>
+                        <h4 class="text-base font-semibold text-gray-800 border-b border-gray-200 pb-2 mb-4 flex items-center gap-2">
+                            <i data-lucide="server" class="w-4 h-4 text-gray-500"></i> Backend API
+                        </h4>
+                        <p class="text-xs text-gray-500 mb-3">Set a backend API base URL to enable server-side auth, session reporting, and exports.</p>
+                        <div class="space-y-3 max-w-md">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1" for="backend-api-base-input">API Base URL</label>
+                                <input type="url" id="backend-api-base-input" placeholder="http://127.0.0.1:9000/api/v1" class="w-full border-gray-300 border rounded-lg px-4 py-2 focus:border-primary focus:ring-1 focus:ring-primary outline-none transition text-sm">
+                            </div>
+                            <div class="flex gap-2">
+                                <button type="button" id="btn-save-backend-api" class="px-4 py-2 bg-primary hover:bg-primary-hover text-white rounded-lg font-medium transition shadow-sm text-sm flex items-center gap-1">
+                                    <i data-lucide="save" class="w-4 h-4"></i> Save
+                                </button>
+                                <button type="button" id="btn-clear-backend-api" class="px-4 py-2 border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 font-medium transition shadow-sm text-sm flex items-center gap-1">
+                                    <i data-lucide="trash-2" class="w-4 h-4"></i> Disconnect
+                                </button>
+                            </div>
+                            <div id="backend-api-msg" class="hidden text-sm font-medium mt-1"></div>
+                        </div>
+                    </section>
+
+                    <!-- Data Export Section -->
+                    <section>
+                        <h4 class="text-base font-semibold text-gray-800 border-b border-gray-200 pb-2 mb-4 flex items-center gap-2">
+                            <i data-lucide="download" class="w-4 h-4 text-gray-500"></i> Data & Privacy
+                        </h4>
+                        <div class="mb-3 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700 flex flex-wrap items-center gap-2">
+                            <span>Offline Queue:</span>
+                            <span class="font-semibold" id="settings-offline-queue-count">0</span>
+                            <span class="text-gray-400">|</span>
+                            <span>Failed Actions:</span>
+                            <span class="font-semibold" id="settings-offline-failed-count">0</span>
+                            <button type="button" id="btn-settings-retry-failed-sync" class="ml-auto px-3 py-1.5 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-100 text-xs disabled:opacity-40" disabled>Retry Failed Sync</button>
+                            <button type="button" id="btn-settings-discard-failed-sync" class="px-3 py-1.5 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-100 text-xs disabled:opacity-40" disabled>Discard Failed</button>
+                        </div>
+                        <div class="flex flex-wrap gap-2">
+                            <button type="button" id="btn-settings-export-state" class="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium transition shadow-sm text-sm">Export Full Data (JSON)</button>
+                            <button type="button" id="btn-settings-export-sessions" class="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium transition shadow-sm text-sm">Download Login History (CSV)</button>
+                        </div>
+                    </section>
+
                 </div>
             </div>
         </div>
 
         <!-- Scripts -->
         <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+        <script src="config.js"></script>
         <script src="github-api.js"></script>
         <script src="app.js"></script>
         <script>

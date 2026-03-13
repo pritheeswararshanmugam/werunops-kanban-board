@@ -1,0 +1,1073 @@
+{
+  "users": {
+    "Eshwar": {
+      "username": "Eshwar",
+      "passwordHash": "f91b043302878951ce9258214033bd206ea0a92bb88931ba8bb6edb01b57d020",
+      "name": "Pritheeswarar",
+      "role": "Admin",
+      "initials": "P"
+    },
+    "Mubarak": {
+      "username": "Mubarak",
+      "passwordHash": "23fece5f1a2a4452cba0113271736a16d241201bef2fd15b72819582e13fb267",
+      "name": "Mubarak",
+      "role": "Manager",
+      "initials": "M"
+    },
+    "Sudhar": {
+      "username": "Sudhar",
+      "passwordHash": "56e89b1d6436fc86deea34dbb0306af59c40d29f20bc20b6efcb001cee9ae71b",
+      "name": "Sudharshan",
+      "role": "User",
+      "initials": "S"
+    }
+  },
+  "tasks": [
+    {
+      "client": "JS Roofing",
+      "project": "House 12",
+      "task": "Create PO fascia",
+      "staff": "Mubarak",
+      "status": "In Progress",
+      "priority": "High",
+      "startDate": "2026-03-09",
+      "dueDate": "2026-03-12",
+      "waitingFor": "Supplier",
+      "notes": "Waiting for supplier pricing",
+      "parentId": null,
+      "id": 1,
+      "createdAt": "2026-03-12T08:57:28.300542Z",
+      "updatedAt": "2026-03-12T08:57:28.300542Z",
+      "createdBy": "Pritheeswarar",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-03-12T08:57:28.300542Z"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "client": "JS Roofing",
+      "project": "House 77",
+      "task": "Validate API smoke",
+      "staff": "Mubarak",
+      "status": "New",
+      "priority": "Low",
+      "startDate": "2026-03-12",
+      "dueDate": "2026-03-15",
+      "waitingFor": "",
+      "notes": "",
+      "parentId": null,
+      "id": 2,
+      "createdAt": "2026-03-12T08:57:28.348592Z",
+      "updatedAt": "2026-03-12T08:57:28.348592Z",
+      "createdBy": "Pritheeswarar",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-03-12T08:57:28.348592Z"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "client": "JS Roofing",
+      "project": "House 77",
+      "task": "Validate API smoke",
+      "staff": "Mubarak",
+      "status": "New",
+      "priority": "Low",
+      "startDate": "2026-03-12",
+      "dueDate": "2026-03-15",
+      "waitingFor": "",
+      "notes": "",
+      "parentId": null,
+      "id": 3,
+      "createdAt": "2026-03-12T09:03:45.860063Z",
+      "updatedAt": "2026-03-12T09:03:45.860063Z",
+      "createdBy": "Pritheeswarar",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-03-12T09:03:45.860063Z"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "client": "JS Roofing",
+      "project": "House 77",
+      "task": "Validate API smoke",
+      "staff": "Mubarak",
+      "status": "New",
+      "priority": "Low",
+      "startDate": "2026-03-12",
+      "dueDate": "2026-03-15",
+      "waitingFor": "",
+      "notes": "",
+      "parentId": null,
+      "id": 4,
+      "createdAt": "2026-03-13T06:29:13.572286Z",
+      "updatedAt": "2026-03-13T06:29:13.572286Z",
+      "createdBy": "Pritheeswarar",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-03-13T06:29:13.572286Z"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "client": "JS Roofing",
+      "project": "House 77",
+      "task": "Validate API smoke",
+      "staff": "Mubarak",
+      "status": "New",
+      "priority": "Low",
+      "startDate": "2026-03-12",
+      "dueDate": "2026-03-15",
+      "waitingFor": "",
+      "notes": "",
+      "parentId": null,
+      "id": 5,
+      "createdAt": "2026-03-13T06:29:44.255722Z",
+      "updatedAt": "2026-03-13T06:29:44.255722Z",
+      "createdBy": "Pritheeswarar",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-03-13T06:29:44.255722Z"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "client": "JS Roofing",
+      "project": "House 77",
+      "task": "Validate API smoke",
+      "staff": "Mubarak",
+      "status": "New",
+      "priority": "Low",
+      "startDate": "2026-03-12",
+      "dueDate": "2026-03-15",
+      "waitingFor": "",
+      "notes": "",
+      "parentId": null,
+      "id": 6,
+      "createdAt": "2026-03-13T06:39:17.056384Z",
+      "updatedAt": "2026-03-13T06:39:17.056384Z",
+      "createdBy": "Pritheeswarar",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-03-13T06:39:17.056384Z"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "client": "JS Roofing",
+      "project": "House 77",
+      "task": "Validate API smoke",
+      "staff": "Mubarak",
+      "status": "New",
+      "priority": "Low",
+      "startDate": "2026-03-12",
+      "dueDate": "2026-03-15",
+      "waitingFor": "",
+      "notes": "",
+      "parentId": null,
+      "id": 7,
+      "createdAt": "2026-03-13T06:54:19.290497Z",
+      "updatedAt": "2026-03-13T06:54:19.290497Z",
+      "createdBy": "Pritheeswarar",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-03-13T06:54:19.290497Z"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "client": "JS Roofing",
+      "project": "House 77",
+      "task": "Validate API smoke",
+      "staff": "Mubarak",
+      "status": "New",
+      "priority": "Low",
+      "startDate": "2026-03-12",
+      "dueDate": "2026-03-15",
+      "waitingFor": "",
+      "notes": "",
+      "parentId": null,
+      "id": 8,
+      "createdAt": "2026-03-13T06:55:04.306888Z",
+      "updatedAt": "2026-03-13T06:55:04.306888Z",
+      "createdBy": "Pritheeswarar",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-03-13T06:55:04.306888Z"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "client": "JS Roofing",
+      "project": "House Lock",
+      "task": "Lock contention test",
+      "staff": "Mubarak",
+      "status": "New",
+      "priority": "Medium",
+      "startDate": "2026-03-13",
+      "dueDate": "2026-03-20",
+      "waitingFor": "",
+      "notes": "",
+      "parentId": null,
+      "id": 9,
+      "createdAt": "2026-03-13T06:55:04.323525Z",
+      "updatedAt": "2026-03-13T06:55:04.323525Z",
+      "createdBy": "Pritheeswarar",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-03-13T06:55:04.323525Z"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "client": "JS Roofing",
+      "project": "House 77",
+      "task": "Validate API smoke",
+      "staff": "Mubarak",
+      "status": "New",
+      "priority": "Low",
+      "startDate": "2026-03-12",
+      "dueDate": "2026-03-15",
+      "waitingFor": "",
+      "notes": "",
+      "parentId": null,
+      "id": 10,
+      "createdAt": "2026-03-13T07:02:38.344459Z",
+      "updatedAt": "2026-03-13T07:02:38.344459Z",
+      "createdBy": "Pritheeswarar",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-03-13T07:02:38.344459Z"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "client": "JS Roofing",
+      "project": "House Lock",
+      "task": "Lock contention test",
+      "staff": "Mubarak",
+      "status": "New",
+      "priority": "Medium",
+      "startDate": "2026-03-13",
+      "dueDate": "2026-03-20",
+      "waitingFor": "",
+      "notes": "",
+      "parentId": null,
+      "id": 11,
+      "createdAt": "2026-03-13T07:02:38.361120Z",
+      "updatedAt": "2026-03-13T07:02:38.361120Z",
+      "createdBy": "Pritheeswarar",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-03-13T07:02:38.361120Z"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "client": "JS Roofing",
+      "project": "House 77",
+      "task": "Validate API smoke",
+      "staff": "Mubarak",
+      "status": "New",
+      "priority": "Low",
+      "startDate": "2026-03-12",
+      "dueDate": "2026-03-15",
+      "waitingFor": "",
+      "notes": "",
+      "parentId": null,
+      "id": 12,
+      "createdAt": "2026-03-13T07:08:00.342153Z",
+      "updatedAt": "2026-03-13T07:08:00.342153Z",
+      "createdBy": "Pritheeswarar",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-03-13T07:08:00.342153Z"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "client": "JS Roofing",
+      "project": "House Lock",
+      "task": "Lock contention test",
+      "staff": "Mubarak",
+      "status": "New",
+      "priority": "Medium",
+      "startDate": "2026-03-13",
+      "dueDate": "2026-03-20",
+      "waitingFor": "",
+      "notes": "",
+      "parentId": null,
+      "id": 13,
+      "createdAt": "2026-03-13T07:08:00.357637Z",
+      "updatedAt": "2026-03-13T07:08:00.357637Z",
+      "createdBy": "Pritheeswarar",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-03-13T07:08:00.357637Z"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "client": "JS Roofing",
+      "project": "House 77",
+      "task": "Validate API smoke",
+      "staff": "Mubarak",
+      "status": "New",
+      "priority": "Low",
+      "startDate": "2026-03-12",
+      "dueDate": "2026-03-15",
+      "waitingFor": "",
+      "notes": "",
+      "parentId": null,
+      "id": 14,
+      "createdAt": "2026-03-13T07:10:06.593875Z",
+      "updatedAt": "2026-03-13T07:10:06.593875Z",
+      "createdBy": "Pritheeswarar",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-03-13T07:10:06.593875Z"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "client": "JS Roofing",
+      "project": "House Lock",
+      "task": "Lock contention test",
+      "staff": "Mubarak",
+      "status": "New",
+      "priority": "Medium",
+      "startDate": "2026-03-13",
+      "dueDate": "2026-03-20",
+      "waitingFor": "",
+      "notes": "",
+      "parentId": null,
+      "id": 15,
+      "createdAt": "2026-03-13T07:10:06.607681Z",
+      "updatedAt": "2026-03-13T07:10:06.607681Z",
+      "createdBy": "Pritheeswarar",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-03-13T07:10:06.607681Z"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "client": "JS Roofing",
+      "project": "House 77",
+      "task": "Validate API smoke",
+      "staff": "Mubarak",
+      "status": "New",
+      "priority": "Low",
+      "startDate": "2026-03-12",
+      "dueDate": "2026-03-15",
+      "waitingFor": "",
+      "notes": "",
+      "parentId": null,
+      "id": 16,
+      "createdAt": "2026-03-13T07:17:39.081990Z",
+      "updatedAt": "2026-03-13T07:17:39.081990Z",
+      "createdBy": "Pritheeswarar",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-03-13T07:17:39.081990Z"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "client": "JS Roofing",
+      "project": "House Lock",
+      "task": "Lock contention test",
+      "staff": "Mubarak",
+      "status": "New",
+      "priority": "Medium",
+      "startDate": "2026-03-13",
+      "dueDate": "2026-03-20",
+      "waitingFor": "",
+      "notes": "",
+      "parentId": null,
+      "id": 17,
+      "createdAt": "2026-03-13T07:17:39.097011Z",
+      "updatedAt": "2026-03-13T07:17:39.097011Z",
+      "createdBy": "Pritheeswarar",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-03-13T07:17:39.097011Z"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "client": "JS Roofing",
+      "project": "House 77",
+      "task": "Validate API smoke",
+      "staff": "Mubarak",
+      "status": "New",
+      "priority": "Low",
+      "startDate": "2026-03-12",
+      "dueDate": "2026-03-15",
+      "waitingFor": "",
+      "notes": "",
+      "parentId": null,
+      "id": 18,
+      "createdAt": "2026-03-13T07:18:33.726538Z",
+      "updatedAt": "2026-03-13T07:18:33.726538Z",
+      "createdBy": "Pritheeswarar",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-03-13T07:18:33.726538Z"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "client": "JS Roofing",
+      "project": "House Lock",
+      "task": "Lock contention test",
+      "staff": "Mubarak",
+      "status": "New",
+      "priority": "Medium",
+      "startDate": "2026-03-13",
+      "dueDate": "2026-03-20",
+      "waitingFor": "",
+      "notes": "",
+      "parentId": null,
+      "id": 19,
+      "createdAt": "2026-03-13T07:18:33.753691Z",
+      "updatedAt": "2026-03-13T07:18:33.753691Z",
+      "createdBy": "Pritheeswarar",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-03-13T07:18:33.753691Z"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "client": "JS Roofing",
+      "project": "House 77",
+      "task": "Validate API smoke",
+      "staff": "Mubarak",
+      "status": "New",
+      "priority": "Low",
+      "startDate": "2026-03-12",
+      "dueDate": "2026-03-15",
+      "waitingFor": "",
+      "notes": "",
+      "parentId": null,
+      "id": 20,
+      "createdAt": "2026-03-13T07:29:03.540232Z",
+      "updatedAt": "2026-03-13T07:29:03.540232Z",
+      "createdBy": "Pritheeswarar",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-03-13T07:29:03.540232Z"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "client": "JS Roofing",
+      "project": "House Lock",
+      "task": "Lock contention test",
+      "staff": "Mubarak",
+      "status": "New",
+      "priority": "Medium",
+      "startDate": "2026-03-13",
+      "dueDate": "2026-03-20",
+      "waitingFor": "",
+      "notes": "",
+      "parentId": null,
+      "id": 21,
+      "createdAt": "2026-03-13T07:29:03.571206Z",
+      "updatedAt": "2026-03-13T07:29:03.571206Z",
+      "createdBy": "Pritheeswarar",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-03-13T07:29:03.571206Z"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "client": "JS Roofing",
+      "project": "House 77",
+      "task": "Validate API smoke",
+      "staff": "Mubarak",
+      "status": "New",
+      "priority": "Low",
+      "startDate": "2026-03-12",
+      "dueDate": "2026-03-15",
+      "waitingFor": "",
+      "notes": "",
+      "parentId": null,
+      "id": 22,
+      "createdAt": "2026-03-13T08:21:51.128123Z",
+      "updatedAt": "2026-03-13T08:21:51.128123Z",
+      "createdBy": "Pritheeswarar",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-03-13T08:21:51.128123Z"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "client": "JS Roofing",
+      "project": "House Lock",
+      "task": "Lock contention test",
+      "staff": "Mubarak",
+      "status": "New",
+      "priority": "Medium",
+      "startDate": "2026-03-13",
+      "dueDate": "2026-03-20",
+      "waitingFor": "",
+      "notes": "",
+      "parentId": null,
+      "id": 23,
+      "createdAt": "2026-03-13T08:21:51.142561Z",
+      "updatedAt": "2026-03-13T08:21:51.142561Z",
+      "createdBy": "Pritheeswarar",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-03-13T08:21:51.142561Z"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "client": "JS Roofing",
+      "project": "House 77",
+      "task": "Validate API smoke",
+      "staff": "Mubarak",
+      "status": "New",
+      "priority": "Low",
+      "startDate": "2026-03-12",
+      "dueDate": "2026-03-15",
+      "waitingFor": "",
+      "notes": "",
+      "parentId": null,
+      "id": 24,
+      "createdAt": "2026-03-13T08:26:06.970861Z",
+      "updatedAt": "2026-03-13T08:26:06.970861Z",
+      "createdBy": "Pritheeswarar",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-03-13T08:26:06.970861Z"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "client": "JS Roofing",
+      "project": "House Lock",
+      "task": "Lock contention test",
+      "staff": "Mubarak",
+      "status": "New",
+      "priority": "Medium",
+      "startDate": "2026-03-13",
+      "dueDate": "2026-03-20",
+      "waitingFor": "",
+      "notes": "",
+      "parentId": null,
+      "id": 25,
+      "createdAt": "2026-03-13T08:26:06.984575Z",
+      "updatedAt": "2026-03-13T08:26:06.984575Z",
+      "createdBy": "Pritheeswarar",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-03-13T08:26:06.984575Z"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "client": "JS Roofing",
+      "project": "House 77",
+      "task": "Validate API smoke",
+      "staff": "Mubarak",
+      "status": "New",
+      "priority": "Low",
+      "startDate": "2026-03-12",
+      "dueDate": "2026-03-15",
+      "waitingFor": "",
+      "notes": "",
+      "parentId": null,
+      "id": 26,
+      "createdAt": "2026-03-13T08:37:20.600170Z",
+      "updatedAt": "2026-03-13T08:37:20.600170Z",
+      "createdBy": "Pritheeswarar",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-03-13T08:37:20.600170Z"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "client": "JS Roofing",
+      "project": "House Lock",
+      "task": "Lock contention test",
+      "staff": "Mubarak",
+      "status": "New",
+      "priority": "Medium",
+      "startDate": "2026-03-13",
+      "dueDate": "2026-03-20",
+      "waitingFor": "",
+      "notes": "",
+      "parentId": null,
+      "id": 27,
+      "createdAt": "2026-03-13T08:37:20.616943Z",
+      "updatedAt": "2026-03-13T08:37:20.616943Z",
+      "createdBy": "Pritheeswarar",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-03-13T08:37:20.616943Z"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "client": "JS Roofing",
+      "project": "House 77",
+      "task": "Validate API smoke",
+      "staff": "Mubarak",
+      "status": "New",
+      "priority": "Low",
+      "startDate": "2026-03-12",
+      "dueDate": "2026-03-15",
+      "waitingFor": "",
+      "notes": "",
+      "parentId": null,
+      "id": 28,
+      "createdAt": "2026-03-13T08:58:36.910970Z",
+      "updatedAt": "2026-03-13T08:58:36.910970Z",
+      "createdBy": "Pritheeswarar",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-03-13T08:58:36.910970Z"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "client": "JS Roofing",
+      "project": "House Lock",
+      "task": "Lock contention test",
+      "staff": "Mubarak",
+      "status": "New",
+      "priority": "Medium",
+      "startDate": "2026-03-13",
+      "dueDate": "2026-03-20",
+      "waitingFor": "",
+      "notes": "",
+      "parentId": null,
+      "id": 29,
+      "createdAt": "2026-03-13T08:58:36.926527Z",
+      "updatedAt": "2026-03-13T08:58:36.926527Z",
+      "createdBy": "Pritheeswarar",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-03-13T08:58:36.926527Z"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "client": "JS Roofing",
+      "project": "House 77",
+      "task": "Validate API smoke",
+      "staff": "Mubarak",
+      "status": "New",
+      "priority": "Low",
+      "startDate": "2026-03-12",
+      "dueDate": "2026-03-15",
+      "waitingFor": "",
+      "notes": "",
+      "parentId": null,
+      "id": 30,
+      "createdAt": "2026-03-13T11:22:49.213817Z",
+      "updatedAt": "2026-03-13T11:22:49.213817Z",
+      "createdBy": "Pritheeswarar",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-03-13T11:22:49.213817Z"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "client": "JS Roofing",
+      "project": "House Lock",
+      "task": "Lock contention test",
+      "staff": "Mubarak",
+      "status": "New",
+      "priority": "Medium",
+      "startDate": "2026-03-13",
+      "dueDate": "2026-03-20",
+      "waitingFor": "",
+      "notes": "",
+      "parentId": null,
+      "id": 31,
+      "createdAt": "2026-03-13T11:22:49.232985Z",
+      "updatedAt": "2026-03-13T11:22:49.232985Z",
+      "createdBy": "Pritheeswarar",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-03-13T11:22:49.232985Z"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "client": "JS Roofing",
+      "project": "House 77",
+      "task": "Validate API smoke",
+      "staff": "Mubarak",
+      "status": "New",
+      "priority": "Low",
+      "startDate": "2026-03-12",
+      "dueDate": "2026-03-15",
+      "waitingFor": "",
+      "notes": "",
+      "parentId": null,
+      "id": 32,
+      "createdAt": "2026-03-13T11:28:13.466566Z",
+      "updatedAt": "2026-03-13T11:28:13.466566Z",
+      "createdBy": "Pritheeswarar",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-03-13T11:28:13.466566Z"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "client": "JS Roofing",
+      "project": "House Lock",
+      "task": "Lock contention test",
+      "staff": "Mubarak",
+      "status": "New",
+      "priority": "Medium",
+      "startDate": "2026-03-13",
+      "dueDate": "2026-03-20",
+      "waitingFor": "",
+      "notes": "",
+      "parentId": null,
+      "id": 33,
+      "createdAt": "2026-03-13T11:28:13.488668Z",
+      "updatedAt": "2026-03-13T11:28:13.488668Z",
+      "createdBy": "Pritheeswarar",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-03-13T11:28:13.488668Z"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "client": "JS Roofing",
+      "project": "House 77",
+      "task": "Validate API smoke",
+      "staff": "Mubarak",
+      "status": "New",
+      "priority": "Low",
+      "startDate": "2026-03-12",
+      "dueDate": "2026-03-15",
+      "waitingFor": "",
+      "notes": "",
+      "parentId": null,
+      "id": 34,
+      "createdAt": "2026-03-13T11:39:52.708594Z",
+      "updatedAt": "2026-03-13T11:39:52.708594Z",
+      "createdBy": "Pritheeswarar",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-03-13T11:39:52.708594Z"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "client": "JS Roofing",
+      "project": "House Lock",
+      "task": "Lock contention test",
+      "staff": "Mubarak",
+      "status": "New",
+      "priority": "Medium",
+      "startDate": "2026-03-13",
+      "dueDate": "2026-03-20",
+      "waitingFor": "",
+      "notes": "",
+      "parentId": null,
+      "id": 35,
+      "createdAt": "2026-03-13T11:39:52.724888Z",
+      "updatedAt": "2026-03-13T11:39:52.724888Z",
+      "createdBy": "Pritheeswarar",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-03-13T11:39:52.724888Z"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "client": "A to Z Roofing",
+      "project": "E2E Project",
+      "task": "Playwright E2E 1773417205446",
+      "staff": "Mubarak",
+      "status": "New",
+      "priority": "Medium",
+      "startDate": "",
+      "dueDate": "2026-03-16",
+      "waitingFor": "",
+      "notes": "",
+      "parentId": null,
+      "id": 36,
+      "createdAt": "2026-03-13T15:53:26.894544Z",
+      "updatedAt": "2026-03-13T15:53:26.894544Z",
+      "createdBy": "Pritheeswarar",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-03-13T15:53:26.894544Z"
+        }
+      ],
+      "version": 1
+    }
+  ],
+  "clients": [
+    {
+      "name": "JS Roofing",
+      "contact": "John Smith",
+      "email": "john@jsroofing.com",
+      "phone": "555-0100",
+      "id": 1,
+      "version": 1
+    },
+    {
+      "name": "A to Z Roofing",
+      "contact": "Alice",
+      "email": "alice@atoz.com",
+      "phone": "555-0101",
+      "id": 2,
+      "version": 1
+    }
+  ],
+  "presence": [
+    {
+      "username": "Eshwar",
+      "online": true,
+      "lastSeen": "2026-03-13T15:53:25.955563Z",
+      "browser": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.7632.6 Safari/537.36 Edg/145.0.7632.6",
+      "device": "Web"
+    }
+  ],
+  "sessions": [
+    {
+      "id": "sess_82ef86c289e9",
+      "username": "Eshwar",
+      "loginTime": "2026-03-13T07:32:02.813382Z",
+      "logoutTime": "2026-03-13T08:08:27.882959Z",
+      "durationSeconds": 2797,
+      "activeSeconds": 2024,
+      "idleSeconds": 773,
+      "browser": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+      "device": "Web"
+    },
+    {
+      "id": "sess_cfd0f101682a",
+      "username": "Eshwar",
+      "loginTime": "2026-03-13T08:42:39.043738Z",
+      "logoutTime": "2026-03-13T08:46:05.088641Z",
+      "durationSeconds": 195,
+      "activeSeconds": 195,
+      "idleSeconds": 0,
+      "browser": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+      "device": "Web"
+    },
+    {
+      "id": "sess_9c73b5d065e9",
+      "username": "Eshwar",
+      "loginTime": "2026-03-13T08:46:28.697055Z",
+      "logoutTime": null,
+      "durationSeconds": 74,
+      "activeSeconds": 74,
+      "idleSeconds": 0,
+      "browser": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+      "device": "Web"
+    },
+    {
+      "id": "sess_d2aaeaa9a22a",
+      "username": "Eshwar",
+      "loginTime": "2026-03-13T08:59:40.399056Z",
+      "logoutTime": null,
+      "durationSeconds": 73,
+      "activeSeconds": 73,
+      "idleSeconds": 0,
+      "browser": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+      "device": "Web"
+    },
+    {
+      "id": "sess_534613093fd7",
+      "username": "Eshwar",
+      "loginTime": "2026-03-13T11:03:27.380626Z",
+      "logoutTime": null,
+      "durationSeconds": 646,
+      "activeSeconds": 646,
+      "idleSeconds": 0,
+      "browser": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+      "device": "Web"
+    },
+    {
+      "id": "sess_7893986ea3b0",
+      "username": "Eshwar",
+      "loginTime": "2026-03-13T11:23:43.065991Z",
+      "logoutTime": null,
+      "durationSeconds": 146,
+      "activeSeconds": 146,
+      "idleSeconds": 0,
+      "browser": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+      "device": "Web"
+    },
+    {
+      "id": "sess_225416cdeba7",
+      "username": "Eshwar",
+      "loginTime": "2026-03-13T11:28:58.590343Z",
+      "logoutTime": null,
+      "durationSeconds": 293,
+      "activeSeconds": 293,
+      "idleSeconds": 0,
+      "browser": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+      "device": "Web"
+    },
+    {
+      "id": "sess_0cf0629bf21d",
+      "username": "Eshwar",
+      "loginTime": "2026-03-13T11:40:48.176011Z",
+      "logoutTime": null,
+      "durationSeconds": 0,
+      "activeSeconds": 0,
+      "idleSeconds": 0,
+      "browser": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+      "device": "Web"
+    },
+    {
+      "id": "sess_ccbd084dade5",
+      "username": "Eshwar",
+      "loginTime": "2026-03-13T15:53:23.549299Z",
+      "logoutTime": null,
+      "durationSeconds": 0,
+      "activeSeconds": 0,
+      "idleSeconds": 0,
+      "browser": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.7632.6 Safari/537.36 Edg/145.0.7632.6",
+      "device": "Web"
+    },
+    {
+      "id": "sess_0596184b6bd4",
+      "username": "Eshwar",
+      "loginTime": "2026-03-13T15:53:25.917458Z",
+      "logoutTime": null,
+      "durationSeconds": 0,
+      "activeSeconds": 0,
+      "idleSeconds": 0,
+      "browser": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.7632.6 Safari/537.36 Edg/145.0.7632.6",
+      "device": "Web"
+    }
+  ],
+  "task_locks": [],
+  "admin_audit_logs": [],
+  "saved_filter_sets": [],
+  "automation_rules": [],
+  "task_comments": {},
+  "next_task_id": 37,
+  "next_client_id": 3
+}

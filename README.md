@@ -1,54 +1,89 @@
-# BackOffice Pro - Operations Dashboard
+# WeRunOps - Operations Dashboard
 
-A modern, intuitive, mobile-first web application for managing back-office operations and tasks.
+Modern, mobile-first operations dashboard with Kanban workflow, client management, analytics, and optional backend API mode.
 
-## 🚀 Features
+## Features
 
-- **Dashboard Intelligence**: Visual metrics, Chart.js graphs, and recent activity tracking.
-- **Interactive Kanban Board**: Drag-and-drop tasks across statuses natively.
-- **Detailed Task List**: Sort, filter, and search through all operational data.
-- **Today's Focus View**: Prioritizes overdue and due-today tasks.
-- **Zero-Cost Data Storage**: Uses the GitHub REST API to persist state in a JSON file without a backend server, falling back to `localStorage` for seamless local development.
+- Dashboard metrics and charts with activity feed.
+- Kanban drag-and-drop workflow with task status transitions.
+- Task list search, sort, bulk delete, and exports.
+- Real-time task lock indicators and collision-safe task updates.
+- Undo and redo stack for task mutations.
+- Offline mode with service worker caching.
+- Offline action queue with replay, failed-action retry, and discard controls.
+- Presence and session reporting support when backend mode is enabled.
 
-## 🛠 Technology Stack
+## Deployment Model
 
-- **HTML5 & Vanilla JS (ES6+)**
-- **Tailwind CSS** (via CDN for zero-build rapid styling)
-- **Chart.js** (via CDN)
-- **SortableJS** (via CDN for Kanban DND)
-- **Lucide Icons** (via CDN)
+- Frontend deploy: GitHub Pages.
+- Backend deploy: Vercel (`backend/` as Vercel root directory).
+- Database: Supabase (recommended for backend persistence).
 
-## 💻 Local Setup & Development
+## Runtime Modes
 
-You can run this project locally without any complex build tools.
+- Local/Firebase mode: Uses local storage and optional Firebase sync.
+- Backend mode: Uses `backend` FastAPI API (configure in Settings -> Backend API).
 
-1. Clone or download this directory.
-2. Simply open `index.html` in your favorite modern browser.
-3. By default, the app uses `localStorage` for its data state, so you can immediately begin creating tasks, moving them around, and seeing the UI react.
+## Frontend Stack
 
-## 🌐 Deploying to GitHub Pages (Zero-Cost Hosting)
+- HTML5 and Vanilla JS.
+- Tailwind CSS via CDN.
+- Chart.js via CDN.
+- SortableJS via CDN.
+- Lucide icons via CDN.
 
-1. Create a new repository on GitHub (e.g., `backoffice-dashboard`).
-2. Upload these files (`index.html`, `styles.css`, `app.js`, `github-api.js`, `README.md`) to the main branch.
-3. Go to your repository **Settings** > **Pages**.
-4. Set the Source to `Deploy from a branch` and select `main` (or master).
-5. Your app will be live at `https://[your-username].github.io/[repo-name]`.
+## Local Development
 
-### Enabling Permanent GitHub Storage
+1. Open `frontend/index.html` in a browser for frontend-only mode.
+1. Optionally start backend API and configure its URL in Settings:
 
-To allow the deployed application to save data to the repository:
+```powershell
+C:/Users/sprit/OneDrive/Desktop/WeRunOps/.venv/Scripts/python.exe -m pip install -r backend/requirements.txt
+C:/Users/sprit/OneDrive/Desktop/WeRunOps/.venv/Scripts/python.exe backend/scripts/run_auto_port.py
+```
 
-1. Generate a **Personal Access Token (PAT)** in GitHub with `repo` scopes.
-2. Open `github-api.js` and modify the `CONFIG` object:
-   ```javascript
-   const CONFIG = {
-       useGithub: true, // Switch to true
-       repo: 'username/backoffice-dashboard', // your actual repo
-       branch: 'main',
-       token: 'ghp_XXXXXXXXXXX', // Provide token securely (ideally via a login prompt in V2)
-       dataFile: 'data/state.json'
-   };
-   ```
-3. Commit the changes. The app will now read/write state continuously to `data/state.json`.
+1. In the app, open `Settings -> Backend API` and set base URL (example: `http://127.0.0.1:9000/api/v1`).
 
-*(Note: Storing a PAT directly in client-side code is a temporary workaround for personal use. For production with multiple users, implement GitHub OAuth login.)*
+## Automated Testing (Playwright)
+
+Playwright E2E smoke tests are configured to start both services automatically:
+
+- Backend API: `http://127.0.0.1:9000`
+- Frontend static server: `http://127.0.0.1:4173`
+
+### One-time setup
+
+```powershell
+npm install
+npx playwright install chromium
+```
+
+### Run tests
+
+```powershell
+npm run test:e2e
+```
+
+Optional modes:
+
+```powershell
+npm run test:e2e:headed
+npm run test:e2e:ui
+npm run test:e2e:report
+```
+
+## Production Setup (GitHub + Vercel + Supabase)
+
+1. Run `backend/supabase_setup.sql` in Supabase SQL editor.
+1. Deploy backend to Vercel with root directory `backend`.
+1. Add env vars from `backend/.env.example` in Vercel.
+1. Deploy frontend to GitHub Pages.
+1. In the app settings, set Backend API base to:
+
+`https://<your-vercel-backend>.vercel.app/api/v1`
+
+## Backend Notes
+
+Backend implementation is in `backend/` with task/client APIs, lock endpoints, session reports, and state export.
+
+See `backend/README.md` for endpoint and run details.
