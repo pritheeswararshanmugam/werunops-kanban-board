@@ -1,4 +1,4 @@
-# WeRunOps Backend (Vercel + Supabase Ready)
+# WeRunOps Backend (Vercel + Firebase / Supabase Ready)
 
 FastAPI backend for WeRunOps frontend deployed on GitHub Pages.
 
@@ -6,7 +6,7 @@ FastAPI backend for WeRunOps frontend deployed on GitHub Pages.
 
 - Frontend: GitHub Pages.
 - Backend: Vercel (Python serverless runtime).
-- Database: Supabase (recommended for persistent backend state in cloud).
+- Database: Firebase Realtime Database (recommended) or Supabase.
 
 ## Implemented API scope
 
@@ -20,14 +20,22 @@ FastAPI backend for WeRunOps frontend deployed on GitHub Pages.
 
 ## Storage drivers
 
-- `supabase`: production mode for Vercel deploys.
+- `firebase`: production mode using Firebase Realtime Database REST API.
+- `supabase`: production mode using Supabase REST API.
 - `file`: local development mode (`backend/data/state_store.json`).
 
-Driver selection:
+Driver auto-selection (when `WERUNOPS_STATE_DRIVER` is not set):
 
-- If `WERUNOPS_STATE_DRIVER=supabase`, backend uses Supabase REST.
-- If `WERUNOPS_STATE_DRIVER=file`, backend uses local JSON file.
-- If not set, backend auto-selects `supabase` when Supabase env vars exist, else `file`.
+1. If `FIREBASE_DATABASE_URL` + `FIREBASE_AUTH_SECRET` are present → `firebase`
+2. Else if `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` are present → `supabase`
+3. Else → `file`
+
+## Firebase Realtime Database setup
+
+1. Go to [Firebase Console](https://console.firebase.google.com/) and open your project (`werun-ops-backoffice`).
+2. Navigate to **Project Settings → Service accounts → Database secrets**.
+3. Generate (or copy) the **Database secret** — this is your `FIREBASE_AUTH_SECRET`.
+4. The database URL is already known: `https://werun-ops-backoffice-default-rtdb.firebaseio.com`
 
 ## Supabase setup
 
@@ -41,6 +49,16 @@ Driver selection:
 1. Set project Root Directory to `backend`.
 1. Vercel will use `backend/vercel.json` and `backend/api/index.py`.
 1. Add environment variables from `backend/.env.example`:
+
+**With Firebase (recommended):**
+
+- `WERUNOPS_STATE_DRIVER=firebase`
+- `FIREBASE_DATABASE_URL=https://werun-ops-backoffice-default-rtdb.firebaseio.com`
+- `FIREBASE_AUTH_SECRET=<your-database-secret>`
+- `FIREBASE_STATE_PATH=werunops_state`
+- `CORS_ALLOW_ORIGINS=https://pritheeswararshanmugam.github.io`
+
+**With Supabase (alternative):**
 
 - `WERUNOPS_STATE_DRIVER=supabase`
 - `SUPABASE_URL=...`
