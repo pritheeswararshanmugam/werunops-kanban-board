@@ -2627,8 +2627,7 @@ function updateHeaderProfile() {
     const adminPortalBtn = document.getElementById('btn-open-admin-portal');
     if (adminPortalBtn) {
         const isAdmin = String(currentUser.role || '').toLowerCase() === 'admin';
-        const canOpenPortal = isAdmin && store.isBackendReady() && !!currentUser.accessToken;
-        adminPortalBtn.classList.toggle('hidden', !canOpenPortal);
+        adminPortalBtn.classList.toggle('hidden', !isAdmin);
     }
     
     const presenceList = document.getElementById('header-presence-list');
