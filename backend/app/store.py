@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 import hashlib
+import hmac
 import os
 import re
-import secrets
+import time
+import base64
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
@@ -41,6 +43,12 @@ class InMemoryStore:
         self.supabase_row_id = int(os.getenv("SUPABASE_STATE_ROW_ID") or "1")
         self.firebase_url = (os.getenv("FIREBASE_DATABASE_URL") or "").rstrip("/")
         self.firebase_auth_secret = os.getenv("FIREBASE_AUTH_SECRET") or ""
+        self.token_secret = (
+            os.getenv("WERUNOPS_TOKEN_SECRET")
+            or self.supabase_key
+            or self.firebase_auth_secret
+            or "werunops-dev-token-secret"
+        )
         raw_path = (os.getenv("FIREBASE_STATE_PATH") or "werunops_state").strip("/")
         # Restrict path to safe characters to prevent path traversal.
         self.firebase_state_path = raw_path if re.fullmatch(r"[A-Za-z0-9_\-/]+", raw_path) else "werunops_state"
@@ -113,7 +121,6 @@ class InMemoryStore:
         self.presence: dict[str, PresenceOut] = {}
         self.sessions: dict[str, SessionOut] = {}
         self.task_locks: dict[int, TaskLockOut] = {}
-        self.active_tokens: dict[str, str] = {}
         self.admin_audit_logs: list[dict[str, Any]] = []
         self.saved_filter_sets: list[dict[str, Any]] = []
         self.automation_rules: list[dict[str, Any]] = [
@@ -226,6 +233,30 @@ class InMemoryStore:
     def _sha256(text: str) -> str:
         return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
+    def _issue_token(self, username: str, expires_in_seconds: int = 3600) -> str:
+        expires_at = int(time.time()) + max(60, int(expires_in_seconds))
+        payload = f"{username}|{expires_at}"
+        signature = hmac.new(self.token_secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+        raw = f"{payload}|{signature}".encode("utf-8")
+        return base64.urlsafe_b64encode(raw).decode("utf-8").rstrip("=")
+
+    def _username_from_token(self, token: str) -> str:
+        try:
+            padded = token + ("=" * ((4 - len(token) % 4) % 4))
+            decoded = base64.urlsafe_b64decode(padded.encode("utf-8")).decode("utf-8")
+            username, expires_raw, signature = decoded.split("|", 2)
+            payload = f"{username}|{expires_raw}"
+            expected_signature = hmac.new(self.token_secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+            if not hmac.compare_digest(signature, expected_signature):
+                raise UnauthorizedError("Invalid or expired token")
+
+            expires_at = int(expires_raw)
+            if expires_at < int(time.time()):
+                raise UnauthorizedError("Invalid or expired token")
+            return username
+        except (ValueError, TypeError, base64.binascii.Error) as error:
+            raise UnauthorizedError("Invalid or expired token") from error
+
     def authenticate(self, username: str, password: str) -> tuple[str, UserProfile]:
         user = self.users.get(username)
         if not user:
@@ -233,8 +264,7 @@ class InMemoryStore:
         if user["passwordHash"] != self._sha256(password):
             raise UnauthorizedError("Invalid username or password")
 
-        token = secrets.token_urlsafe(32)
-        self.active_tokens[token] = username
+        token = self._issue_token(username)
         profile = UserProfile(
             username=user["username"],
             name=user["name"],
@@ -253,8 +283,8 @@ class InMemoryStore:
         self.save_state()
 
     def user_from_token(self, token: str) -> UserProfile:
-        username = self.active_tokens.get(token)
-        if not username:
+        username = self._username_from_token(token)
+        if username not in self.users:
             raise UnauthorizedError("Invalid or expired token")
         user = self.users[username]
         return UserProfile(
@@ -265,7 +295,8 @@ class InMemoryStore:
         )
 
     def logout(self, token: str) -> None:
-        self.active_tokens.pop(token, None)
+        # Stateless token mode: logout is handled client-side by dropping the token.
+        return
 
     def _cleanup_expired_locks(self) -> None:
         now = self._now()
