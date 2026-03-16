@@ -241,6 +241,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (!currentUser) return;
         store.stopPresenceHeartbeat();
         store.stopTaskLockListener();
+        store.stopBackendSyncPolling?.();
         stopSessionActivityTracking();
         currentUser = null;
         localStorage.removeItem(SESSION_KEY);
@@ -2468,6 +2469,7 @@ async function setupAuth() {
                 store.startPresenceHeartbeat(currentUser.username);
                 store.startPresenceListener(() => updateHeaderProfile());
                 store.startTaskLockListener();
+                store.startBackendSyncPolling?.();
                 startSessionActivityTracking();
                 updateHeaderProfile();
             }
@@ -2512,6 +2514,7 @@ async function setupAuth() {
                 if (store.isBackendReady()) {
                     await store.fetchFromBackend();
                     store.startTaskLockListener();
+                    store.startBackendSyncPolling?.();
                 }
 
                 store.startPresenceHeartbeat(currentUser.username);
@@ -2549,6 +2552,7 @@ async function setupAuth() {
         
         store.stopPresenceHeartbeat();
         store.stopTaskLockListener();
+        store.stopBackendSyncPolling?.();
         if (currentLockedTaskId) {
             await store.releaseTaskLock(currentLockedTaskId);
             currentLockedTaskId = null;
@@ -2705,7 +2709,15 @@ function openAdminPortal() {
     const baseApi = (CONFIG.backendApiBase || '').replace(/\/+$/, '');
     const url = `${baseApi}/admin/portal`;
 
-    const portalWindow = window.open('', '_blank', 'noopener');
+    const portalWindow = window.open('about:blank', '_blank', 'noopener,noreferrer');
+    if (!portalWindow) {
+        showNotification('Popup Blocked', 'Allow popups for this site to open Admin Portal in a new tab.', 'warning');
+        return;
+    }
+
+    portalWindow.document.open();
+    portalWindow.document.write('<!doctype html><title>Loading Admin Portal...</title><p style="font-family:Segoe UI,Arial,sans-serif;padding:16px;color:#334155;">Loading Admin Portal...</p>');
+    portalWindow.document.close();
 
     fetch(url, {
         headers: { Authorization: `Bearer ${currentUser.accessToken}` }
@@ -2718,17 +2730,9 @@ function openAdminPortal() {
                 throw new Error(`Admin portal request failed (${response.status})`);
             }
             const html = await response.text();
-
-            if (portalWindow) {
-                portalWindow.document.open();
-                portalWindow.document.write(html);
-                portalWindow.document.close();
-            } else {
-                // Popup blocked: open portal content in the current tab.
-                document.open();
-                document.write(html);
-                document.close();
-            }
+            portalWindow.document.open();
+            portalWindow.document.write(html);
+            portalWindow.document.close();
         })
         .catch(() => {
             if (portalWindow) portalWindow.close();

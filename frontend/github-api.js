@@ -135,6 +135,8 @@ class DataStore {
         this.remoteEventSource = null;
         this.lastRemoteSyncAt = 0;
         this.taskLocksInterval = null;
+        this.backendSyncInterval = null;
+        this.backendSyncInFlight = null;
         this.offlineQueueKey = 'werunops_offline_actions';
         this.failedOfflineQueueKey = 'werunops_offline_failed_actions';
     }
@@ -542,6 +544,60 @@ class DataStore {
         }
     }
 
+    async refreshBackendSharedState() {
+        if (!this.isBackendReady() || !this.hasBackendAuth()) return;
+        if (this.backendSyncInFlight) return this.backendSyncInFlight;
+
+        this.backendSyncInFlight = (async () => {
+            try {
+                await this.fetchFromBackend(true);
+                await this.fetchTaskLocks().catch(() => {});
+
+                // Keep presence in sync for all logged-in users while backend mode is active.
+                const response = await this.backendFetch('/presence');
+                const payload = await response.json();
+                const data = payload?.data || [];
+                const mapped = {};
+                data.forEach(item => {
+                    mapped[item.username] = {
+                        online: !!item.online,
+                        lastSeen: item.lastSeen,
+                        browser: item.browser,
+                        device: item.device
+                    };
+                });
+
+                if (this.state) {
+                    this.state.livePresence = mapped;
+                    this.notify();
+                }
+            } catch (error) {
+                // Best-effort background sync; avoid crashing UI flows.
+            } finally {
+                this.backendSyncInFlight = null;
+            }
+        })();
+
+        return this.backendSyncInFlight;
+    }
+
+    startBackendSyncPolling(intervalMs = 8000) {
+        if (!this.isBackendReady() || !this.hasBackendAuth()) return;
+        this.stopBackendSyncPolling();
+
+        this.refreshBackendSharedState();
+        this.backendSyncInterval = setInterval(() => {
+            this.refreshBackendSharedState();
+        }, Math.max(3000, Number(intervalMs) || 8000));
+    }
+
+    stopBackendSyncPolling() {
+        if (this.backendSyncInterval) {
+            clearInterval(this.backendSyncInterval);
+            this.backendSyncInterval = null;
+        }
+    }
+
     async acquireTaskLock(taskId, ttlSeconds = 60) {
         if (!this.isBackendReady() || !this.hasBackendAuth()) return null;
         const response = await this.backendFetch(`/locks/tasks/${parseInt(taskId)}`, {
@@ -570,8 +626,29 @@ class DataStore {
     startPresenceHeartbeat(username) {
         if (!this.state) return;
 
-        // Prefer Firebase presence channel when configured; this avoids
-        // per-instance drift on serverless backends.
+        // In backend mode, always use backend presence so auth/session rules
+        // are consistent and we avoid silent Firebase permission failures.
+        if (this.isBackendReady()) {
+            if (!this.hasBackendAuth()) return;
+            const pingPresence = async () => {
+                if (!this.hasBackendAuth()) {
+                    this.stopPresenceHeartbeat();
+                    return;
+                }
+                try {
+                    await this.backendFetch('/presence/me', {
+                        method: 'PUT',
+                        body: JSON.stringify({ online: true, browser: navigator.userAgent, device: 'Web' })
+                    });
+                } catch (error) { }
+            };
+
+            pingPresence();
+            if (this.presenceInterval) clearInterval(this.presenceInterval);
+            this.presenceInterval = setInterval(pingPresence, 20000);
+            return;
+        }
+
         if (this.isFirebaseReady()) {
             const pingPresence = async () => {
                 try {
@@ -595,27 +672,6 @@ class DataStore {
             return;
         }
 
-        if (this.isBackendReady()) {
-            if (!this.hasBackendAuth()) return;
-            const pingPresence = async () => {
-                if (!this.hasBackendAuth()) {
-                    this.stopPresenceHeartbeat();
-                    return;
-                }
-                try {
-                    await this.backendFetch('/presence/me', {
-                        method: 'PUT',
-                        body: JSON.stringify({ online: true, browser: navigator.userAgent, device: 'Web' })
-                    });
-                } catch (error) { }
-            };
-
-            pingPresence();
-            if (this.presenceInterval) clearInterval(this.presenceInterval);
-            this.presenceInterval = setInterval(pingPresence, 20000);
-            return;
-        }
-
         if (this.presenceInterval) {
             clearInterval(this.presenceInterval);
             this.presenceInterval = null;
@@ -624,27 +680,6 @@ class DataStore {
 
     // Lightweight presence polling — reads only livePresence node
     startPresenceListener(onPresenceUpdate) {
-        if (this.isFirebaseReady()) {
-            const pollPresence = async () => {
-                try {
-                    const url = `${CONFIG.firebaseUrl}/${CONFIG.dataPath}/livePresence.json`;
-                    const res = await fetch(url);
-                    if (res.ok) {
-                        const data = await res.json();
-                        if (data && this.state) {
-                            this.state.livePresence = data;
-                            if (onPresenceUpdate) onPresenceUpdate(data);
-                        }
-                    }
-                } catch (e) { /* ignore */ }
-            };
-
-            pollPresence();
-            if (this.presenceListenerInterval) clearInterval(this.presenceListenerInterval);
-            this.presenceListenerInterval = setInterval(pollPresence, 10000); // every 10s
-            return;
-        }
-
         if (this.isBackendReady()) {
             if (!this.hasBackendAuth()) return;
             const pollPresence = async () => {
@@ -667,6 +702,7 @@ class DataStore {
                     });
                     if (this.state) {
                         this.state.livePresence = mapped;
+                        this.notify();
                         if (onPresenceUpdate) onPresenceUpdate(mapped);
                     }
                 } catch (error) { }
@@ -675,6 +711,28 @@ class DataStore {
             pollPresence();
             if (this.presenceListenerInterval) clearInterval(this.presenceListenerInterval);
             this.presenceListenerInterval = setInterval(pollPresence, 10000);
+            return;
+        }
+
+        if (this.isFirebaseReady()) {
+            const pollPresence = async () => {
+                try {
+                    const url = `${CONFIG.firebaseUrl}/${CONFIG.dataPath}/livePresence.json`;
+                    const res = await fetch(url);
+                    if (res.ok) {
+                        const data = await res.json();
+                        if (data && this.state) {
+                            this.state.livePresence = data;
+                            this.notify();
+                            if (onPresenceUpdate) onPresenceUpdate(data);
+                        }
+                    }
+                } catch (e) { /* ignore */ }
+            };
+
+            pollPresence();
+            if (this.presenceListenerInterval) clearInterval(this.presenceListenerInterval);
+            this.presenceListenerInterval = setInterval(pollPresence, 10000); // every 10s
             return;
         }
 

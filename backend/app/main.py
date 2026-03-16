@@ -136,7 +136,7 @@ def root(request: Request):
 
 @app.get("/api/v1/health")
 def health(request: Request):
-    return build_response({"status": "ok"}, request)
+    return build_response({"status": "ok", "stateDriver": store.state_driver}, request)
 
 @app.post("/api/v1/testing/reset-state", response_model=APIResponse)
 def testing_reset_state(request: Request):
