@@ -1,10 +1,11 @@
-const CACHE_VERSION = 'v2';
+const CACHE_VERSION = 'v3';
 const STATIC_CACHE = `werunops-static-${CACHE_VERSION}`;
 const PAGE_CACHE = `werunops-pages-${CACHE_VERSION}`;
 const CORE_ASSETS = [
   './',
   './index.html',
   './styles.css',
+  './config.js',
   './app.js',
   './github-api.js'
 ];

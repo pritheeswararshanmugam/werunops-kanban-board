@@ -10,6 +10,7 @@ const RUNTIME_CONFIG = (typeof window !== 'undefined' && window.WERUNOPS_CONFIG)
 const isLocalHost = typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname);
 const savedBackendApiBase = (localStorage.getItem('werunops_backend_api_base') || '').trim();
 const shouldIgnoreSavedLocalBackend = !isLocalHost && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\b/i.test(savedBackendApiBase);
+const shouldForceRuntimeBackendInProd = !isLocalHost;
 
 const CONFIG = {
     // Firebase Realtime Database URL — hardcoded for production
@@ -17,8 +18,14 @@ const CONFIG = {
     firebaseUrl: localStorage.getItem('werunops_firebase_url') || RUNTIME_CONFIG.firebaseUrl || 'https://werun-ops-backoffice-default-rtdb.firebaseio.com',
     dataPath: 'state', // The path in the database where state is stored
     firebaseWebApiKey: localStorage.getItem('werunops_firebase_web_api_key') || RUNTIME_CONFIG.firebaseWebApiKey || '',
-    backendApiBase: shouldIgnoreSavedLocalBackend ? (RUNTIME_CONFIG.backendApiBase || '') : (savedBackendApiBase || RUNTIME_CONFIG.backendApiBase || '')
+    backendApiBase: shouldForceRuntimeBackendInProd
+        ? (RUNTIME_CONFIG.backendApiBase || '')
+        : (shouldIgnoreSavedLocalBackend ? (RUNTIME_CONFIG.backendApiBase || '') : (savedBackendApiBase || RUNTIME_CONFIG.backendApiBase || ''))
 };
+
+if (!isLocalHost && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\b/i.test(savedBackendApiBase)) {
+    localStorage.removeItem('werunops_backend_api_base');
+}
 
 // Helper to set the Firebase URL at runtime (called from Settings UI)
 function setFirebaseUrl(url) {
