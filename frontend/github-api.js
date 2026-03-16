@@ -134,6 +134,7 @@ class DataStore {
         this.saveQueue = Promise.resolve();
         this.remoteEventSource = null;
         this.lastRemoteSyncAt = 0;
+        this.hasLoadedBackendState = false;
         this.taskLocksInterval = null;
         this.backendSyncInterval = null;
         this.backendSyncInFlight = null;
@@ -256,6 +257,7 @@ class DataStore {
             this.state.config.nextTaskId = Math.max(...tasks.map(item => Number(item.id) || 0), 0) + 1;
             this.state.config.nextClientId = Math.max(...clients.map(item => Number(item.id) || 0), 0) + 1;
             if (!this.state.taskLocks) this.state.taskLocks = {};
+            this.hasLoadedBackendState = true;
 
             this.migrateData();
             this.notify();

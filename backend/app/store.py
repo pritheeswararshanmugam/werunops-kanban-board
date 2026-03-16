@@ -368,6 +368,9 @@ class InMemoryStore:
             # In this mode, state remains in-memory for the current instance only.
             return
 
+    def reload_state(self) -> None:
+        self._load_state()
+
     def _load_state(self) -> None:
         if self.state_driver == "supabase":
             raw = self._load_state_from_supabase()

@@ -148,7 +148,7 @@ def testing_reset_state(request: Request):
         raise HTTPException(status_code=404, detail="Seed state file not found")
 
     store.state_file.write_text(seed_path.read_text(encoding="utf-8"), encoding="utf-8")
-    store._load_state()
+    store.reload_state()
     return build_response(
         {
             "reset": True,

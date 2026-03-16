@@ -2465,7 +2465,9 @@ async function setupAuth() {
                 window.location.hash = '#/login';
             } else {
                 currentUser = { ...storedSession };
-                store.fetchFromBackend(true).catch(() => {});
+                if (!store.hasLoadedBackendState) {
+                    store.fetchFromBackend(true).catch(() => {});
+                }
                 store.startPresenceHeartbeat(currentUser.username);
                 store.startPresenceListener(() => updateHeaderProfile());
                 store.startTaskLockListener();
