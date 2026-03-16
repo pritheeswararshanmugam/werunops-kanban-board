@@ -28,7 +28,12 @@ class UnauthorizedError(Exception):
 
 class InMemoryStore:
     def __init__(self) -> None:
-        self.state_file = Path(__file__).resolve().parent.parent / "data" / "state_store.json"
+        default_state_file = Path(__file__).resolve().parent.parent / "data" / "state_store.json"
+        # Vercel's project filesystem is read-only at runtime; /tmp is writable per instance.
+        if os.getenv("VERCEL"):
+            self.state_file = Path("/tmp") / "state_store.json"
+        else:
+            self.state_file = default_state_file
         self.state_driver = (os.getenv("WERUNOPS_STATE_DRIVER") or "").strip().lower()
         self.supabase_url = (os.getenv("SUPABASE_URL") or "").rstrip("/")
         self.supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or ""
@@ -325,7 +330,12 @@ class InMemoryStore:
         if self.state_driver == "firebase":
             self._save_state_to_firebase(payload)
             return
-        self.state_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        try:
+            self.state_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        except OSError:
+            # Keep API responses successful even when file persistence is unavailable.
+            # In this mode, state remains in-memory for the current instance only.
+            return
 
     def _load_state(self) -> None:
         if self.state_driver == "supabase":
