@@ -41,11 +41,12 @@ app = FastAPI(title="WeRunOps Backend API", version="1.0.0")
 
 cors_origins_raw = os.getenv("CORS_ALLOW_ORIGINS", "*").strip()
 allow_origins = [item.strip() for item in cors_origins_raw.split(",") if item.strip()] or ["*"]
+allow_credentials = allow_origins != ["*"]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allow_origins,
-    allow_credentials=True,
+    allow_credentials=allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
