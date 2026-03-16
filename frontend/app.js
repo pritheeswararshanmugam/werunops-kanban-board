@@ -371,6 +371,12 @@ function initNavigation() {
         if (!hash || hash === '#/') {
             hash = localStorage.getItem(SESSION_KEY) ? '#/dashboard' : '#/login';
         }
+
+        const hasSession = !!currentUser || !!readSession();
+        if (hash !== '#/login' && !hasSession) {
+            window.location.hash = '#/login';
+            return;
+        }
         
         let targetId = 'view-dashboard';
         if (hash === '#/kanban') targetId = 'view-kanban';
@@ -2632,8 +2638,32 @@ function updateHeaderProfile() {
     
     const presenceList = document.getElementById('header-presence-list');
     if (presenceList) {
-        const validUsers = store.state.authUsers || [];
+        const authUsers = Array.isArray(store?.state?.authUsers) ? store.state.authUsers : [];
         const live = store.state.livePresence || {};
+        const userMap = new Map();
+
+        authUsers.forEach((user) => {
+            if (!user?.username) return;
+            userMap.set(String(user.username), user);
+        });
+
+        Object.keys(live || {}).forEach((username) => {
+            if (!username) return;
+            if (!userMap.has(username)) {
+                userMap.set(username, { username, name: username, role: 'User', initials: String(username).charAt(0).toUpperCase() });
+            }
+        });
+
+        if (currentUser?.username && !userMap.has(currentUser.username)) {
+            userMap.set(currentUser.username, {
+                username: currentUser.username,
+                name: currentUser.name || currentUser.username,
+                role: currentUser.role || 'User',
+                initials: currentUser.initials || String(currentUser.username).charAt(0).toUpperCase()
+            });
+        }
+
+        const validUsers = Array.from(userMap.values());
         const now = Date.now();
         
         presenceList.innerHTML = validUsers.map(u => {
@@ -2959,8 +2989,8 @@ function setupSettingsModal() {
     const fbApiKeyInput = document.getElementById('firebase-api-key-input');
     const backendApiInput = document.getElementById('backend-api-base-input');
     const backendApiMsg = document.getElementById('backend-api-msg');
-    const firebaseSection = document.getElementById('settings-firebase-section');
-    const backendSection = document.getElementById('settings-backend-section');
+    const firebaseSection = document.getElementById('settings-firebase-config-section');
+    const backendSection = document.getElementById('settings-backend-api-section');
 
     if (!ALLOW_USER_ENDPOINT_CONFIG) {
         if (firebaseSection) firebaseSection.classList.add('hidden');

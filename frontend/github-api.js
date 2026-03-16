@@ -570,6 +570,31 @@ class DataStore {
     startPresenceHeartbeat(username) {
         if (!this.state) return;
 
+        // Prefer Firebase presence channel when configured; this avoids
+        // per-instance drift on serverless backends.
+        if (this.isFirebaseReady()) {
+            const pingPresence = async () => {
+                try {
+                    const url = `${CONFIG.firebaseUrl}/${CONFIG.dataPath}/livePresence/${username}.json`;
+                    await fetch(url, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            online: true,
+                            lastSeen: new Date().toISOString(),
+                            browser: navigator.userAgent,
+                            device: 'Web'
+                        })
+                    });
+                } catch (e) { /* heartbeat is non-critical */ }
+            };
+
+            pingPresence();
+            if (this.presenceInterval) clearInterval(this.presenceInterval);
+            this.presenceInterval = setInterval(pingPresence, 20000); // every 20s
+            return;
+        }
+
         if (this.isBackendReady()) {
             if (!this.hasBackendAuth()) return;
             const pingPresence = async () => {
@@ -591,29 +616,35 @@ class DataStore {
             return;
         }
 
-        const pingPresence = async () => {
-            if (!this.isFirebaseReady()) return;
-            // PATCH only this user's presence entry — tiny payload, no conflicts
-            try {
-                const url = `${CONFIG.firebaseUrl}/${CONFIG.dataPath}/livePresence/${username}.json`;
-                await fetch(url, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        online: true,
-                        lastSeen: new Date().toISOString()
-                    })
-                });
-            } catch (e) { /* heartbeat is non-critical */ }
-        };
-
-        pingPresence();
-        if (this.presenceInterval) clearInterval(this.presenceInterval);
-        this.presenceInterval = setInterval(pingPresence, 20000); // every 20s
+        if (this.presenceInterval) {
+            clearInterval(this.presenceInterval);
+            this.presenceInterval = null;
+        }
     }
 
     // Lightweight presence polling — reads only livePresence node
     startPresenceListener(onPresenceUpdate) {
+        if (this.isFirebaseReady()) {
+            const pollPresence = async () => {
+                try {
+                    const url = `${CONFIG.firebaseUrl}/${CONFIG.dataPath}/livePresence.json`;
+                    const res = await fetch(url);
+                    if (res.ok) {
+                        const data = await res.json();
+                        if (data && this.state) {
+                            this.state.livePresence = data;
+                            if (onPresenceUpdate) onPresenceUpdate(data);
+                        }
+                    }
+                } catch (e) { /* ignore */ }
+            };
+
+            pollPresence();
+            if (this.presenceListenerInterval) clearInterval(this.presenceListenerInterval);
+            this.presenceListenerInterval = setInterval(pollPresence, 10000); // every 10s
+            return;
+        }
+
         if (this.isBackendReady()) {
             if (!this.hasBackendAuth()) return;
             const pollPresence = async () => {
@@ -647,24 +678,10 @@ class DataStore {
             return;
         }
 
-        const pollPresence = async () => {
-            if (!this.isFirebaseReady()) return;
-            try {
-                const url = `${CONFIG.firebaseUrl}/${CONFIG.dataPath}/livePresence.json`;
-                const res = await fetch(url);
-                if (res.ok) {
-                    const data = await res.json();
-                    if (data && this.state) {
-                        this.state.livePresence = data;
-                        if (onPresenceUpdate) onPresenceUpdate(data);
-                    }
-                }
-            } catch (e) { /* ignore */ }
-        };
-
-        pollPresence();
-        if (this.presenceListenerInterval) clearInterval(this.presenceListenerInterval);
-        this.presenceListenerInterval = setInterval(pollPresence, 10000); // every 10s
+        if (this.presenceListenerInterval) {
+            clearInterval(this.presenceListenerInterval);
+            this.presenceListenerInterval = null;
+        }
     }
 
     stopPresenceHeartbeat() {
