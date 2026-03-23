@@ -21,6 +21,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate Required Vercel Secrets
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo "Missing secret: VERCEL_TOKEN"
+            exit 1
+          fi
+          if [ -z "$VERCEL_ORG_ID" ]; then
+            echo "Missing secret: VERCEL_ORG_ID"
+            exit 1
+          fi
+          if [ -z "$VERCEL_PROJECT_ID" ]; then
+            echo "Missing secret: VERCEL_PROJECT_ID"
+            exit 1
+          fi
+          echo "Required Vercel secrets found."
+
       - name: Install Vercel CLI
         run: npm install --global vercel@latest
 

@@ -489,9 +489,23 @@ class InMemoryStore:
         }
         with httpx.Client(timeout=15.0) as client:
             response = client.get(endpoint, params=params, headers=self._supabase_headers())
-            if response.status_code >= 400 and "42P01" in response.text:
+            response_text_upper = (response.text or "").upper()
+            missing_table_error = (
+                "42P01" in response_text_upper
+                or "PGRST205" in response_text_upper
+                or "SCHEMA CACHE" in response_text_upper
+                or "COULD NOT FIND THE TABLE" in response_text_upper
+            )
+            if response.status_code >= 400 and missing_table_error:
                 if self._bootstrap_supabase_storage():
-                    response = client.get(endpoint, params=params, headers=self._supabase_headers())
+                    # PostgREST schema cache can take a moment to observe new relations.
+                    for _ in range(3):
+                        response = client.get(endpoint, params=params, headers=self._supabase_headers())
+                        if response.status_code < 400:
+                            break
+                        if "PGRST205" not in (response.text or "").upper():
+                            break
+                        time.sleep(0.6)
             if response.status_code >= 400:
                 raise RuntimeError(f"Supabase load failed with HTTP {response.status_code}: {response.text}")
 
