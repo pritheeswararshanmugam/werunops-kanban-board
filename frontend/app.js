@@ -229,13 +229,29 @@ document.addEventListener('DOMContentLoaded', async () => {
     initFilters();
 
     // Show Loading
-    document.getElementById('global-loader').classList.remove('hidden');
+    const globalLoader = document.getElementById('global-loader');
+    globalLoader.classList.remove('hidden');
 
-    // 2. Initialize Data Store
-    await store.init();
+    let startupReady = false;
+    try {
+        // 2. Initialize Data Store
+        await store.init();
 
-    // 3. Setup Auth now that store is ready
-    await setupAuth();
+        // 3. Setup Auth now that store is ready
+        await setupAuth();
+        startupReady = true;
+    } catch (error) {
+        console.error('Startup initialization failed:', error);
+        showNotification('Startup Recovery', 'Backend sync failed during startup. Loaded local fallback state.', 'warning');
+
+        try {
+            if (!store.state && typeof store.fetchFromLocal === 'function') {
+                store.fetchFromLocal();
+            }
+        } catch (fallbackError) {
+            console.error('Local fallback failed:', fallbackError);
+        }
+    }
 
     window.addEventListener('werunops-auth-invalid', () => {
         if (!currentUser) return;
@@ -299,12 +315,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         refreshOfflineSyncControls();
     });
 
-    // Initial Render
-    scheduleRender(store.state);
+    // Initial Render (or fallback render)
+    if (store.state) {
+        scheduleRender(store.state);
+    }
     refreshOfflineSyncControls();
 
-    // Hide Loading
-    document.getElementById('global-loader').classList.add('hidden');
+    // Hide Loading (always)
+    globalLoader.classList.add('hidden');
 
     // First-run: alert if no Firebase URL is configured
     if (!CONFIG.firebaseUrl) {
@@ -320,8 +338,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 3. Setup form handlers
     setupFormHandlers();
 
-    // 4. Show a welcome notification
-    showNotification('Success', 'Connected to data source successfully.', 'success');
+    // 4. Show a startup notification
+    if (startupReady) {
+        showNotification('Success', 'Connected to data source successfully.', 'success');
+    }
 
     window.addEventListener('beforeunload', () => {
         if (!store.isBackendReady() || !currentUser?.accessToken || !currentUser?.sessionId) return;
