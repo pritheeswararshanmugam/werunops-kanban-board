@@ -356,32 +356,36 @@ class InMemoryStore:
                 "initials": "S",
             },
         }
-        now = datetime.now(UTC)
-        self.tasks: dict[int, TaskOut] = {
-            1: TaskOut(
-                id=1,
-                client="JS Roofing",
-                project="House 12",
-                task="Create PO fascia",
-                staff="Mubarak",
-                status="In Progress",
-                priority="High",
-                startDate="2026-03-09",
-                dueDate=now.date().isoformat(),
-                waitingFor="Supplier",
-                notes="Waiting for supplier pricing",
-                parentId=None,
-                createdAt=now,
-                updatedAt=now,
-                createdBy="Pritheeswarar",
-                activityLog=[ActivityEntry(action="Task created", user="Pritheeswarar", timestamp=now)],
-                version=1,
-            )
-        }
-        self.clients: dict[int, ClientOut] = {
-            1: ClientOut(id=1, name="JS Roofing", contact="John Smith", email="john@jsroofing.com", phone="555-0100", version=1),
-            2: ClientOut(id=2, name="A to Z Roofing", contact="Alice", email="alice@atoz.com", phone="555-0101", version=1),
-        }
+        self.tasks: dict[int, TaskOut] = {}
+        self.clients: dict[int, ClientOut] = {}
+
+        if self.state_driver == "file":
+            now = datetime.now(UTC)
+            self.tasks = {
+                1: TaskOut(
+                    id=1,
+                    client="JS Roofing",
+                    project="House 12",
+                    task="Create PO fascia",
+                    staff="Mubarak",
+                    status="In Progress",
+                    priority="High",
+                    startDate="2026-03-09",
+                    dueDate=now.date().isoformat(),
+                    waitingFor="Supplier",
+                    notes="Waiting for supplier pricing",
+                    parentId=None,
+                    createdAt=now,
+                    updatedAt=now,
+                    createdBy="Pritheeswarar",
+                    activityLog=[ActivityEntry(action="Task created", user="Pritheeswarar", timestamp=now)],
+                    version=1,
+                )
+            }
+            self.clients = {
+                1: ClientOut(id=1, name="JS Roofing", contact="John Smith", email="john@jsroofing.com", phone="555-0100", version=1),
+                2: ClientOut(id=2, name="A to Z Roofing", contact="Alice", email="alice@atoz.com", phone="555-0101", version=1),
+            }
         self.presence: dict[str, PresenceOut] = {}
         self.sessions: dict[str, SessionOut] = {}
         self.task_locks: dict[int, TaskLockOut] = {}
@@ -404,8 +408,8 @@ class InMemoryStore:
             },
         ]
         self.task_comments: dict[int, list[dict[str, Any]]] = {}
-        self.next_task_id = 2
-        self.next_client_id = 3
+        self.next_task_id = 2 if self.state_driver == "file" else 1
+        self.next_client_id = 3 if self.state_driver == "file" else 1
         try:
             self._load_state()
         except Exception as error:
@@ -419,6 +423,8 @@ class InMemoryStore:
         self.env_debug["supabaseUrlPresent"] = str(bool(self.supabase_url)).lower()
         self.env_debug["supabaseKeyPresent"] = str(bool(self.supabase_key)).lower()
         self.env_debug["supabasePostgresUrlPresent"] = str(bool(self.supabase_postgres_url)).lower()
+        self.env_debug["supabaseTable"] = self.supabase_table
+        self.env_debug["supabaseRowId"] = str(self.supabase_row_id)
         self.env_debug["lastRemoteBootstrapError"] = self.last_remote_bootstrap_error
 
     def _supabase_headers(self) -> dict[str, str]:
@@ -716,12 +722,12 @@ class InMemoryStore:
     def _load_state(self) -> None:
         if self.state_driver == "supabase":
             raw = self._load_state_from_supabase()
-            if raw is None:
+            if not isinstance(raw, dict) or not raw:
                 self.save_state()
                 raw = self._load_state_from_supabase() or {}
         elif self.state_driver == "firebase":
             raw = self._load_state_from_firebase()
-            if raw is None:
+            if not isinstance(raw, dict) or not raw:
                 self.save_state()
                 raw = self._load_state_from_firebase() or {}
         else:
