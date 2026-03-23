@@ -8,11 +8,17 @@ import re
 import time
 import base64
 import binascii
+import importlib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
 import httpx
+
+try:
+    psycopg = cast(Any, importlib.import_module("psycopg"))
+except ModuleNotFoundError:  # pragma: no cover - optional runtime dependency
+    psycopg = None
 
 from app.models import ActivityEntry, ClientOut, PresenceOut, SessionOut, TaskLockOut, TaskOut, UserProfile
 
@@ -74,6 +80,13 @@ def _parse_int_env(value: str, fallback: int) -> int:
         return fallback
 
 
+def _safe_identifier(value: str, fallback: str) -> str:
+    candidate = (value or "").strip()
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", candidate):
+        return candidate
+    return fallback
+
+
 class InMemoryStore:
     def __init__(self) -> None:
         default_state_file = Path(__file__).resolve().parent.parent / "data" / "state_store.json"
@@ -103,6 +116,7 @@ class InMemoryStore:
             suffixes=("_SUPABASE_STATE_TABLE",),
             default="werunops_state",
         )
+        self.supabase_table = _safe_identifier(self.supabase_table, "werunops_state")
         self.supabase_row_id = _parse_int_env(
             _get_env_compat(
                 names=("SUPABASE_STATE_ROW_ID",),
@@ -110,6 +124,11 @@ class InMemoryStore:
                 default="1",
             ),
             1,
+        )
+        self.supabase_postgres_url = _get_env_compat(
+            names=("SUPABASE_POSTGRES_URL_NON_POOLING", "SUPABASE_POSTGRES_URL", "POSTGRES_URL_NON_POOLING", "POSTGRES_URL"),
+            suffixes=("_SUPABASE_POSTGRES_URL_NON_POOLING", "_SUPABASE_POSTGRES_URL", "_POSTGRES_URL_NON_POOLING", "_POSTGRES_URL"),
+            default="",
         )
         self.firebase_url = _get_env_compat(
             names=("FIREBASE_DATABASE_URL",),
@@ -252,6 +271,48 @@ class InMemoryStore:
     def _supabase_endpoint(self) -> str:
         return f"{self.supabase_url}/rest/v1/{self.supabase_table}"
 
+    def _bootstrap_supabase_storage(self) -> bool:
+        if not self.supabase_postgres_url:
+            self.state_driver_note = "supabase relation missing; no postgres URL available for bootstrap"
+            return False
+        if psycopg is None:
+            self.state_driver_note = "supabase relation missing; psycopg not installed for bootstrap"
+            return False
+
+        index_name = f"{self.supabase_table}_payload_gin"
+        try:
+            with psycopg.connect(self.supabase_postgres_url, autocommit=True, connect_timeout=10) as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        f"""
+                        create table if not exists public.{self.supabase_table} (
+                          id bigint primary key,
+                          payload jsonb not null,
+                          updated_at timestamptz not null default now()
+                        )
+                        """
+                    )
+                    cursor.execute(
+                        f"""
+                        insert into public.{self.supabase_table} (id, payload)
+                        values (%s, '{{}}'::jsonb)
+                        on conflict (id) do nothing
+                        """,
+                        (self.supabase_row_id,),
+                    )
+                    cursor.execute(
+                        f"""
+                        create index if not exists {index_name}
+                        on public.{self.supabase_table}
+                        using gin (payload)
+                        """
+                    )
+            self.state_driver_note = "auto-bootstrapped supabase state table"
+            return True
+        except Exception as error:
+            self.state_driver_note = f"supabase relation missing; bootstrap failed ({error})"
+            return False
+
     def _load_state_from_supabase(self) -> dict[str, Any] | None:
         endpoint = self._supabase_endpoint()
         params = {
@@ -261,6 +322,9 @@ class InMemoryStore:
         }
         with httpx.Client(timeout=15.0) as client:
             response = client.get(endpoint, params=params, headers=self._supabase_headers())
+            if response.status_code >= 400 and "42P01" in response.text:
+                if self._bootstrap_supabase_storage():
+                    response = client.get(endpoint, params=params, headers=self._supabase_headers())
             if response.status_code >= 400:
                 raise RuntimeError(f"Supabase load failed with HTTP {response.status_code}: {response.text}")
 
