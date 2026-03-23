@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'v4';
+const CACHE_VERSION = 'v5';
 const STATIC_CACHE = `werunops-static-${CACHE_VERSION}`;
 const PAGE_CACHE = `werunops-pages-${CACHE_VERSION}`;
 const CORE_ASSETS = [

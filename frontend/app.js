@@ -2279,6 +2279,33 @@ async function backendApiFetch(path, options = {}, token = null) {
     return response;
 }
 
+async function ensureBackendSession() {
+    if (!store.isBackendReady() || !currentUser?.accessToken) return false;
+    if (currentUser.sessionId) return true;
+
+    try {
+        const sessionResponse = await backendApiFetch(
+            '/sessions/start',
+            {
+                method: 'POST',
+                body: JSON.stringify({ browser: navigator.userAgent, device: 'Web' })
+            },
+            currentUser.accessToken
+        );
+        if (!sessionResponse || !sessionResponse.ok) return false;
+
+        const payload = await sessionResponse.json();
+        const sessionId = payload?.data?.id || null;
+        if (!sessionId) return false;
+
+        currentUser.sessionId = sessionId;
+        persistSession(currentUser);
+        return true;
+    } catch (error) {
+        return false;
+    }
+}
+
 function persistSession(session) {
     localStorage.setItem(SESSION_KEY, JSON.stringify(session));
 }
@@ -2407,10 +2434,16 @@ async function flushSessionHeartbeat(force = false) {
     sessionIdleSecondsBucket = 0;
 
     try {
-        await backendApiFetch(`/sessions/${currentUser.sessionId}/heartbeat`, {
+        const heartbeatResponse = await backendApiFetch(`/sessions/${currentUser.sessionId}/heartbeat`, {
             method: 'POST',
             body: JSON.stringify(payload)
         }, currentUser.accessToken);
+
+        if (heartbeatResponse && heartbeatResponse.status === 404) {
+            currentUser.sessionId = null;
+            persistSession(currentUser);
+            await ensureBackendSession();
+        }
     } catch (error) {
         console.warn('Session heartbeat failed:', error);
     }
@@ -2468,6 +2501,7 @@ async function setupAuth() {
                 if (!store.hasLoadedBackendState) {
                     store.fetchFromBackend(true).catch(() => {});
                 }
+                await ensureBackendSession();
                 store.startPresenceHeartbeat(currentUser.username);
                 store.startPresenceListener(() => updateHeaderProfile());
                 store.startTaskLockListener();
