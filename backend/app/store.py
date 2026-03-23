@@ -28,6 +28,37 @@ class UnauthorizedError(Exception):
     pass
 
 
+def _get_env(*names: str, default: str = "") -> str:
+    for name in names:
+        value = (os.getenv(name) or "").strip()
+        if value:
+            return value
+    return default
+
+
+def _get_env_by_suffix(*suffixes: str, default: str = "") -> str:
+    if not suffixes:
+        return default
+
+    env_items = sorted(os.environ.items(), key=lambda item: item[0])
+    for suffix in suffixes:
+        expected = suffix.upper()
+        for key, raw_value in env_items:
+            if not key.upper().endswith(expected):
+                continue
+            value = (raw_value or "").strip()
+            if value:
+                return value
+    return default
+
+
+def _get_env_compat(names: tuple[str, ...], suffixes: tuple[str, ...], default: str = "") -> str:
+    direct = _get_env(*names)
+    if direct:
+        return direct
+    return _get_env_by_suffix(*suffixes, default=default)
+
+
 class InMemoryStore:
     def __init__(self) -> None:
         default_state_file = Path(__file__).resolve().parent.parent / "data" / "state_store.json"
@@ -36,20 +67,58 @@ class InMemoryStore:
             self.state_file = Path("/tmp") / "state_store.json"
         else:
             self.state_file = default_state_file
-        self.state_driver = (os.getenv("WERUNOPS_STATE_DRIVER") or "").strip().lower()
-        self.supabase_url = (os.getenv("SUPABASE_URL") or "").rstrip("/")
-        self.supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or ""
-        self.supabase_table = (os.getenv("SUPABASE_STATE_TABLE") or "werunops_state").strip()
-        self.supabase_row_id = int(os.getenv("SUPABASE_STATE_ROW_ID") or "1")
-        self.firebase_url = (os.getenv("FIREBASE_DATABASE_URL") or "").rstrip("/")
-        self.firebase_auth_secret = os.getenv("FIREBASE_AUTH_SECRET") or ""
+        self.state_driver = _get_env_compat(
+            names=("WERUNOPS_STATE_DRIVER",),
+            suffixes=("_WERUNOPS_STATE_DRIVER",),
+            default="",
+        ).lower()
+        self.supabase_url = _get_env_compat(
+            names=("SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL"),
+            suffixes=("_SUPABASE_URL", "_NEXT_PUBLIC_SUPABASE_URL"),
+            default="",
+        ).rstrip("/")
+        self.supabase_key = _get_env_compat(
+            names=("SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SECRET_KEY"),
+            suffixes=("_SUPABASE_SERVICE_ROLE_KEY", "_SUPABASE_SECRET_KEY"),
+            default="",
+        )
+        self.supabase_table = _get_env_compat(
+            names=("SUPABASE_STATE_TABLE",),
+            suffixes=("_SUPABASE_STATE_TABLE",),
+            default="werunops_state",
+        )
+        self.supabase_row_id = int(
+            _get_env_compat(
+                names=("SUPABASE_STATE_ROW_ID",),
+                suffixes=("_SUPABASE_STATE_ROW_ID",),
+                default="1",
+            )
+        )
+        self.firebase_url = _get_env_compat(
+            names=("FIREBASE_DATABASE_URL",),
+            suffixes=("_FIREBASE_DATABASE_URL",),
+            default="",
+        ).rstrip("/")
+        self.firebase_auth_secret = _get_env_compat(
+            names=("FIREBASE_AUTH_SECRET",),
+            suffixes=("_FIREBASE_AUTH_SECRET",),
+            default="",
+        )
         self.token_secret = (
-            os.getenv("WERUNOPS_TOKEN_SECRET")
+            _get_env_compat(
+                names=("WERUNOPS_TOKEN_SECRET",),
+                suffixes=("_WERUNOPS_TOKEN_SECRET",),
+                default="",
+            )
             or self.supabase_key
             or self.firebase_auth_secret
             or "werunops-dev-token-secret"
         )
-        raw_path = (os.getenv("FIREBASE_STATE_PATH") or "werunops_state").strip("/")
+        raw_path = _get_env_compat(
+            names=("FIREBASE_STATE_PATH",),
+            suffixes=("_FIREBASE_STATE_PATH",),
+            default="werunops_state",
+        ).strip("/")
         # Restrict path to safe characters to prevent path traversal.
         self.firebase_state_path = raw_path if re.fullmatch(r"[A-Za-z0-9_\-/]+", raw_path) else "werunops_state"
 

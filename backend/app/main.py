@@ -39,7 +39,31 @@ from app.store import ConflictError, UnauthorizedError, store
 
 app = FastAPI(title="WeRunOps Backend API", version="1.0.0")
 
-cors_origins_raw = os.getenv("CORS_ALLOW_ORIGINS", "*").strip()
+
+def _get_env_compat(names: tuple[str, ...], suffixes: tuple[str, ...], default: str = "") -> str:
+    for name in names:
+        value = (os.getenv(name) or "").strip()
+        if value:
+            return value
+
+    env_items = sorted(os.environ.items(), key=lambda item: item[0])
+    for suffix in suffixes:
+        expected = suffix.upper()
+        for key, raw_value in env_items:
+            if not key.upper().endswith(expected):
+                continue
+            value = (raw_value or "").strip()
+            if value:
+                return value
+
+    return default
+
+
+cors_origins_raw = _get_env_compat(
+    names=("CORS_ALLOW_ORIGINS",),
+    suffixes=("_CORS_ALLOW_ORIGINS",),
+    default="*",
+)
 allow_origins = [item.strip() for item in cors_origins_raw.split(",") if item.strip()] or ["*"]
 allow_credentials = allow_origins != ["*"]
 
