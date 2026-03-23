@@ -7,6 +7,7 @@ import os
 import re
 import time
 import base64
+import binascii
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
@@ -28,9 +29,16 @@ class UnauthorizedError(Exception):
     pass
 
 
+def _normalize_env_value(value: str) -> str:
+    cleaned = (value or "").strip()
+    if len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in {'"', "'"}:
+        cleaned = cleaned[1:-1].strip()
+    return cleaned
+
+
 def _get_env(*names: str, default: str = "") -> str:
     for name in names:
-        value = (os.getenv(name) or "").strip()
+        value = _normalize_env_value(os.getenv(name) or "")
         if value:
             return value
     return default
@@ -46,7 +54,7 @@ def _get_env_by_suffix(*suffixes: str, default: str = "") -> str:
         for key, raw_value in env_items:
             if not key.upper().endswith(expected):
                 continue
-            value = (raw_value or "").strip()
+            value = _normalize_env_value(raw_value or "")
             if value:
                 return value
     return default
@@ -57,6 +65,13 @@ def _get_env_compat(names: tuple[str, ...], suffixes: tuple[str, ...], default: 
     if direct:
         return direct
     return _get_env_by_suffix(*suffixes, default=default)
+
+
+def _parse_int_env(value: str, fallback: int) -> int:
+    try:
+        return int(_normalize_env_value(value))
+    except (TypeError, ValueError):
+        return fallback
 
 
 class InMemoryStore:
@@ -87,12 +102,13 @@ class InMemoryStore:
             suffixes=("_SUPABASE_STATE_TABLE",),
             default="werunops_state",
         )
-        self.supabase_row_id = int(
+        self.supabase_row_id = _parse_int_env(
             _get_env_compat(
                 names=("SUPABASE_STATE_ROW_ID",),
                 suffixes=("_SUPABASE_STATE_ROW_ID",),
                 default="1",
-            )
+            ),
+            1,
         )
         self.firebase_url = _get_env_compat(
             names=("FIREBASE_DATABASE_URL",),
@@ -211,7 +227,12 @@ class InMemoryStore:
         self.task_comments: dict[int, list[dict[str, Any]]] = {}
         self.next_task_id = 2
         self.next_client_id = 3
-        self._load_state()
+        try:
+            self._load_state()
+        except Exception:
+            # Keep API alive even when remote state bootstrap fails.
+            self.state_driver = "file"
+            self._load_state()
 
     def _supabase_headers(self) -> dict[str, str]:
         return {
@@ -323,7 +344,7 @@ class InMemoryStore:
             if expires_at < int(time.time()):
                 raise UnauthorizedError("Invalid or expired token")
             return username
-        except (ValueError, TypeError, base64.binascii.Error) as error:
+        except (ValueError, TypeError, binascii.Error) as error:
             raise UnauthorizedError("Invalid or expired token") from error
 
     def authenticate(self, username: str, password: str) -> tuple[str, UserProfile]:
