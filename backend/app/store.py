@@ -116,6 +116,7 @@ class InMemoryStore:
             self.state_file = default_state_file
         self.state_driver_note = ""
         self.env_debug: dict[str, str] = {}
+        self.last_remote_bootstrap_error = ""
 
         raw_driver, driver_source = _get_env_compat_with_source(
             names=(
@@ -333,16 +334,18 @@ class InMemoryStore:
         self.next_client_id = 3
         try:
             self._load_state()
-        except Exception:
+        except Exception as error:
             # Keep API alive even when remote state bootstrap fails.
             self.state_driver = "file"
-            self.state_driver_note = "remote state bootstrap failed; fell back to file mode"
+            self.last_remote_bootstrap_error = str(error)
+            self.state_driver_note = f"remote state bootstrap failed; fell back to file mode ({self.last_remote_bootstrap_error})"
             self._load_state()
 
         self.env_debug["stateDriver"] = self.state_driver
         self.env_debug["supabaseUrlPresent"] = str(bool(self.supabase_url)).lower()
         self.env_debug["supabaseKeyPresent"] = str(bool(self.supabase_key)).lower()
         self.env_debug["supabasePostgresUrlPresent"] = str(bool(self.supabase_postgres_url)).lower()
+        self.env_debug["lastRemoteBootstrapError"] = self.last_remote_bootstrap_error
 
     def _supabase_headers(self) -> dict[str, str]:
         return {
@@ -365,7 +368,13 @@ class InMemoryStore:
 
         index_name = f"{self.supabase_table}_payload_gin"
         try:
-            with psycopg.connect(self.supabase_postgres_url, autocommit=True, connect_timeout=10) as conn:
+            # Keep connect options in conninfo so psycopg won't reject unexpected kwargs on some runtimes.
+            conninfo = self.supabase_postgres_url
+            if "connect_timeout=" not in conninfo:
+                separator = "&" if "?" in conninfo else "?"
+                conninfo = f"{conninfo}{separator}connect_timeout=10"
+
+            with psycopg.connect(conninfo, autocommit=True) as conn:
                 with conn.cursor() as cursor:
                     cursor.execute(
                         f"""
