@@ -73,6 +73,25 @@ def _get_env_compat(names: tuple[str, ...], suffixes: tuple[str, ...], default: 
     return _get_env_by_suffix(*suffixes, default=default)
 
 
+def _get_env_compat_with_source(names: tuple[str, ...], suffixes: tuple[str, ...], default: str = "") -> tuple[str, str]:
+    for name in names:
+        value = _normalize_env_value(os.getenv(name) or "")
+        if value:
+            return value, name
+
+    env_items = sorted(os.environ.items(), key=lambda item: item[0])
+    for suffix in suffixes:
+        expected = suffix.upper()
+        for key, raw_value in env_items:
+            if not key.upper().endswith(expected):
+                continue
+            value = _normalize_env_value(raw_value or "")
+            if value:
+                return value, key
+
+    return default, ""
+
+
 def _parse_int_env(value: str, fallback: int) -> int:
     try:
         return int(_normalize_env_value(value))
@@ -96,40 +115,81 @@ class InMemoryStore:
         else:
             self.state_file = default_state_file
         self.state_driver_note = ""
-        self.state_driver = _get_env_compat(
-            names=("WERUNOPS_STATE_DRIVER",),
-            suffixes=("_WERUNOPS_STATE_DRIVER",),
-            default="",
-        ).lower()
-        self.supabase_url = _get_env_compat(
-            names=("SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL"),
-            suffixes=("_SUPABASE_URL", "_NEXT_PUBLIC_SUPABASE_URL"),
-            default="",
-        ).rstrip("/")
-        self.supabase_key = _get_env_compat(
-            names=("SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SECRET_KEY"),
-            suffixes=("_SUPABASE_SERVICE_ROLE_KEY", "_SUPABASE_SECRET_KEY"),
+        self.env_debug: dict[str, str] = {}
+
+        raw_driver, driver_source = _get_env_compat_with_source(
+            names=("WERUNOPS_STATE_DRIVER", "NEXT_PUBLIC_WERUNOPS_STATE_DRIVER"),
+            suffixes=("_WERUNOPS_STATE_DRIVER", "_NEXT_PUBLIC_WERUNOPS_STATE_DRIVER"),
             default="",
         )
-        self.supabase_table = _get_env_compat(
+        self.state_driver = raw_driver.lower()
+        self.env_debug["stateDriverSource"] = driver_source or ""
+
+        self.supabase_url, supabase_url_source = _get_env_compat_with_source(
+            names=("SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL", "SUPABASE_PROJECT_URL"),
+            suffixes=(
+                "_SUPABASE_URL",
+                "_NEXT_PUBLIC_SUPABASE_URL",
+                "_SUPABASE_PROJECT_URL",
+                "_SUPABASE_PROJECT_API_URL",
+                "_PROJECT_URL",
+            ),
+            default="",
+        )
+        self.supabase_url = self.supabase_url.rstrip("/")
+        self.env_debug["supabaseUrlSource"] = supabase_url_source or ""
+
+        self.supabase_key, supabase_key_source = _get_env_compat_with_source(
+            names=("SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SECRET_KEY", "SUPABASE_SERVICE_KEY", "SUPABASE_KEY"),
+            suffixes=(
+                "_SUPABASE_SERVICE_ROLE_KEY",
+                "_SUPABASE_SECRET_KEY",
+                "_SUPABASE_SERVICE_KEY",
+                "_SUPABASE_KEY",
+            ),
+            default="",
+        )
+        self.env_debug["supabaseKeySource"] = supabase_key_source or ""
+
+        self.supabase_table, supabase_table_source = _get_env_compat_with_source(
             names=("SUPABASE_STATE_TABLE",),
             suffixes=("_SUPABASE_STATE_TABLE",),
             default="werunops_state",
         )
+        self.env_debug["supabaseTableSource"] = supabase_table_source or "default"
         self.supabase_table = _safe_identifier(self.supabase_table, "werunops_state")
+
+        supabase_row_id_raw, supabase_row_id_source = _get_env_compat_with_source(
+            names=("SUPABASE_STATE_ROW_ID",),
+            suffixes=("_SUPABASE_STATE_ROW_ID",),
+            default="1",
+        )
+        self.env_debug["supabaseRowIdSource"] = supabase_row_id_source or "default"
         self.supabase_row_id = _parse_int_env(
-            _get_env_compat(
-                names=("SUPABASE_STATE_ROW_ID",),
-                suffixes=("_SUPABASE_STATE_ROW_ID",),
-                default="1",
-            ),
+            supabase_row_id_raw,
             1,
         )
-        self.supabase_postgres_url = _get_env_compat(
-            names=("SUPABASE_POSTGRES_URL_NON_POOLING", "SUPABASE_POSTGRES_URL", "POSTGRES_URL_NON_POOLING", "POSTGRES_URL"),
-            suffixes=("_SUPABASE_POSTGRES_URL_NON_POOLING", "_SUPABASE_POSTGRES_URL", "_POSTGRES_URL_NON_POOLING", "_POSTGRES_URL"),
+
+        self.supabase_postgres_url, supabase_postgres_source = _get_env_compat_with_source(
+            names=(
+                "SUPABASE_POSTGRES_URL_NON_POOLING",
+                "SUPABASE_POSTGRES_URL",
+                "SUPABASE_DB_URL",
+                "DATABASE_URL",
+                "POSTGRES_URL_NON_POOLING",
+                "POSTGRES_URL",
+            ),
+            suffixes=(
+                "_SUPABASE_POSTGRES_URL_NON_POOLING",
+                "_SUPABASE_POSTGRES_URL",
+                "_SUPABASE_DB_URL",
+                "_DATABASE_URL",
+                "_POSTGRES_URL_NON_POOLING",
+                "_POSTGRES_URL",
+            ),
             default="",
         )
+        self.env_debug["supabasePostgresUrlSource"] = supabase_postgres_source or ""
         self.firebase_url = _get_env_compat(
             names=("FIREBASE_DATABASE_URL",),
             suffixes=("_FIREBASE_DATABASE_URL",),
@@ -259,6 +319,11 @@ class InMemoryStore:
             self.state_driver = "file"
             self.state_driver_note = "remote state bootstrap failed; fell back to file mode"
             self._load_state()
+
+        self.env_debug["stateDriver"] = self.state_driver
+        self.env_debug["supabaseUrlPresent"] = str(bool(self.supabase_url)).lower()
+        self.env_debug["supabaseKeyPresent"] = str(bool(self.supabase_key)).lower()
+        self.env_debug["supabasePostgresUrlPresent"] = str(bool(self.supabase_postgres_url)).lower()
 
     def _supabase_headers(self) -> dict[str, str]:
         return {

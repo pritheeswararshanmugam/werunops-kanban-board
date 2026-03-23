@@ -165,6 +165,7 @@ def health(request: Request):
             "status": "ok",
             "stateDriver": store.state_driver,
             "stateDriverNote": store.state_driver_note,
+            "stateDriverDebug": store.env_debug,
         },
         request,
     )
