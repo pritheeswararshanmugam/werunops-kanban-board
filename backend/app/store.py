@@ -82,6 +82,7 @@ class InMemoryStore:
             self.state_file = Path("/tmp") / "state_store.json"
         else:
             self.state_file = default_state_file
+        self.state_driver_note = ""
         self.state_driver = _get_env_compat(
             names=("WERUNOPS_STATE_DRIVER",),
             suffixes=("_WERUNOPS_STATE_DRIVER",),
@@ -141,18 +142,23 @@ class InMemoryStore:
         if not self.state_driver:
             if self.firebase_url and self.firebase_auth_secret:
                 self.state_driver = "firebase"
+                self.state_driver_note = "auto-detected firebase credentials"
             elif self.supabase_url and self.supabase_key:
                 self.state_driver = "supabase"
+                self.state_driver_note = "auto-detected supabase credentials"
             else:
                 self.state_driver = "file"
+                self.state_driver_note = "no backend credentials found; using file mode"
 
         if self.state_driver == "supabase" and (not self.supabase_url or not self.supabase_key):
             # Fall back to file mode if Supabase credentials are missing.
             self.state_driver = "file"
+            self.state_driver_note = "supabase selected but URL or service key missing"
 
         if self.state_driver == "firebase" and not self.firebase_url:
             # Fall back to file mode if Firebase URL is missing.
             self.state_driver = "file"
+            self.state_driver_note = "firebase selected but database URL missing"
 
         self.users: dict[str, dict[str, Any]] = {
             "Eshwar": {
@@ -232,6 +238,7 @@ class InMemoryStore:
         except Exception:
             # Keep API alive even when remote state bootstrap fails.
             self.state_driver = "file"
+            self.state_driver_note = "remote state bootstrap failed; fell back to file mode"
             self._load_state()
 
     def _supabase_headers(self) -> dict[str, str]:

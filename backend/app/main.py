@@ -160,7 +160,14 @@ def root(request: Request):
 
 @app.get("/api/v1/health")
 def health(request: Request):
-    return build_response({"status": "ok", "stateDriver": store.state_driver}, request)
+    return build_response(
+        {
+            "status": "ok",
+            "stateDriver": store.state_driver,
+            "stateDriverNote": store.state_driver_note,
+        },
+        request,
+    )
 
 @app.post("/api/v1/testing/reset-state", response_model=APIResponse)
 def testing_reset_state(request: Request):
