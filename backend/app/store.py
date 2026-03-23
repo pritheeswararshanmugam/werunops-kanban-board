@@ -118,7 +118,11 @@ class InMemoryStore:
         self.env_debug: dict[str, str] = {}
 
         raw_driver, driver_source = _get_env_compat_with_source(
-            names=("WERUNOPS_STATE_DRIVER", "NEXT_PUBLIC_WERUNOPS_STATE_DRIVER"),
+            names=(
+                "WERUNOPS_STATE_DRIVER",
+                "NEXT_PUBLIC_WERUNOPS_STATE_DRIVER",
+                "werunops_kanbanboard_supabase_WERUNOPS_STATE_DRIVER",
+            ),
             suffixes=("_WERUNOPS_STATE_DRIVER", "_NEXT_PUBLIC_WERUNOPS_STATE_DRIVER"),
             default="",
         )
@@ -126,7 +130,13 @@ class InMemoryStore:
         self.env_debug["stateDriverSource"] = driver_source or ""
 
         self.supabase_url, supabase_url_source = _get_env_compat_with_source(
-            names=("SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL", "SUPABASE_PROJECT_URL"),
+            names=(
+                "SUPABASE_URL",
+                "NEXT_PUBLIC_SUPABASE_URL",
+                "NEXT_PUBLIC_werunops_kanbanboard_supabase_SUPABASE_URL",
+                "werunops_kanbanboard_supabase_SUPABASE_URL",
+                "SUPABASE_PROJECT_URL",
+            ),
             suffixes=(
                 "_SUPABASE_URL",
                 "_NEXT_PUBLIC_SUPABASE_URL",
@@ -140,7 +150,14 @@ class InMemoryStore:
         self.env_debug["supabaseUrlSource"] = supabase_url_source or ""
 
         self.supabase_key, supabase_key_source = _get_env_compat_with_source(
-            names=("SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SECRET_KEY", "SUPABASE_SERVICE_KEY", "SUPABASE_KEY"),
+            names=(
+                "SUPABASE_SERVICE_ROLE_KEY",
+                "SUPABASE_SECRET_KEY",
+                "werunops_kanbanboard_supabase_SUPABASE_SERVICE_ROLE_KEY",
+                "werunops_kanbanboard_supabase_SUPABASE_SECRET_KEY",
+                "SUPABASE_SERVICE_KEY",
+                "SUPABASE_KEY",
+            ),
             suffixes=(
                 "_SUPABASE_SERVICE_ROLE_KEY",
                 "_SUPABASE_SECRET_KEY",
@@ -174,6 +191,8 @@ class InMemoryStore:
             names=(
                 "SUPABASE_POSTGRES_URL_NON_POOLING",
                 "SUPABASE_POSTGRES_URL",
+                "werunops_kanbanboard_supabase_POSTGRES_URL_NON_POOLING",
+                "werunops_kanbanboard_supabase_POSTGRES_URL",
                 "SUPABASE_DB_URL",
                 "DATABASE_URL",
                 "POSTGRES_URL_NON_POOLING",
