@@ -9,7 +9,8 @@ from typing import Any, cast
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, Response
+from starlette.middleware.base import RequestResponseEndpoint
 
 from app.models import (
     ActivityEntry,
@@ -38,6 +39,20 @@ from app.models import (
 from app.store import ConflictError, UnauthorizedError, store
 
 app = FastAPI(title="WeRunOps Backend API", version="1.0.0")
+
+
+@app.middleware("http")
+async def refresh_remote_state_middleware(request: Request, call_next: RequestResponseEndpoint) -> Response:
+    path = request.url.path or ""
+    should_refresh = path.startswith("/api/v1/") and path not in {"/api/v1/health", "/api/v1"}
+
+    if should_refresh:
+        try:
+            store.refresh_remote_state_if_needed(min_interval_seconds=1.5)
+        except Exception as error:
+            store.state_driver_note = f"remote refresh failed before request: {error}"
+
+    return await call_next(request)
 
 
 def _get_env_compat(names: tuple[str, ...], suffixes: tuple[str, ...], default: str = "") -> str:

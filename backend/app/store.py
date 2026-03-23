@@ -108,6 +108,91 @@ def _safe_identifier(value: str, fallback: str) -> str:
 
 class InMemoryStore:
     @staticmethod
+    def _parse_iso_datetime(value: Any) -> datetime:
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str) and value.strip():
+            raw = value.strip()
+            if raw.endswith("Z"):
+                raw = raw[:-1] + "+00:00"
+            try:
+                parsed = datetime.fromisoformat(raw)
+                if parsed.tzinfo is None:
+                    return parsed.replace(tzinfo=UTC)
+                return parsed
+            except ValueError:
+                pass
+        return datetime.min.replace(tzinfo=UTC)
+
+    @classmethod
+    def _merge_tasks_payload(cls, local_tasks: list[dict[str, Any]], remote_tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        merged: dict[int, dict[str, Any]] = {}
+
+        def ingest(candidate: dict[str, Any]) -> None:
+            raw_id = candidate.get("id")
+            if raw_id is None:
+                return
+            try:
+                task_id = int(raw_id)
+            except (TypeError, ValueError):
+                return
+
+            current = merged.get(task_id)
+            if current is None:
+                merged[task_id] = candidate
+                return
+
+            current_dt = cls._parse_iso_datetime(current.get("updatedAt"))
+            candidate_dt = cls._parse_iso_datetime(candidate.get("updatedAt"))
+
+            if candidate_dt > current_dt:
+                merged[task_id] = candidate
+                return
+
+            if candidate_dt == current_dt:
+                current_version = _parse_int_env(str(current.get("version", "1")), 1)
+                candidate_version = _parse_int_env(str(candidate.get("version", "1")), 1)
+                if candidate_version >= current_version:
+                    merged[task_id] = candidate
+
+        for task in remote_tasks:
+            ingest(task)
+        for task in local_tasks:
+            ingest(task)
+
+        return [merged[key] for key in sorted(merged.keys())]
+
+    @staticmethod
+    def _merge_clients_payload(local_clients: list[dict[str, Any]], remote_clients: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        merged: dict[int, dict[str, Any]] = {}
+
+        def ingest(candidate: dict[str, Any]) -> None:
+            raw_id = candidate.get("id")
+            if raw_id is None:
+                return
+            try:
+                client_id = int(raw_id)
+            except (TypeError, ValueError):
+                return
+
+            current = merged.get(client_id)
+            if current is None:
+                merged[client_id] = candidate
+                return
+
+            current_version = _parse_int_env(str(current.get("version", "1")), 1)
+            candidate_version = _parse_int_env(str(candidate.get("version", "1")), 1)
+            if candidate_version >= current_version:
+                merged[client_id] = candidate
+
+        for client in remote_clients:
+            ingest(client)
+        for client in local_clients:
+            ingest(client)
+
+        return [merged[key] for key in sorted(merged.keys())]
+
+    @staticmethod
     def _as_sequence(value: Any) -> list[Any]:
         if isinstance(value, list):
             return cast(list[Any], value)
@@ -410,6 +495,7 @@ class InMemoryStore:
         self.task_comments: dict[int, list[dict[str, Any]]] = {}
         self.next_task_id = 2 if self.state_driver == "file" else 1
         self.next_client_id = 3 if self.state_driver == "file" else 1
+        self._last_remote_refresh_monotonic = 0.0
         try:
             self._load_state()
         except Exception as error:
@@ -704,7 +790,31 @@ class InMemoryStore:
             "next_client_id": self.next_client_id,
         }
         if self.state_driver == "supabase":
-            self._save_state_to_supabase(payload)
+            remote_payload = self._load_state_from_supabase() or {}
+
+            merged_payload = dict(payload)
+            remote_tasks = [cast(dict[str, Any], item) for item in self._as_sequence(remote_payload.get("tasks", [])) if isinstance(item, dict)]
+            local_tasks = [cast(dict[str, Any], item) for item in self._as_sequence(payload.get("tasks", [])) if isinstance(item, dict)]
+            merged_tasks = self._merge_tasks_payload(local_tasks, remote_tasks)
+
+            remote_clients = [cast(dict[str, Any], item) for item in self._as_sequence(remote_payload.get("clients", [])) if isinstance(item, dict)]
+            local_clients = [cast(dict[str, Any], item) for item in self._as_sequence(payload.get("clients", [])) if isinstance(item, dict)]
+            merged_clients = self._merge_clients_payload(local_clients, remote_clients)
+
+            merged_payload["tasks"] = merged_tasks
+            merged_payload["clients"] = merged_clients
+            merged_payload["next_task_id"] = max(
+                _parse_int_env(str(payload.get("next_task_id", 1)), 1),
+                _parse_int_env(str(remote_payload.get("next_task_id", 1)), 1),
+                max((int(item.get("id", 0)) for item in merged_tasks), default=0) + 1,
+            )
+            merged_payload["next_client_id"] = max(
+                _parse_int_env(str(payload.get("next_client_id", 1)), 1),
+                _parse_int_env(str(remote_payload.get("next_client_id", 1)), 1),
+                max((int(item.get("id", 0)) for item in merged_clients), default=0) + 1,
+            )
+
+            self._save_state_to_supabase(merged_payload)
             return
         if self.state_driver == "firebase":
             self._save_state_to_firebase(payload)
@@ -718,6 +828,17 @@ class InMemoryStore:
 
     def reload_state(self) -> None:
         self._load_state()
+        self._last_remote_refresh_monotonic = time.monotonic()
+
+    def refresh_remote_state_if_needed(self, min_interval_seconds: float = 2.0) -> None:
+        if self.state_driver not in {"supabase", "firebase"}:
+            return
+
+        now = time.monotonic()
+        if now - self._last_remote_refresh_monotonic < max(0.0, float(min_interval_seconds)):
+            return
+
+        self.reload_state()
 
     def _load_state(self) -> None:
         if self.state_driver == "supabase":
