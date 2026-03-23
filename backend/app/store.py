@@ -107,6 +107,80 @@ def _safe_identifier(value: str, fallback: str) -> str:
 
 
 class InMemoryStore:
+    @staticmethod
+    def _as_sequence(value: Any) -> list[Any]:
+        if isinstance(value, list):
+            return cast(list[Any], value)
+        if isinstance(value, dict):
+            # Legacy payloads may store collections as keyed objects.
+            return list(cast(dict[str, Any], value).values())
+        return []
+
+    @staticmethod
+    def _coerce_task_payload(item: Any) -> dict[str, Any] | None:
+        if not isinstance(item, dict):
+            return None
+
+        payload: dict[str, Any] = dict(cast(dict[str, Any], item))
+        now_iso = datetime.now(UTC).isoformat()
+
+        task_id = payload.get("id")
+        if task_id is None:
+            return None
+        try:
+            payload["id"] = int(task_id)
+        except (TypeError, ValueError):
+            return None
+
+        payload["createdBy"] = payload.get("createdBy") or payload.get("staff") or "System"
+        payload["version"] = _parse_int_env(str(payload.get("version", "1")), 1)
+
+        created_at = payload.get("createdAt") or payload.get("updatedAt") or now_iso
+        updated_at = payload.get("updatedAt") or payload.get("createdAt") or now_iso
+        payload["createdAt"] = created_at
+        payload["updatedAt"] = updated_at
+
+        activity_log = payload.get("activityLog")
+        if not isinstance(activity_log, list):
+            payload["activityLog"] = [
+                {
+                    "action": "Task migrated",
+                    "user": "System",
+                    "timestamp": updated_at,
+                }
+            ]
+
+        return payload
+
+    @staticmethod
+    def _coerce_client_payload(item: Any, fallback_id: int) -> dict[str, Any] | None:
+        if isinstance(item, str):
+            return {
+                "id": fallback_id,
+                "name": item,
+                "contact": "",
+                "email": "",
+                "phone": "",
+                "version": 1,
+            }
+        if not isinstance(item, dict):
+            return None
+
+        payload: dict[str, Any] = dict(cast(dict[str, Any], item))
+        if not payload.get("name"):
+            return None
+
+        try:
+            payload["id"] = int(payload.get("id", fallback_id))
+        except (TypeError, ValueError):
+            payload["id"] = fallback_id
+
+        payload["version"] = _parse_int_env(str(payload.get("version", "1")), 1)
+        payload["contact"] = payload.get("contact") or ""
+        payload["email"] = payload.get("email") or ""
+        payload["phone"] = payload.get("phone") or ""
+        return payload
+
     def __init__(self) -> None:
         default_state_file = Path(__file__).resolve().parent.parent / "data" / "state_store.json"
         # Vercel's project filesystem is read-only at runtime; /tmp is writable per instance.
@@ -646,35 +720,70 @@ class InMemoryStore:
         if isinstance(loaded_users, dict):
             self.users = loaded_users
 
-        tasks = raw.get("tasks", [])
+        skipped_tasks = 0
+        skipped_clients = 0
+        skipped_presence = 0
+        skipped_sessions = 0
+        skipped_locks = 0
+
+        tasks = self._as_sequence(raw.get("tasks", []))
         self.tasks = {}
         for item in tasks:
-            task = TaskOut.model_validate(item)
-            self.tasks[task.id] = task
+            coerced_task = self._coerce_task_payload(item)
+            if not coerced_task:
+                skipped_tasks += 1
+                continue
+            try:
+                task = TaskOut.model_validate(coerced_task)
+                self.tasks[task.id] = task
+            except Exception:
+                skipped_tasks += 1
 
-        clients = raw.get("clients", [])
+        clients_source = raw.get("clients")
+        if clients_source is None and isinstance(raw.get("config"), dict):
+            clients_source = cast(dict[str, Any], raw.get("config")).get("clients", [])
+
+        clients = self._as_sequence(clients_source)
         self.clients = {}
+        next_fallback_client_id = 1
         for item in clients:
-            client = ClientOut.model_validate(item)
-            self.clients[client.id] = client
+            coerced_client = self._coerce_client_payload(item, next_fallback_client_id)
+            next_fallback_client_id += 1
+            if not coerced_client:
+                skipped_clients += 1
+                continue
+            try:
+                client = ClientOut.model_validate(coerced_client)
+                self.clients[client.id] = client
+            except Exception:
+                skipped_clients += 1
 
-        presence = raw.get("presence", [])
+        presence = self._as_sequence(raw.get("presence", []))
         self.presence = {}
         for item in presence:
-            record = PresenceOut.model_validate(item)
-            self.presence[record.username] = record
+            try:
+                record = PresenceOut.model_validate(item)
+                self.presence[record.username] = record
+            except Exception:
+                skipped_presence += 1
 
-        sessions = raw.get("sessions", [])
+        sessions = self._as_sequence(raw.get("sessions", []))
         self.sessions = {}
         for item in sessions:
-            session = SessionOut.model_validate(item)
-            self.sessions[session.id] = session
+            try:
+                session = SessionOut.model_validate(item)
+                self.sessions[session.id] = session
+            except Exception:
+                skipped_sessions += 1
 
-        task_locks = raw.get("task_locks", [])
+        task_locks = self._as_sequence(raw.get("task_locks", []))
         self.task_locks = {}
         for item in task_locks:
-            lock = TaskLockOut.model_validate(item)
-            self.task_locks[lock.taskId] = lock
+            try:
+                lock = TaskLockOut.model_validate(item)
+                self.task_locks[lock.taskId] = lock
+            except Exception:
+                skipped_locks += 1
 
         admin_audit_logs = raw.get("admin_audit_logs", [])
         self.admin_audit_logs = admin_audit_logs if isinstance(admin_audit_logs, list) else []
@@ -690,8 +799,21 @@ class InMemoryStore:
 
         self._cleanup_expired_locks()
 
-        self.next_task_id = int(raw.get("next_task_id", max(self.tasks.keys(), default=0) + 1))
-        self.next_client_id = int(raw.get("next_client_id", max(self.clients.keys(), default=0) + 1))
+        next_task_default = max(self.tasks.keys(), default=0) + 1
+        next_client_default = max(self.clients.keys(), default=0) + 1
+        if isinstance(raw.get("config"), dict):
+            raw_config = cast(dict[str, Any], raw.get("config"))
+            next_task_default = _parse_int_env(str(raw_config.get("nextTaskId", next_task_default)), next_task_default)
+            next_client_default = _parse_int_env(str(raw_config.get("nextClientId", next_client_default)), next_client_default)
+
+        self.next_task_id = _parse_int_env(str(raw.get("next_task_id", next_task_default)), next_task_default)
+        self.next_client_id = _parse_int_env(str(raw.get("next_client_id", next_client_default)), next_client_default)
+
+        if skipped_tasks or skipped_clients or skipped_presence or skipped_sessions or skipped_locks:
+            self.state_driver_note = (
+                f"state loaded with skipped invalid entries: tasks={skipped_tasks}, clients={skipped_clients}, "
+                f"presence={skipped_presence}, sessions={skipped_sessions}, locks={skipped_locks}"
+            )
 
 
 store = InMemoryStore()
