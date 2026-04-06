@@ -132,7 +132,18 @@ def ensure_task_not_locked_by_other(task_id: int, user: UserProfile) -> None:
 
 
 def current_admin_user(authorization: str | None = Header(default=None, alias="Authorization")) -> UserProfile:
-    token = parse_bearer(authorization)
+    user, _ = resolve_admin_user(None, authorization)
+    return user
+
+
+def resolve_admin_user(access_token: str | None, authorization: str | None) -> tuple[UserProfile, str]:
+    token = ""
+    if authorization and authorization.lower().startswith("bearer "):
+        token = authorization[7:].strip()
+    if not token and access_token:
+        token = access_token.strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing bearer token")
 
     try:
         user = store.user_from_token(token)
@@ -142,7 +153,7 @@ def current_admin_user(authorization: str | None = Header(default=None, alias="A
     if user.role.lower() != "admin":
         raise HTTPException(status_code=403, detail="Admin role required")
 
-    return user
+    return user, token
 
 
 def admin_log_event(admin: UserProfile, action: str, details: dict[str, Any] | None = None) -> None:
@@ -222,9 +233,10 @@ def api_root(request: Request):
 
 @app.get("/api/v1/admin/portal", response_class=HTMLResponse)
 def admin_portal(
-    _: UserProfile = Depends(current_admin_user),
     authorization: str | None = Header(default=None, alias="Authorization"),
+    access_token: str | None = Query(default=None, alias="accessToken"),
 ):
+        _, token = resolve_admin_user(access_token, authorization)
         now = datetime.now(UTC)
         bootstrap: dict[str, Any] = {
                 "generatedAt": now.isoformat(),
@@ -847,12 +859,6 @@ def admin_portal(
 </body>
 </html>
 """
-        token = ""
-        if authorization:
-            lower = authorization.lower()
-            if lower.startswith("bearer "):
-                token = authorization[7:].strip()
-
         html = html.replace("__BOOTSTRAP_JSON__", bootstrap_json)
         html = html.replace("__WERUNOPS_ADMIN_TOKEN__", token)
         return HTMLResponse(content=html)
@@ -860,10 +866,10 @@ def admin_portal(
 
 @app.get("/admin/portal", response_class=HTMLResponse)
 def admin_portal_alias(
-    user: UserProfile = Depends(current_admin_user),
     authorization: str | None = Header(default=None, alias="Authorization"),
+    access_token: str | None = Query(default=None, alias="accessToken"),
 ):
-    return admin_portal(user, authorization)
+    return admin_portal(authorization=authorization, access_token=access_token)
 
 
 @app.get("/api/v1/admin/operations", response_model=APIResponse)

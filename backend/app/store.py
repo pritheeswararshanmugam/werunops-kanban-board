@@ -108,6 +108,7 @@ def _safe_identifier(value: str, fallback: str) -> str:
 
 class InMemoryStore:
     MAX_PERSISTED_TOMBSTONES = 4096
+    SUPABASE_ADVISORY_LOCK_KEY = 71854051
 
     @staticmethod
     def _coerce_id(value: Any) -> int | None:
@@ -126,6 +127,29 @@ class InMemoryStore:
         if len(parsed) <= cls.MAX_PERSISTED_TOMBSTONES:
             return parsed
         return set(sorted(parsed)[-cls.MAX_PERSISTED_TOMBSTONES :])
+
+    @staticmethod
+    def _coerce_bool(value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "t", "yes", "y", "on"}
+        return False
+
+    @staticmethod
+    def _coerce_json_dict(value: Any) -> dict[str, Any]:
+        if isinstance(value, dict):
+            return cast(dict[str, Any], value)
+        if isinstance(value, str):
+            try:
+                parsed: Any = json.loads(value)
+                if isinstance(parsed, dict):
+                    return cast(dict[str, Any], parsed)
+            except json.JSONDecodeError:
+                return {}
+        return {}
 
     @staticmethod
     def _parse_iso_datetime(value: Any) -> datetime:
@@ -367,6 +391,26 @@ class InMemoryStore:
             1,
         )
 
+        storage_mode_raw, storage_mode_source = _get_env_compat_with_source(
+            names=("SUPABASE_STORAGE_MODE",),
+            suffixes=("_SUPABASE_STORAGE_MODE",),
+            default="",
+        )
+        storage_mode = storage_mode_raw.strip().lower()
+        if storage_mode in {"relational", "singleton"}:
+            self.supabase_storage_mode = storage_mode
+        else:
+            self.supabase_storage_mode = ""
+        self.env_debug["supabaseStorageModeSource"] = storage_mode_source or "auto"
+
+        supabase_prefix_raw, supabase_prefix_source = _get_env_compat_with_source(
+            names=("SUPABASE_RELATIONAL_PREFIX",),
+            suffixes=("_SUPABASE_RELATIONAL_PREFIX",),
+            default="werunops",
+        )
+        self.supabase_relational_prefix = _safe_identifier(supabase_prefix_raw, "werunops")
+        self.env_debug["supabaseRelationalPrefixSource"] = supabase_prefix_source or "default"
+
         self.supabase_postgres_url, supabase_postgres_source = _get_env_compat_with_source(
             names=(
                 "SUPABASE_POSTGRES_URL_NON_POOLING",
@@ -389,6 +433,14 @@ class InMemoryStore:
             default="",
         )
         self.env_debug["supabasePostgresUrlSource"] = supabase_postgres_source or ""
+
+        if not self.supabase_storage_mode:
+            self.supabase_storage_mode = "relational" if (self.supabase_postgres_url and psycopg is not None) else "singleton"
+
+        if self.supabase_storage_mode == "relational" and (not self.supabase_postgres_url or psycopg is None):
+            self.supabase_storage_mode = "singleton"
+            self.state_driver_note = "supabase relational mode unavailable; falling back to singleton payload mode"
+
         self.firebase_url = _get_env_compat(
             names=("FIREBASE_DATABASE_URL",),
             suffixes=("_FIREBASE_DATABASE_URL",),
@@ -535,6 +587,8 @@ class InMemoryStore:
         self.env_debug["supabasePostgresUrlPresent"] = str(bool(self.supabase_postgres_url)).lower()
         self.env_debug["supabaseTable"] = self.supabase_table
         self.env_debug["supabaseRowId"] = str(self.supabase_row_id)
+        self.env_debug["supabaseStorageMode"] = self.supabase_storage_mode
+        self.env_debug["supabaseRelationalPrefix"] = self.supabase_relational_prefix
         self.env_debug["lastRemoteBootstrapError"] = self.last_remote_bootstrap_error
 
     def _supabase_headers(self) -> dict[str, str]:
@@ -548,6 +602,878 @@ class InMemoryStore:
     def _supabase_endpoint(self) -> str:
         return f"{self.supabase_url}/rest/v1/{self.supabase_table}"
 
+    def _supabase_postgres_conninfo(self) -> str:
+        conninfo = self.supabase_postgres_url
+        if "connect_timeout=" not in conninfo:
+            separator = "&" if "?" in conninfo else "?"
+            conninfo = f"{conninfo}{separator}connect_timeout=10"
+        return conninfo
+
+    def _supabase_rel_table(self, suffix: str) -> str:
+        return f"{self.supabase_relational_prefix}_{suffix}"
+
+    def _bootstrap_supabase_relational_storage(self) -> bool:
+        if not self.supabase_postgres_url:
+            self.state_driver_note = "supabase relational mode missing postgres URL"
+            return False
+        if psycopg is None:
+            self.state_driver_note = "supabase relational mode unavailable; psycopg not installed"
+            return False
+
+        users_table = self._supabase_rel_table("users")
+        clients_table = self._supabase_rel_table("clients")
+        tasks_table = self._supabase_rel_table("tasks")
+        task_activity_table = self._supabase_rel_table("task_activity")
+        presence_table = self._supabase_rel_table("presence")
+        sessions_table = self._supabase_rel_table("sessions")
+        locks_table = self._supabase_rel_table("task_locks")
+        audit_table = self._supabase_rel_table("admin_audit_logs")
+        saved_filters_table = self._supabase_rel_table("saved_filters")
+        rules_table = self._supabase_rel_table("automation_rules")
+        comments_table = self._supabase_rel_table("task_comments")
+        deleted_tasks_table = self._supabase_rel_table("deleted_tasks")
+        deleted_clients_table = self._supabase_rel_table("deleted_clients")
+        meta_table = self._supabase_rel_table("state_meta")
+
+        try:
+            with psycopg.connect(self._supabase_postgres_conninfo()) as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        f"""
+                        create table if not exists public.{users_table} (
+                          username text primary key,
+                          password_hash text not null,
+                          name text not null,
+                          role text not null,
+                          initials text not null
+                        )
+                        """
+                    )
+                    cursor.execute(
+                        f"""
+                        create table if not exists public.{clients_table} (
+                          id bigint primary key,
+                          name text not null,
+                          contact text not null default '',
+                          email text not null default '',
+                          phone text not null default '',
+                          version integer not null default 1
+                        )
+                        """
+                    )
+                    cursor.execute(
+                        f"""
+                        create table if not exists public.{tasks_table} (
+                          id bigint primary key,
+                          client text not null,
+                          project text not null default '',
+                          task text not null,
+                          staff text not null,
+                          status text not null,
+                          priority text not null,
+                          start_date text not null default '',
+                          due_date text not null default '',
+                          waiting_for text not null default '',
+                          notes text not null default '',
+                          parent_id bigint,
+                          created_at timestamptz not null,
+                          updated_at timestamptz not null,
+                          created_by text not null,
+                          version integer not null default 1
+                        )
+                        """
+                    )
+                    cursor.execute(
+                        f"""
+                        create table if not exists public.{task_activity_table} (
+                          task_id bigint not null,
+                          seq integer not null,
+                          action text not null,
+                          user_name text not null,
+                          timestamp timestamptz not null,
+                          primary key (task_id, seq),
+                          foreign key (task_id) references public.{tasks_table}(id) on delete cascade
+                        )
+                        """
+                    )
+                    cursor.execute(
+                        f"""
+                        create table if not exists public.{presence_table} (
+                          username text primary key,
+                          online boolean not null,
+                          last_seen timestamptz not null,
+                          browser text,
+                          device text
+                        )
+                        """
+                    )
+                    cursor.execute(
+                        f"""
+                        create table if not exists public.{sessions_table} (
+                          id text primary key,
+                          username text not null,
+                          login_time timestamptz not null,
+                          logout_time timestamptz,
+                          duration_seconds integer not null default 0,
+                          active_seconds integer not null default 0,
+                          idle_seconds integer not null default 0,
+                          browser text,
+                          device text
+                        )
+                        """
+                    )
+                    cursor.execute(
+                        f"""
+                        create table if not exists public.{locks_table} (
+                          task_id bigint primary key,
+                          locked_by text not null,
+                          locked_by_name text not null,
+                          acquired_at timestamptz not null,
+                          expires_at timestamptz not null
+                        )
+                        """
+                    )
+                    cursor.execute(
+                        f"""
+                        create table if not exists public.{audit_table} (
+                          seq integer primary key,
+                          timestamp timestamptz not null,
+                          admin text,
+                          admin_name text,
+                          action text not null,
+                          details_json jsonb not null default '{{}}'::jsonb
+                        )
+                        """
+                    )
+                    cursor.execute(
+                        f"""
+                        create table if not exists public.{saved_filters_table} (
+                          name text primary key,
+                          filters_json jsonb not null default '{{}}'::jsonb,
+                          position integer not null default 0,
+                          saved_at timestamptz,
+                          saved_by text
+                        )
+                        """
+                    )
+                    cursor.execute(
+                        f"""
+                        alter table public.{saved_filters_table}
+                        add column if not exists position integer not null default 0
+                        """
+                    )
+                    cursor.execute(
+                        f"""
+                        create table if not exists public.{rules_table} (
+                          id text primary key,
+                          name text not null,
+                          trigger text not null,
+                          action text not null,
+                          enabled boolean not null default true,
+                          position integer not null default 0,
+                          metadata_json jsonb not null default '{{}}'::jsonb
+                        )
+                        """
+                    )
+                    cursor.execute(
+                        f"""
+                        create table if not exists public.{comments_table} (
+                          task_id bigint not null,
+                          seq integer not null,
+                          id text not null,
+                          comment text not null,
+                          user_name text not null,
+                          username text,
+                          timestamp timestamptz not null,
+                          primary key (task_id, seq)
+                        )
+                        """
+                    )
+                    cursor.execute(
+                        f"""
+                        create table if not exists public.{deleted_tasks_table} (
+                          task_id bigint primary key,
+                          deleted_at timestamptz not null default now()
+                        )
+                        """
+                    )
+                    cursor.execute(
+                        f"""
+                        create table if not exists public.{deleted_clients_table} (
+                          client_id bigint primary key,
+                          deleted_at timestamptz not null default now()
+                        )
+                        """
+                    )
+                    cursor.execute(
+                        f"""
+                        create table if not exists public.{meta_table} (
+                          key text primary key,
+                          value_text text not null
+                        )
+                        """
+                    )
+
+                    cursor.execute(f"select 1 from public.{users_table} limit 1")
+                    has_rows = cursor.fetchone() is not None
+                    if not has_rows:
+                        cursor.execute("select to_regclass(%s)", (f"public.{self.supabase_table}",))
+                        legacy_relation = cursor.fetchone()
+                        if legacy_relation and legacy_relation[0]:
+                            cursor.execute(
+                                f"select payload from public.{self.supabase_table} where id = %s limit 1",
+                                (self.supabase_row_id,),
+                            )
+                            legacy_row = cursor.fetchone()
+                            if legacy_row and isinstance(legacy_row[0], dict):
+                                self._write_relational_payload(cursor, cast(dict[str, Any], legacy_row[0]))
+                                self.state_driver_note = "auto-migrated legacy singleton state into relational tables"
+
+            self.state_driver_note = "supabase relational storage ready"
+            return True
+        except Exception as error:
+            self.state_driver_note = f"supabase relational bootstrap failed ({error})"
+            return False
+
+    def _write_relational_payload(self, cursor: Any, payload: dict[str, Any]) -> None:
+        users_table = self._supabase_rel_table("users")
+        clients_table = self._supabase_rel_table("clients")
+        tasks_table = self._supabase_rel_table("tasks")
+        task_activity_table = self._supabase_rel_table("task_activity")
+        presence_table = self._supabase_rel_table("presence")
+        sessions_table = self._supabase_rel_table("sessions")
+        locks_table = self._supabase_rel_table("task_locks")
+        audit_table = self._supabase_rel_table("admin_audit_logs")
+        saved_filters_table = self._supabase_rel_table("saved_filters")
+        rules_table = self._supabase_rel_table("automation_rules")
+        comments_table = self._supabase_rel_table("task_comments")
+        deleted_tasks_table = self._supabase_rel_table("deleted_tasks")
+        deleted_clients_table = self._supabase_rel_table("deleted_clients")
+        meta_table = self._supabase_rel_table("state_meta")
+
+        cursor.execute(f"delete from public.{task_activity_table}")
+        cursor.execute(f"delete from public.{comments_table}")
+        cursor.execute(f"delete from public.{locks_table}")
+        cursor.execute(f"delete from public.{sessions_table}")
+        cursor.execute(f"delete from public.{presence_table}")
+        cursor.execute(f"delete from public.{tasks_table}")
+        cursor.execute(f"delete from public.{clients_table}")
+        cursor.execute(f"delete from public.{users_table}")
+        cursor.execute(f"delete from public.{audit_table}")
+        cursor.execute(f"delete from public.{saved_filters_table}")
+        cursor.execute(f"delete from public.{rules_table}")
+        cursor.execute(f"delete from public.{deleted_tasks_table}")
+        cursor.execute(f"delete from public.{deleted_clients_table}")
+        cursor.execute(f"delete from public.{meta_table} where key in ('next_task_id', 'next_client_id')")
+
+        users_source_raw = payload.get("users", {})
+        users_source: dict[str, Any] = cast(dict[str, Any], users_source_raw) if isinstance(users_source_raw, dict) else {}
+        if users_source:
+            user_values = [cast(dict[str, Any], value) for value in users_source.values() if isinstance(value, dict)]
+            for user in sorted(user_values, key=lambda item: str(item.get("username") or "")):
+                username = str(user.get("username") or "").strip()
+                if not username:
+                    continue
+                cursor.execute(
+                    f"""
+                    insert into public.{users_table} (username, password_hash, name, role, initials)
+                    values (%s, %s, %s, %s, %s)
+                    """,
+                    (
+                        username,
+                        str(user.get("passwordHash") or ""),
+                        str(user.get("name") or username),
+                        str(user.get("role") or "User"),
+                        str(user.get("initials") or username[:1].upper()),
+                    ),
+                )
+
+        clients_source = self._as_sequence(payload.get("clients", []))
+        for raw_client in clients_source:
+            if not isinstance(raw_client, dict):
+                continue
+            client = cast(dict[str, Any], raw_client)
+            client_id = self._coerce_id(client.get("id"))
+            if client_id is None:
+                continue
+            cursor.execute(
+                f"""
+                insert into public.{clients_table} (id, name, contact, email, phone, version)
+                values (%s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    client_id,
+                    str(client.get("name") or ""),
+                    str(client.get("contact") or ""),
+                    str(client.get("email") or ""),
+                    str(client.get("phone") or ""),
+                    _parse_int_env(str(client.get("version", 1)), 1),
+                ),
+            )
+
+        tasks_source = self._as_sequence(payload.get("tasks", []))
+        for raw_task in tasks_source:
+            if not isinstance(raw_task, dict):
+                continue
+            task = cast(dict[str, Any], raw_task)
+            task_id = self._coerce_id(task.get("id"))
+            if task_id is None:
+                continue
+            parent_id = self._coerce_id(task.get("parentId"))
+            cursor.execute(
+                f"""
+                insert into public.{tasks_table} (
+                  id, client, project, task, staff, status, priority,
+                  start_date, due_date, waiting_for, notes, parent_id,
+                  created_at, updated_at, created_by, version
+                )
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    task_id,
+                    str(task.get("client") or ""),
+                    str(task.get("project") or ""),
+                    str(task.get("task") or ""),
+                    str(task.get("staff") or ""),
+                    str(task.get("status") or "New"),
+                    str(task.get("priority") or "Medium"),
+                    str(task.get("startDate") or ""),
+                    str(task.get("dueDate") or ""),
+                    str(task.get("waitingFor") or ""),
+                    str(task.get("notes") or ""),
+                    parent_id,
+                    self._parse_iso_datetime(task.get("createdAt")),
+                    self._parse_iso_datetime(task.get("updatedAt")),
+                    str(task.get("createdBy") or "System"),
+                    _parse_int_env(str(task.get("version", 1)), 1),
+                ),
+            )
+
+            activity_source = self._as_sequence(task.get("activityLog", []))
+            for seq, raw_activity in enumerate(activity_source):
+                if not isinstance(raw_activity, dict):
+                    continue
+                activity = cast(dict[str, Any], raw_activity)
+                cursor.execute(
+                    f"""
+                    insert into public.{task_activity_table} (task_id, seq, action, user_name, timestamp)
+                    values (%s, %s, %s, %s, %s)
+                    """,
+                    (
+                        task_id,
+                        seq,
+                        str(activity.get("action") or ""),
+                        str(activity.get("user") or ""),
+                        self._parse_iso_datetime(activity.get("timestamp")),
+                    ),
+                )
+
+        presence_source = self._as_sequence(payload.get("presence", []))
+        for raw_presence in presence_source:
+            if not isinstance(raw_presence, dict):
+                continue
+            presence = cast(dict[str, Any], raw_presence)
+            username = str(presence.get("username") or "").strip()
+            if not username:
+                continue
+            cursor.execute(
+                f"""
+                insert into public.{presence_table} (username, online, last_seen, browser, device)
+                values (%s, %s, %s, %s, %s)
+                """,
+                (
+                    username,
+                    self._coerce_bool(presence.get("online")),
+                    self._parse_iso_datetime(presence.get("lastSeen")),
+                    str(presence.get("browser") or "") or None,
+                    str(presence.get("device") or "") or None,
+                ),
+            )
+
+        sessions_source = self._as_sequence(payload.get("sessions", []))
+        for raw_session in sessions_source:
+            if not isinstance(raw_session, dict):
+                continue
+            session = cast(dict[str, Any], raw_session)
+            session_id = str(session.get("id") or "").strip()
+            username = str(session.get("username") or "").strip()
+            if not session_id or not username:
+                continue
+            logout_time_raw = session.get("logoutTime")
+            cursor.execute(
+                f"""
+                insert into public.{sessions_table} (
+                  id, username, login_time, logout_time, duration_seconds,
+                  active_seconds, idle_seconds, browser, device
+                )
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    session_id,
+                    username,
+                    self._parse_iso_datetime(session.get("loginTime")),
+                    self._parse_iso_datetime(logout_time_raw) if logout_time_raw else None,
+                    _parse_int_env(str(session.get("durationSeconds", 0)), 0),
+                    _parse_int_env(str(session.get("activeSeconds", 0)), 0),
+                    _parse_int_env(str(session.get("idleSeconds", 0)), 0),
+                    str(session.get("browser") or "") or None,
+                    str(session.get("device") or "") or None,
+                ),
+            )
+
+        locks_source = self._as_sequence(payload.get("task_locks", []))
+        for raw_lock in locks_source:
+            if not isinstance(raw_lock, dict):
+                continue
+            lock = cast(dict[str, Any], raw_lock)
+            task_id = self._coerce_id(lock.get("taskId"))
+            if task_id is None:
+                continue
+            cursor.execute(
+                f"""
+                insert into public.{locks_table} (task_id, locked_by, locked_by_name, acquired_at, expires_at)
+                values (%s, %s, %s, %s, %s)
+                """,
+                (
+                    task_id,
+                    str(lock.get("lockedBy") or ""),
+                    str(lock.get("lockedByName") or ""),
+                    self._parse_iso_datetime(lock.get("acquiredAt")),
+                    self._parse_iso_datetime(lock.get("expiresAt")),
+                ),
+            )
+
+        audit_source = self._as_sequence(payload.get("admin_audit_logs", []))
+        for seq, raw_audit in enumerate(audit_source):
+            if not isinstance(raw_audit, dict):
+                continue
+            audit = cast(dict[str, Any], raw_audit)
+            details_raw = audit.get("details")
+            details = cast(dict[str, Any], details_raw) if isinstance(details_raw, dict) else {}
+            cursor.execute(
+                f"""
+                insert into public.{audit_table} (seq, timestamp, admin, admin_name, action, details_json)
+                values (%s, %s, %s, %s, %s, %s::jsonb)
+                """,
+                (
+                    seq,
+                    self._parse_iso_datetime(audit.get("timestamp")),
+                    str(audit.get("admin") or "") or None,
+                    str(audit.get("adminName") or "") or None,
+                    str(audit.get("action") or ""),
+                    json.dumps(details),
+                ),
+            )
+
+        filters_source = self._as_sequence(payload.get("saved_filter_sets", []))
+        for seq, raw_filter in enumerate(filters_source):
+            if not isinstance(raw_filter, dict):
+                continue
+            saved_filter = cast(dict[str, Any], raw_filter)
+            name = str(saved_filter.get("name") or "").strip()
+            if not name:
+                continue
+            filters_raw = saved_filter.get("filters")
+            filters = cast(dict[str, Any], filters_raw) if isinstance(filters_raw, dict) else {}
+            saved_at = saved_filter.get("savedAt")
+            cursor.execute(
+                f"""
+                insert into public.{saved_filters_table} (name, filters_json, position, saved_at, saved_by)
+                values (%s, %s::jsonb, %s, %s, %s)
+                """,
+                (
+                    name,
+                    json.dumps(filters),
+                    seq,
+                    self._parse_iso_datetime(saved_at) if saved_at else None,
+                    str(saved_filter.get("savedBy") or "") or None,
+                ),
+            )
+
+        rules_source = self._as_sequence(payload.get("automation_rules", []))
+        for seq, raw_rule in enumerate(rules_source):
+            if not isinstance(raw_rule, dict):
+                continue
+            rule = cast(dict[str, Any], raw_rule)
+            rule_id = str(rule.get("id") or "").strip() or f"rule_{seq}"
+            metadata = {key: value for key, value in rule.items() if key not in {"id", "name", "trigger", "action", "enabled"}}
+            cursor.execute(
+                f"""
+                insert into public.{rules_table} (id, name, trigger, action, enabled, position, metadata_json)
+                values (%s, %s, %s, %s, %s, %s, %s::jsonb)
+                """,
+                (
+                    rule_id,
+                    str(rule.get("name") or rule_id),
+                    str(rule.get("trigger") or "manual"),
+                    str(rule.get("action") or "none"),
+                    self._coerce_bool(rule.get("enabled", True)),
+                    seq,
+                    json.dumps(metadata),
+                ),
+            )
+
+        comments_source = payload.get("task_comments", {})
+        if isinstance(comments_source, dict):
+            for raw_task_id, raw_bucket in cast(dict[Any, Any], comments_source).items():
+                task_id = self._coerce_id(raw_task_id)
+                if task_id is None:
+                    continue
+                bucket = self._as_sequence(raw_bucket)
+                for seq, raw_comment in enumerate(bucket):
+                    if not isinstance(raw_comment, dict):
+                        continue
+                    comment = cast(dict[str, Any], raw_comment)
+                    cursor.execute(
+                        f"""
+                        insert into public.{comments_table} (task_id, seq, id, comment, user_name, username, timestamp)
+                        values (%s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            task_id,
+                            seq,
+                            str(comment.get("id") or f"c_{task_id}_{seq}"),
+                            str(comment.get("comment") or ""),
+                            str(comment.get("user") or ""),
+                            str(comment.get("username") or "") or None,
+                            self._parse_iso_datetime(comment.get("timestamp")),
+                        ),
+                    )
+
+        for task_id in sorted(self._coerce_id_set(payload.get("deleted_task_ids", []))):
+            cursor.execute(
+                f"insert into public.{deleted_tasks_table} (task_id) values (%s)",
+                (task_id,),
+            )
+
+        for client_id in sorted(self._coerce_id_set(payload.get("deleted_client_ids", []))):
+            cursor.execute(
+                f"insert into public.{deleted_clients_table} (client_id) values (%s)",
+                (client_id,),
+            )
+
+        next_task_id = _parse_int_env(str(payload.get("next_task_id", 1)), 1)
+        next_client_id = _parse_int_env(str(payload.get("next_client_id", 1)), 1)
+        cursor.execute(
+            f"insert into public.{meta_table} (key, value_text) values (%s, %s)",
+            ("next_task_id", str(next_task_id)),
+        )
+        cursor.execute(
+            f"insert into public.{meta_table} (key, value_text) values (%s, %s)",
+            ("next_client_id", str(next_client_id)),
+        )
+
+    def _load_state_from_supabase_relational(self) -> dict[str, Any] | None:
+        if not self._bootstrap_supabase_relational_storage():
+            raise RuntimeError("Supabase relational storage is not available")
+
+        if psycopg is None:
+            raise RuntimeError("psycopg is required for relational Supabase mode")
+
+        users_table = self._supabase_rel_table("users")
+        clients_table = self._supabase_rel_table("clients")
+        tasks_table = self._supabase_rel_table("tasks")
+        task_activity_table = self._supabase_rel_table("task_activity")
+        presence_table = self._supabase_rel_table("presence")
+        sessions_table = self._supabase_rel_table("sessions")
+        locks_table = self._supabase_rel_table("task_locks")
+        audit_table = self._supabase_rel_table("admin_audit_logs")
+        saved_filters_table = self._supabase_rel_table("saved_filters")
+        rules_table = self._supabase_rel_table("automation_rules")
+        comments_table = self._supabase_rel_table("task_comments")
+        deleted_tasks_table = self._supabase_rel_table("deleted_tasks")
+        deleted_clients_table = self._supabase_rel_table("deleted_clients")
+        meta_table = self._supabase_rel_table("state_meta")
+
+        with psycopg.connect(self._supabase_postgres_conninfo()) as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("select pg_advisory_xact_lock_shared(%s)", (self.SUPABASE_ADVISORY_LOCK_KEY,))
+
+                cursor.execute(
+                    f"select username, password_hash, name, role, initials from public.{users_table} order by username"
+                )
+                users_rows = cursor.fetchall()
+                users: dict[str, dict[str, Any]] = {}
+                for username, password_hash, name, role, initials in users_rows:
+                    username_text = str(username or "")
+                    if not username_text:
+                        continue
+                    users[username_text] = {
+                        "username": username_text,
+                        "passwordHash": str(password_hash or ""),
+                        "name": str(name or username_text),
+                        "role": str(role or "User"),
+                        "initials": str(initials or username_text[:1].upper()),
+                    }
+
+                cursor.execute(
+                    f"select task_id, seq, action, user_name, timestamp from public.{task_activity_table} order by task_id, seq"
+                )
+                activity_rows = cursor.fetchall()
+                activity_map: dict[int, list[dict[str, Any]]] = {}
+                for task_id, _seq, action, user_name, timestamp in activity_rows:
+                    task_key = int(task_id)
+                    bucket = activity_map.setdefault(task_key, [])
+                    bucket.append(
+                        {
+                            "action": str(action or ""),
+                            "user": str(user_name or ""),
+                            "timestamp": timestamp,
+                        }
+                    )
+
+                cursor.execute(
+                    f"""
+                    select id, client, project, task, staff, status, priority,
+                           start_date, due_date, waiting_for, notes, parent_id,
+                           created_at, updated_at, created_by, version
+                    from public.{tasks_table}
+                    order by id
+                    """
+                )
+                task_rows = cursor.fetchall()
+                tasks: list[dict[str, Any]] = []
+                for (
+                    task_id,
+                    client,
+                    project,
+                    task_name,
+                    staff,
+                    status,
+                    priority,
+                    start_date,
+                    due_date,
+                    waiting_for,
+                    notes,
+                    parent_id,
+                    created_at,
+                    updated_at,
+                    created_by,
+                    version,
+                ) in task_rows:
+                    tasks.append(
+                        {
+                            "id": int(task_id),
+                            "client": str(client or ""),
+                            "project": str(project or ""),
+                            "task": str(task_name or ""),
+                            "staff": str(staff or ""),
+                            "status": str(status or "New"),
+                            "priority": str(priority or "Medium"),
+                            "startDate": str(start_date or ""),
+                            "dueDate": str(due_date or ""),
+                            "waitingFor": str(waiting_for or ""),
+                            "notes": str(notes or ""),
+                            "parentId": self._coerce_id(parent_id),
+                            "createdAt": created_at,
+                            "updatedAt": updated_at,
+                            "createdBy": str(created_by or "System"),
+                            "version": _parse_int_env(str(version), 1),
+                            "activityLog": activity_map.get(int(task_id), []),
+                        }
+                    )
+
+                cursor.execute(
+                    f"select id, name, contact, email, phone, version from public.{clients_table} order by id"
+                )
+                client_rows = cursor.fetchall()
+                clients: list[dict[str, Any]] = [
+                    {
+                        "id": int(client_id),
+                        "name": str(name or ""),
+                        "contact": str(contact or ""),
+                        "email": str(email or ""),
+                        "phone": str(phone or ""),
+                        "version": _parse_int_env(str(version), 1),
+                    }
+                    for client_id, name, contact, email, phone, version in client_rows
+                ]
+
+                cursor.execute(
+                    f"select username, online, last_seen, browser, device from public.{presence_table} order by username"
+                )
+                presence_rows = cursor.fetchall()
+                presence: list[dict[str, Any]] = [
+                    {
+                        "username": str(username or ""),
+                        "online": self._coerce_bool(online),
+                        "lastSeen": last_seen,
+                        "browser": browser,
+                        "device": device,
+                    }
+                    for username, online, last_seen, browser, device in presence_rows
+                    if str(username or "").strip()
+                ]
+
+                cursor.execute(
+                    f"""
+                    select id, username, login_time, logout_time, duration_seconds,
+                           active_seconds, idle_seconds, browser, device
+                    from public.{sessions_table}
+                    order by login_time desc
+                    """
+                )
+                session_rows = cursor.fetchall()
+                sessions: list[dict[str, Any]] = [
+                    {
+                        "id": str(session_id or ""),
+                        "username": str(username or ""),
+                        "loginTime": login_time,
+                        "logoutTime": logout_time,
+                        "durationSeconds": _parse_int_env(str(duration_seconds), 0),
+                        "activeSeconds": _parse_int_env(str(active_seconds), 0),
+                        "idleSeconds": _parse_int_env(str(idle_seconds), 0),
+                        "browser": browser,
+                        "device": device,
+                    }
+                    for (
+                        session_id,
+                        username,
+                        login_time,
+                        logout_time,
+                        duration_seconds,
+                        active_seconds,
+                        idle_seconds,
+                        browser,
+                        device,
+                    ) in session_rows
+                    if str(session_id or "").strip() and str(username or "").strip()
+                ]
+
+                cursor.execute(
+                    f"select task_id, locked_by, locked_by_name, acquired_at, expires_at from public.{locks_table} order by task_id"
+                )
+                lock_rows = cursor.fetchall()
+                task_locks: list[dict[str, Any]] = [
+                    {
+                        "taskId": int(task_id),
+                        "lockedBy": str(locked_by or ""),
+                        "lockedByName": str(locked_by_name or ""),
+                        "acquiredAt": acquired_at,
+                        "expiresAt": expires_at,
+                    }
+                    for task_id, locked_by, locked_by_name, acquired_at, expires_at in lock_rows
+                ]
+
+                cursor.execute(
+                    f"select seq, timestamp, admin, admin_name, action, details_json from public.{audit_table} order by seq"
+                )
+                audit_rows = cursor.fetchall()
+                admin_audit_logs: list[dict[str, Any]] = []
+                for _seq, timestamp, admin, admin_name, action, details_json in audit_rows:
+                    admin_audit_logs.append(
+                        {
+                            "timestamp": timestamp.isoformat() if isinstance(timestamp, datetime) else str(timestamp or ""),
+                            "admin": str(admin or ""),
+                            "adminName": str(admin_name or ""),
+                            "action": str(action or ""),
+                            "details": self._coerce_json_dict(details_json),
+                        }
+                    )
+
+                cursor.execute(
+                    f"select name, filters_json, saved_at, saved_by from public.{saved_filters_table} order by position, saved_at desc"
+                )
+                filter_rows = cursor.fetchall()
+                saved_filter_sets: list[dict[str, Any]] = []
+                for name, filters_json, saved_at, saved_by in filter_rows:
+                    saved_filter_sets.append(
+                        {
+                            "name": str(name or ""),
+                            "filters": self._coerce_json_dict(filters_json),
+                            "savedAt": saved_at.isoformat() if isinstance(saved_at, datetime) else "",
+                            "savedBy": str(saved_by or ""),
+                        }
+                    )
+
+                cursor.execute(
+                    f"select id, name, trigger, action, enabled, metadata_json from public.{rules_table} order by position, id"
+                )
+                rule_rows = cursor.fetchall()
+                automation_rules: list[dict[str, Any]] = []
+                for rule_id, name, trigger, action, enabled, metadata_json in rule_rows:
+                    metadata = self._coerce_json_dict(metadata_json)
+                    entry: dict[str, Any] = {
+                        "id": str(rule_id or ""),
+                        "name": str(name or ""),
+                        "trigger": str(trigger or ""),
+                        "action": str(action or ""),
+                        "enabled": self._coerce_bool(enabled),
+                    }
+                    entry.update(metadata)
+                    automation_rules.append(entry)
+
+                cursor.execute(
+                    f"select task_id, id, comment, user_name, username, timestamp from public.{comments_table} order by task_id, seq"
+                )
+                comment_rows = cursor.fetchall()
+                task_comments: dict[int, list[dict[str, Any]]] = {}
+                for task_id, comment_id, comment, user_name, username, timestamp in comment_rows:
+                    key = int(task_id)
+                    bucket = task_comments.setdefault(key, [])
+                    bucket.append(
+                        {
+                            "id": str(comment_id or ""),
+                            "taskId": key,
+                            "comment": str(comment or ""),
+                            "user": str(user_name or ""),
+                            "username": str(username or ""),
+                            "timestamp": timestamp.isoformat() if isinstance(timestamp, datetime) else str(timestamp or ""),
+                        }
+                    )
+
+                cursor.execute(f"select task_id from public.{deleted_tasks_table} order by task_id")
+                deleted_task_ids = [int(task_id) for (task_id,) in cursor.fetchall()]
+
+                cursor.execute(f"select client_id from public.{deleted_clients_table} order by client_id")
+                deleted_client_ids = [int(client_id) for (client_id,) in cursor.fetchall()]
+
+                cursor.execute(
+                    f"select key, value_text from public.{meta_table} where key in ('next_task_id', 'next_client_id')"
+                )
+                meta_rows = cursor.fetchall()
+                next_task_id = 1
+                next_client_id = 1
+                for key, value_text in meta_rows:
+                    if key == "next_task_id":
+                        next_task_id = _parse_int_env(str(value_text), 1)
+                    if key == "next_client_id":
+                        next_client_id = _parse_int_env(str(value_text), 1)
+
+        payload: dict[str, Any] = {
+            "users": users,
+            "tasks": tasks,
+            "clients": clients,
+            "presence": presence,
+            "sessions": sessions,
+            "task_locks": task_locks,
+            "admin_audit_logs": admin_audit_logs,
+            "saved_filter_sets": saved_filter_sets,
+            "automation_rules": automation_rules,
+            "task_comments": task_comments,
+            "next_task_id": next_task_id,
+            "next_client_id": next_client_id,
+            "deleted_task_ids": deleted_task_ids,
+            "deleted_client_ids": deleted_client_ids,
+        }
+
+        if not users and not tasks and not clients and not sessions and not presence:
+            return {}
+
+        return payload
+
+    def _save_state_to_supabase_relational(self, payload: dict[str, Any]) -> None:
+        if not self._bootstrap_supabase_relational_storage():
+            raise RuntimeError("Supabase relational storage is not available")
+
+        if psycopg is None:
+            raise RuntimeError("psycopg is required for relational Supabase mode")
+
+        with psycopg.connect(self._supabase_postgres_conninfo()) as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("select pg_advisory_xact_lock(%s)", (self.SUPABASE_ADVISORY_LOCK_KEY,))
+                self._write_relational_payload(cursor, payload)
+
     def _bootstrap_supabase_storage(self) -> bool:
         if not self.supabase_postgres_url:
             self.state_driver_note = "supabase relation missing; no postgres URL available for bootstrap"
@@ -558,13 +1484,7 @@ class InMemoryStore:
 
         index_name = f"{self.supabase_table}_payload_gin"
         try:
-            # Keep connect options in conninfo so psycopg won't reject unexpected kwargs on some runtimes.
-            conninfo = self.supabase_postgres_url
-            if "connect_timeout=" not in conninfo:
-                separator = "&" if "?" in conninfo else "?"
-                conninfo = f"{conninfo}{separator}connect_timeout=10"
-
-            with psycopg.connect(conninfo, autocommit=True) as conn:
+            with psycopg.connect(self._supabase_postgres_conninfo(), autocommit=True) as conn:
                 with conn.cursor() as cursor:
                     cursor.execute(
                         f"""
@@ -597,6 +1517,9 @@ class InMemoryStore:
             return False
 
     def _load_state_from_supabase(self) -> dict[str, Any] | None:
+        if self.supabase_storage_mode == "relational":
+            return self._load_state_from_supabase_relational()
+
         endpoint = self._supabase_endpoint()
         params = {
             "select": "payload",
@@ -642,6 +1565,10 @@ class InMemoryStore:
             return None
 
     def _save_state_to_supabase(self, payload: dict[str, Any]) -> None:
+        if self.supabase_storage_mode == "relational":
+            self._save_state_to_supabase_relational(payload)
+            return
+
         endpoint = self._supabase_endpoint()
         body: dict[str, Any] = {
             "id": self.supabase_row_id,

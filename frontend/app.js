@@ -2763,37 +2763,21 @@ function openAdminPortal() {
     }
 
     const baseApi = (CONFIG.backendApiBase || '').replace(/\/+$/, '');
-    const url = `${baseApi}/admin/portal`;
+    const url = `${baseApi}/admin/portal?accessToken=${encodeURIComponent(currentUser.accessToken)}`;
 
-    const portalWindow = window.open('about:blank', '_blank', 'noopener,noreferrer');
-    if (!portalWindow) {
-        showNotification('Popup Blocked', 'Allow popups for this site to open Admin Portal in a new tab.', 'warning');
+    const opened = window.open(url, '_blank', 'noopener,noreferrer');
+    if (opened) {
         return;
     }
 
-    portalWindow.document.open();
-    portalWindow.document.write('<!doctype html><title>Loading Admin Portal...</title><p style="font-family:Segoe UI,Arial,sans-serif;padding:16px;color:#334155;">Loading Admin Portal...</p>');
-    portalWindow.document.close();
-
-    fetch(url, {
-        headers: { Authorization: `Bearer ${currentUser.accessToken}` }
-    })
-        .then(async (response) => {
-            if (!response.ok) {
-                if (response.status === 401 || response.status === 403) {
-                    window.dispatchEvent(new CustomEvent('werunops-auth-invalid', { detail: { status: response.status } }));
-                }
-                throw new Error(`Admin portal request failed (${response.status})`);
-            }
-            const html = await response.text();
-            portalWindow.document.open();
-            portalWindow.document.write(html);
-            portalWindow.document.close();
-        })
-        .catch(() => {
-            if (portalWindow) portalWindow.close();
-            showNotification('Portal Error', 'Unable to open backend admin portal.', 'error');
-        });
+    const fallbackLink = document.createElement('a');
+    fallbackLink.href = url;
+    fallbackLink.target = '_blank';
+    fallbackLink.rel = 'noopener noreferrer';
+    fallbackLink.style.display = 'none';
+    document.body.appendChild(fallbackLink);
+    fallbackLink.click();
+    fallbackLink.remove();
 }
 
 function setupProfileModal() {

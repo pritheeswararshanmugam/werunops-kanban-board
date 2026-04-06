@@ -42,6 +42,7 @@ Driver auto-selection (when `WERUNOPS_STATE_DRIVER` is not set):
 1. Create a Supabase project.
 2. Open SQL Editor and run `backend/supabase_setup.sql`.
 3. Copy `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
+4. Copy the direct Postgres connection string (`SUPABASE_POSTGRES_URL_NON_POOLING`) so backend can use relational SQL tables.
 
 ## Vercel deploy (backend)
 
@@ -61,10 +62,10 @@ Driver auto-selection (when `WERUNOPS_STATE_DRIVER` is not set):
 **With Supabase (alternative):**
 
 - `WERUNOPS_STATE_DRIVER=supabase`
+- `SUPABASE_STORAGE_MODE=relational`
 - `SUPABASE_URL=...`
 - `SUPABASE_SERVICE_ROLE_KEY=...`
-- `SUPABASE_STATE_TABLE=werunops_state`
-- `SUPABASE_STATE_ROW_ID=1`
+- `SUPABASE_POSTGRES_URL_NON_POOLING=...`
 - `CORS_ALLOW_ORIGINS=https://pritheeswararshanmugam.github.io`
 
 1. Deploy and note the backend URL.
