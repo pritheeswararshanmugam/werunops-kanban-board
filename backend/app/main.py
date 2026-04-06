@@ -1276,6 +1276,7 @@ def create_task(payload: TaskCreate, request: Request, user: UserProfile = Depen
 @app.post("/api/v1/tasks/restore", response_model=APIResponse)
 def restore_task(payload: TaskRestoreRequest, request: Request, _: UserProfile = Depends(current_user)):
     task = payload.task
+    store.mark_task_restored(task.id)
     store.tasks[task.id] = task
     if task.id >= store.next_task_id:
         store.next_task_id = task.id + 1
@@ -1321,6 +1322,7 @@ def delete_task(task_id: int, request: Request, user: UserProfile = Depends(curr
     if task_id not in store.tasks:
         raise HTTPException(status_code=404, detail="Task not found")
     ensure_task_not_locked_by_other(task_id, user)
+    store.mark_task_deleted(task_id)
     store.tasks.pop(task_id)
     store.task_locks.pop(task_id, None)
     store.save_state()
@@ -1333,6 +1335,7 @@ def bulk_delete_tasks(payload: BulkDeleteRequest, request: Request, user: UserPr
     for task_id in payload.taskIds:
         if task_id in store.tasks:
             ensure_task_not_locked_by_other(task_id, user)
+            store.mark_task_deleted(task_id)
             store.tasks.pop(task_id)
             store.task_locks.pop(task_id, None)
             deleted += 1
@@ -1380,6 +1383,7 @@ def delete_client(client_id: int, request: Request, _: UserProfile = Depends(cur
     if has_tasks:
         raise HTTPException(status_code=400, detail="Client has active tasks")
 
+    store.mark_client_deleted(client_id)
     store.clients.pop(client_id)
     store.save_state()
     return build_response({"deleted": True, "clientId": client_id}, request)

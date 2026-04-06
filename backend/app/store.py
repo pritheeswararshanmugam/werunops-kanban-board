@@ -107,6 +107,26 @@ def _safe_identifier(value: str, fallback: str) -> str:
 
 
 class InMemoryStore:
+    MAX_PERSISTED_TOMBSTONES = 4096
+
+    @staticmethod
+    def _coerce_id(value: Any) -> int | None:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _coerce_id_set(cls, value: Any) -> set[int]:
+        parsed: set[int] = set()
+        for item in cls._as_sequence(value):
+            task_id = cls._coerce_id(item)
+            if task_id is not None:
+                parsed.add(task_id)
+        if len(parsed) <= cls.MAX_PERSISTED_TOMBSTONES:
+            return parsed
+        return set(sorted(parsed)[-cls.MAX_PERSISTED_TOMBSTONES :])
+
     @staticmethod
     def _parse_iso_datetime(value: Any) -> datetime:
         if isinstance(value, datetime):
@@ -496,6 +516,10 @@ class InMemoryStore:
         self.next_task_id = 2 if self.state_driver == "file" else 1
         self.next_client_id = 3 if self.state_driver == "file" else 1
         self._last_remote_refresh_monotonic = 0.0
+        self._deleted_task_ids: set[int] = set()
+        self._deleted_client_ids: set[int] = set()
+        self._restored_task_ids: set[int] = set()
+        self._restored_client_ids: set[int] = set()
         try:
             self._load_state()
         except Exception as error:
@@ -774,6 +798,30 @@ class InMemoryStore:
         self._cleanup_expired_locks()
         return self.task_locks.get(task_id)
 
+    def mark_task_deleted(self, task_id: int) -> None:
+        parsed = self._coerce_id(task_id)
+        if parsed is not None:
+            self._deleted_task_ids.add(parsed)
+            self._restored_task_ids.discard(parsed)
+
+    def mark_client_deleted(self, client_id: int) -> None:
+        parsed = self._coerce_id(client_id)
+        if parsed is not None:
+            self._deleted_client_ids.add(parsed)
+            self._restored_client_ids.discard(parsed)
+
+    def mark_task_restored(self, task_id: int) -> None:
+        parsed = self._coerce_id(task_id)
+        if parsed is not None:
+            self._restored_task_ids.add(parsed)
+            self._deleted_task_ids.discard(parsed)
+
+    def mark_client_restored(self, client_id: int) -> None:
+        parsed = self._coerce_id(client_id)
+        if parsed is not None:
+            self._restored_client_ids.add(parsed)
+            self._deleted_client_ids.discard(parsed)
+
     def save_state(self) -> None:
         payload: dict[str, Any] = {
             "users": self.users,
@@ -793,34 +841,72 @@ class InMemoryStore:
             remote_payload = self._load_state_from_supabase() or {}
 
             merged_payload = dict(payload)
+            effective_deleted_task_ids = self._coerce_id_set(remote_payload.get("deleted_task_ids", []))
+            effective_deleted_task_ids |= self._deleted_task_ids
+            effective_deleted_task_ids -= self._restored_task_ids
+            if len(effective_deleted_task_ids) > self.MAX_PERSISTED_TOMBSTONES:
+                effective_deleted_task_ids = set(sorted(effective_deleted_task_ids)[-self.MAX_PERSISTED_TOMBSTONES :])
+
+            effective_deleted_client_ids = self._coerce_id_set(remote_payload.get("deleted_client_ids", []))
+            effective_deleted_client_ids |= self._deleted_client_ids
+            effective_deleted_client_ids -= self._restored_client_ids
+            if len(effective_deleted_client_ids) > self.MAX_PERSISTED_TOMBSTONES:
+                effective_deleted_client_ids = set(sorted(effective_deleted_client_ids)[-self.MAX_PERSISTED_TOMBSTONES :])
+
             remote_tasks = [cast(dict[str, Any], item) for item in self._as_sequence(remote_payload.get("tasks", [])) if isinstance(item, dict)]
             local_tasks = [cast(dict[str, Any], item) for item in self._as_sequence(payload.get("tasks", [])) if isinstance(item, dict)]
             merged_tasks = self._merge_tasks_payload(local_tasks, remote_tasks)
+            if effective_deleted_task_ids:
+                merged_tasks = [
+                    item
+                    for item in merged_tasks
+                    if (self._coerce_id(item.get("id")) not in effective_deleted_task_ids)
+                ]
 
             remote_clients = [cast(dict[str, Any], item) for item in self._as_sequence(remote_payload.get("clients", [])) if isinstance(item, dict)]
             local_clients = [cast(dict[str, Any], item) for item in self._as_sequence(payload.get("clients", [])) if isinstance(item, dict)]
             merged_clients = self._merge_clients_payload(local_clients, remote_clients)
+            if effective_deleted_client_ids:
+                merged_clients = [
+                    item
+                    for item in merged_clients
+                    if (self._coerce_id(item.get("id")) not in effective_deleted_client_ids)
+                ]
 
             merged_payload["tasks"] = merged_tasks
             merged_payload["clients"] = merged_clients
+            merged_payload["deleted_task_ids"] = sorted(effective_deleted_task_ids)
+            merged_payload["deleted_client_ids"] = sorted(effective_deleted_client_ids)
             merged_payload["next_task_id"] = max(
                 _parse_int_env(str(payload.get("next_task_id", 1)), 1),
                 _parse_int_env(str(remote_payload.get("next_task_id", 1)), 1),
-                max((int(item.get("id", 0)) for item in merged_tasks), default=0) + 1,
+                max(((self._coerce_id(item.get("id")) or 0) for item in merged_tasks), default=0) + 1,
             )
             merged_payload["next_client_id"] = max(
                 _parse_int_env(str(payload.get("next_client_id", 1)), 1),
                 _parse_int_env(str(remote_payload.get("next_client_id", 1)), 1),
-                max((int(item.get("id", 0)) for item in merged_clients), default=0) + 1,
+                max(((self._coerce_id(item.get("id")) or 0) for item in merged_clients), default=0) + 1,
             )
 
             self._save_state_to_supabase(merged_payload)
+            self._deleted_task_ids.clear()
+            self._deleted_client_ids.clear()
+            self._restored_task_ids.clear()
+            self._restored_client_ids.clear()
             return
         if self.state_driver == "firebase":
             self._save_state_to_firebase(payload)
+            self._deleted_task_ids.clear()
+            self._deleted_client_ids.clear()
+            self._restored_task_ids.clear()
+            self._restored_client_ids.clear()
             return
         try:
             self.state_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            self._deleted_task_ids.clear()
+            self._deleted_client_ids.clear()
+            self._restored_task_ids.clear()
+            self._restored_client_ids.clear()
         except OSError:
             # Keep API responses successful even when file persistence is unavailable.
             # In this mode, state remains in-memory for the current instance only.
@@ -898,6 +984,18 @@ class InMemoryStore:
                 self.clients[client.id] = client
             except Exception:
                 skipped_clients += 1
+
+        loaded_deleted_task_ids = self._coerce_id_set(raw.get("deleted_task_ids", []))
+        loaded_deleted_client_ids = self._coerce_id_set(raw.get("deleted_client_ids", []))
+        for task_id in loaded_deleted_task_ids:
+            self.tasks.pop(task_id, None)
+            self.task_locks.pop(task_id, None)
+        for client_id in loaded_deleted_client_ids:
+            self.clients.pop(client_id, None)
+        self._deleted_task_ids = loaded_deleted_task_ids
+        self._deleted_client_ids = loaded_deleted_client_ids
+        self._restored_task_ids.clear()
+        self._restored_client_ids.clear()
 
         presence = self._as_sequence(raw.get("presence", []))
         self.presence = {}
