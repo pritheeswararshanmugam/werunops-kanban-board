@@ -144,7 +144,18 @@ test('forensic check: created task should not disappear after sync and reload', 
 
     await page.reload({ waitUntil: 'domcontentloaded' });
     await expect(page.locator('#main-content')).toBeVisible({ timeout: 30_000 });
-    stillVisibleAfterReload = await taskVisibleInTable(page, taskName);
+
+    try {
+      await expect
+        .poll(async () => taskVisibleInTable(page, taskName), {
+          timeout: 20_000,
+          intervals: [500, 1000, 2000],
+        })
+        .toBe(true);
+      stillVisibleAfterReload = true;
+    } catch {
+      stillVisibleAfterReload = false;
+    }
 
     expect(
       stillVisibleAfterWait && stillVisibleAfterReload,

@@ -24,7 +24,6 @@
   },
   "tasks": [
     {
-      "id": 1,
       "client": "JS Roofing",
       "project": "House 12",
       "task": "Create PO fascia",
@@ -36,6 +35,7 @@
       "waitingFor": "Supplier",
       "notes": "Waiting for supplier pricing",
       "parentId": null,
+      "id": 1,
       "createdAt": "2026-03-01T00:00:00Z",
       "updatedAt": "2026-03-01T00:00:00Z",
       "createdBy": "Pritheeswarar",
@@ -49,7 +49,6 @@
       "version": 1
     },
     {
-      "id": 2,
       "client": "A to Z Roofing",
       "project": "House 21",
       "task": "Confirm gutter color",
@@ -61,6 +60,7 @@
       "waitingFor": "Client",
       "notes": "Need client final color decision",
       "parentId": null,
+      "id": 2,
       "createdAt": "2026-03-02T00:00:00Z",
       "updatedAt": "2026-03-02T00:00:00Z",
       "createdBy": "Pritheeswarar",
@@ -72,23 +72,73 @@
         }
       ],
       "version": 1
+    },
+    {
+      "client": "JS Roofing",
+      "project": "House 77",
+      "task": "Validate API smoke",
+      "staff": "Mubarak",
+      "status": "New",
+      "priority": "Low",
+      "startDate": "2026-03-12",
+      "dueDate": "2026-03-15",
+      "waitingFor": "",
+      "notes": "",
+      "parentId": null,
+      "id": 3,
+      "createdAt": "2026-04-06T12:14:06.393671Z",
+      "updatedAt": "2026-04-06T12:14:06.393671Z",
+      "createdBy": "Pritheeswarar",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-04-06T12:14:06.393671Z"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "client": "JS Roofing",
+      "project": "House Lock",
+      "task": "Lock contention test",
+      "staff": "Mubarak",
+      "status": "New",
+      "priority": "Medium",
+      "startDate": "2026-03-13",
+      "dueDate": "2026-03-20",
+      "waitingFor": "",
+      "notes": "",
+      "parentId": null,
+      "id": 4,
+      "createdAt": "2026-04-06T12:14:06.423097Z",
+      "updatedAt": "2026-04-06T12:14:06.423097Z",
+      "createdBy": "Pritheeswarar",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-04-06T12:14:06.423097Z"
+        }
+      ],
+      "version": 1
     }
   ],
   "clients": [
     {
-      "id": 1,
       "name": "JS Roofing",
       "contact": "John Smith",
       "email": "john@jsroofing.com",
       "phone": "555-0100",
+      "id": 1,
       "version": 1
     },
     {
-      "id": 2,
       "name": "A to Z Roofing",
       "contact": "Alice",
       "email": "alice@atoz.com",
       "phone": "555-0101",
+      "id": 2,
       "version": 1
     }
   ],
@@ -114,6 +164,6 @@
     }
   ],
   "task_comments": {},
-  "next_task_id": 3,
+  "next_task_id": 5,
   "next_client_id": 3
 }

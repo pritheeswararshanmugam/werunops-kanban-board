@@ -3,6 +3,7 @@
 ## 1) Purpose of the App
 
 WeRunOps is an operations management platform for small teams that need a single workspace to:
+
 - manage day-to-day tasks in a Kanban-style workflow,
 - track clients and related work,
 - monitor user activity, presence, and sessions,
@@ -14,22 +15,26 @@ The main business goal is operational visibility plus execution speed: users can
 ## 2) What the Product Includes
 
 The product is split into two parts:
+
 - Frontend web app (Vanilla JS + Tailwind via CDN) for daily operations.
 - FastAPI backend for auth, persistence, syncing, locking, reporting, admin workflows, and exports.
 
 It supports two practical runtime styles:
+
 - Frontend-first/local mode for quick usage and offline support.
 - Backend API mode for shared state, auth, multi-user consistency, session/presence tracking, and admin operations.
 
 ## 3) Core Functional Areas
 
 ### Authentication and User Identity
+
 - Sign-in with username/password.
 - Profile retrieval and token-based session handling.
 - Logout and password change.
 - Role-aware behavior (Admin, Manager, User).
 
 ### Task Management
+
 - Create, read, update, delete tasks.
 - Status transitions across workflow states:
   - New
@@ -45,6 +50,7 @@ It supports two practical runtime styles:
 - Optimistic concurrency with version checks to prevent silent overwrite.
 
 ### Task Locking and Multi-User Safety
+
 - Task-level lock acquire/release endpoints.
 - Lock conflict handling when another user owns a lock.
 - Lock TTL and refresh behavior.
