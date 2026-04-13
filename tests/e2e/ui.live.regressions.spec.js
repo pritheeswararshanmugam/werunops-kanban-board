@@ -60,9 +60,13 @@ async function selectNonDefaultStaff(page) {
     const options = Array.from(select.options || []).filter((option) => option.value && !option.disabled);
     if (!options.length) return null;
 
-    const first = options[0].value;
-    const second = options.length > 1 ? options[1].value : options[0].value;
-    return { first, selected: second };
+    const first = options[0];
+    const second = options.length > 1 ? options[1] : options[0];
+    return {
+      first: first.value,
+      selected: second.value,
+      selectedLabel: String(second.label || second.textContent || second.value).trim(),
+    };
   });
 
   if (!choice || !choice.selected) {
@@ -135,7 +139,7 @@ test('live task assignee should not reset during background sync', async ({ page
   await page.fill('#tasks-search', taskName);
   const row = page.locator('#tasks-table-body tr', { hasText: taskName }).first();
   await expect(row).toBeVisible({ timeout: 30_000 });
-  await expect(row).toContainText(staffChoice.selected);
+  await expect(row).toContainText(staffChoice.selectedLabel);
 
   await row.locator('td:nth-child(5) .hover\\:underline, td:nth-child(5) div').first().click().catch(async () => {
     await page.evaluate((name) => {
