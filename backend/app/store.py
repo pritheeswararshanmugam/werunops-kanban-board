@@ -109,6 +109,14 @@ def _safe_identifier(value: str, fallback: str) -> str:
 class InMemoryStore:
     MAX_PERSISTED_TOMBSTONES = 4096
     SUPABASE_ADVISORY_LOCK_KEY = 71854051
+    ROLE_ALIASES = {
+        "admin": "Admin",
+        "super admin": "Admin",
+        "super_admin": "Admin",
+        "manager": "Manager",
+        "operator": "User",
+        "user": "User",
+    }
 
     @staticmethod
     def _coerce_id(value: Any) -> int | None:
@@ -137,6 +145,47 @@ class InMemoryStore:
         if isinstance(value, str):
             return value.strip().lower() in {"1", "true", "t", "yes", "y", "on"}
         return False
+
+    @classmethod
+    def _normalize_role(cls, value: Any) -> str:
+        raw_role = str(value or "").strip().lower()
+        return cls.ROLE_ALIASES.get(raw_role, "User")
+
+    @classmethod
+    def _normalize_user_record(cls, fallback_username: str, item: Any) -> dict[str, Any] | None:
+        if not isinstance(item, dict):
+            return None
+
+        payload = dict(cast(dict[str, Any], item))
+        username = str(payload.get("username") or fallback_username or "").strip()
+        if not username:
+            return None
+
+        name = str(payload.get("name") or username)
+        initials_source = str(payload.get("initials") or name or username).strip()
+        is_active_raw = payload.get("isActive") if "isActive" in payload else payload.get("is_active", True)
+        return {
+            "username": username,
+            "passwordHash": str(payload.get("passwordHash") or payload.get("password_hash") or ""),
+            "name": name,
+            "role": cls._normalize_role(payload.get("role")),
+            "initials": (initials_source[:1] or username[:1]).upper(),
+            "department": str(payload.get("department") or ""),
+            "timezone": str(payload.get("timezone") or "UTC"),
+            "isActive": cls._coerce_bool(is_active_raw),
+        }
+
+    @classmethod
+    def _user_profile_from_record(cls, user: dict[str, Any]) -> UserProfile:
+        return UserProfile(
+            username=str(user.get("username") or ""),
+            name=str(user.get("name") or user.get("username") or ""),
+            role=cls._normalize_role(user.get("role")),
+            initials=str(user.get("initials") or user.get("username") or "?")[:1].upper(),
+            department=str(user.get("department") or ""),
+            timezone=str(user.get("timezone") or "UTC"),
+            isActive=cls._coerce_bool(user.get("isActive", True)),
+        )
 
     @staticmethod
     def _coerce_json_dict(value: Any) -> dict[str, Any]:
@@ -268,6 +317,16 @@ class InMemoryStore:
         updated_at = payload.get("updatedAt") or payload.get("createdAt") or now_iso
         payload["createdAt"] = created_at
         payload["updatedAt"] = updated_at
+        payload["operationalCategory"] = str(payload.get("operationalCategory") or "")
+
+        approval_status = str(payload.get("approvalStatus") or "Pending")
+        if approval_status not in {"Pending", "Approved", "Rejected", "Not Required"}:
+            approval_status = "Pending"
+        payload["approvalStatus"] = approval_status
+
+        approved_by = str(payload.get("approvedBy") or "").strip()
+        payload["approvedBy"] = approved_by or None
+        payload["approvedAt"] = payload.get("approvedAt") or None
 
         activity_log = payload.get("activityLog")
         if not isinstance(activity_log, list):
@@ -308,6 +367,28 @@ class InMemoryStore:
         payload["contact"] = payload.get("contact") or ""
         payload["email"] = payload.get("email") or ""
         payload["phone"] = payload.get("phone") or ""
+        return payload
+
+    @staticmethod
+    def _coerce_session_payload(item: Any) -> dict[str, Any] | None:
+        if not isinstance(item, dict):
+            return None
+
+        payload: dict[str, Any] = dict(cast(dict[str, Any], item))
+        session_id = str(payload.get("id") or "").strip()
+        username = str(payload.get("username") or "").strip()
+        if not session_id or not username:
+            return None
+
+        payload["id"] = session_id
+        payload["username"] = username
+        payload["durationSeconds"] = _parse_int_env(str(payload.get("durationSeconds", 0)), 0)
+        payload["activeSeconds"] = _parse_int_env(str(payload.get("activeSeconds", 0)), 0)
+        payload["idleSeconds"] = _parse_int_env(str(payload.get("idleSeconds", 0)), 0)
+        payload["projectTag"] = str(payload.get("projectTag") or "")
+        payload["operationalCategory"] = str(payload.get("operationalCategory") or "")
+        payload["billableSeconds"] = _parse_int_env(str(payload.get("billableSeconds", 0)), 0)
+        payload["administrativeSeconds"] = _parse_int_env(str(payload.get("administrativeSeconds", 0)), 0)
         return payload
 
     def __init__(self) -> None:
@@ -497,6 +578,9 @@ class InMemoryStore:
                 "name": "Pritheeswarar",
                 "role": "Admin",
                 "initials": "P",
+                "department": "Leadership",
+                "timezone": "Asia/Kolkata",
+                "isActive": True,
             },
             "Mubarak": {
                 "username": "Mubarak",
@@ -504,6 +588,9 @@ class InMemoryStore:
                 "name": "Mubarak",
                 "role": "Manager",
                 "initials": "M",
+                "department": "Operations",
+                "timezone": "Asia/Kolkata",
+                "isActive": True,
             },
             "Sudhar": {
                 "username": "Sudhar",
@@ -511,6 +598,9 @@ class InMemoryStore:
                 "name": "Sudharshan",
                 "role": "User",
                 "initials": "S",
+                "department": "Delivery",
+                "timezone": "Asia/Kolkata",
+                "isActive": True,
             },
         }
         self.tasks: dict[int, TaskOut] = {}
@@ -651,6 +741,24 @@ class InMemoryStore:
                     )
                     cursor.execute(
                         f"""
+                        alter table public.{users_table}
+                        add column if not exists department text not null default ''
+                        """
+                    )
+                    cursor.execute(
+                        f"""
+                        alter table public.{users_table}
+                        add column if not exists timezone text not null default 'UTC'
+                        """
+                    )
+                    cursor.execute(
+                        f"""
+                        alter table public.{users_table}
+                        add column if not exists is_active boolean not null default true
+                        """
+                    )
+                    cursor.execute(
+                        f"""
                         create table if not exists public.{clients_table} (
                           id bigint primary key,
                           name text not null,
@@ -681,6 +789,30 @@ class InMemoryStore:
                           created_by text not null,
                           version integer not null default 1
                         )
+                        """
+                    )
+                    cursor.execute(
+                        f"""
+                        alter table public.{tasks_table}
+                        add column if not exists operational_category text not null default ''
+                        """
+                    )
+                    cursor.execute(
+                        f"""
+                        alter table public.{tasks_table}
+                        add column if not exists approval_status text not null default 'Pending'
+                        """
+                    )
+                    cursor.execute(
+                        f"""
+                        alter table public.{tasks_table}
+                        add column if not exists approved_by text
+                        """
+                    )
+                    cursor.execute(
+                        f"""
+                        alter table public.{tasks_table}
+                        add column if not exists approved_at timestamptz
                         """
                     )
                     cursor.execute(
@@ -720,6 +852,30 @@ class InMemoryStore:
                           browser text,
                           device text
                         )
+                        """
+                    )
+                    cursor.execute(
+                        f"""
+                        alter table public.{sessions_table}
+                        add column if not exists project_tag text not null default ''
+                        """
+                    )
+                    cursor.execute(
+                        f"""
+                        alter table public.{sessions_table}
+                        add column if not exists operational_category text not null default ''
+                        """
+                    )
+                    cursor.execute(
+                        f"""
+                        alter table public.{sessions_table}
+                        add column if not exists billable_seconds integer not null default 0
+                        """
+                    )
+                    cursor.execute(
+                        f"""
+                        alter table public.{sessions_table}
+                        add column if not exists administrative_seconds integer not null default 0
                         """
                     )
                     cursor.execute(
@@ -869,22 +1025,26 @@ class InMemoryStore:
         users_source_raw = payload.get("users", {})
         users_source: dict[str, Any] = cast(dict[str, Any], users_source_raw) if isinstance(users_source_raw, dict) else {}
         if users_source:
-            user_values = [cast(dict[str, Any], value) for value in users_source.values() if isinstance(value, dict)]
-            for user in sorted(user_values, key=lambda item: str(item.get("username") or "")):
-                username = str(user.get("username") or "").strip()
-                if not username:
+            for fallback_username, raw_user in sorted(users_source.items(), key=lambda item: str(item[0] or "")):
+                user = self._normalize_user_record(str(fallback_username or ""), raw_user)
+                if not user:
                     continue
                 cursor.execute(
                     f"""
-                    insert into public.{users_table} (username, password_hash, name, role, initials)
-                    values (%s, %s, %s, %s, %s)
+                    insert into public.{users_table} (
+                      username, password_hash, name, role, initials, department, timezone, is_active
+                    )
+                    values (%s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
-                        username,
+                        user["username"],
                         str(user.get("passwordHash") or ""),
-                        str(user.get("name") or username),
-                        str(user.get("role") or "User"),
-                        str(user.get("initials") or username[:1].upper()),
+                        str(user.get("name") or user["username"]),
+                        self._normalize_role(user.get("role")),
+                        str(user.get("initials") or user["username"][:1].upper()),
+                        str(user.get("department") or ""),
+                        str(user.get("timezone") or "UTC"),
+                        self._coerce_bool(user.get("isActive", True)),
                     ),
                 )
 
@@ -913,21 +1073,23 @@ class InMemoryStore:
 
         tasks_source = self._as_sequence(payload.get("tasks", []))
         for raw_task in tasks_source:
-            if not isinstance(raw_task, dict):
+            task = self._coerce_task_payload(raw_task)
+            if not task:
                 continue
-            task = cast(dict[str, Any], raw_task)
             task_id = self._coerce_id(task.get("id"))
             if task_id is None:
                 continue
             parent_id = self._coerce_id(task.get("parentId"))
+            approved_at_raw = task.get("approvedAt")
             cursor.execute(
                 f"""
                 insert into public.{tasks_table} (
                   id, client, project, task, staff, status, priority,
                   start_date, due_date, waiting_for, notes, parent_id,
+                  operational_category, approval_status, approved_by, approved_at,
                   created_at, updated_at, created_by, version
                 )
-                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     task_id,
@@ -942,6 +1104,10 @@ class InMemoryStore:
                     str(task.get("waitingFor") or ""),
                     str(task.get("notes") or ""),
                     parent_id,
+                    str(task.get("operationalCategory") or ""),
+                    str(task.get("approvalStatus") or "Pending"),
+                    str(task.get("approvedBy") or "") or None,
+                    self._parse_iso_datetime(approved_at_raw) if approved_at_raw else None,
                     self._parse_iso_datetime(task.get("createdAt")),
                     self._parse_iso_datetime(task.get("updatedAt")),
                     str(task.get("createdBy") or "System"),
@@ -992,9 +1158,9 @@ class InMemoryStore:
 
         sessions_source = self._as_sequence(payload.get("sessions", []))
         for raw_session in sessions_source:
-            if not isinstance(raw_session, dict):
+            session = self._coerce_session_payload(raw_session)
+            if not session:
                 continue
-            session = cast(dict[str, Any], raw_session)
             session_id = str(session.get("id") or "").strip()
             username = str(session.get("username") or "").strip()
             if not session_id or not username:
@@ -1004,9 +1170,10 @@ class InMemoryStore:
                 f"""
                 insert into public.{sessions_table} (
                   id, username, login_time, logout_time, duration_seconds,
-                  active_seconds, idle_seconds, browser, device
+                  active_seconds, idle_seconds, browser, device,
+                  project_tag, operational_category, billable_seconds, administrative_seconds
                 )
-                values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     session_id,
@@ -1018,6 +1185,10 @@ class InMemoryStore:
                     _parse_int_env(str(session.get("idleSeconds", 0)), 0),
                     str(session.get("browser") or "") or None,
                     str(session.get("device") or "") or None,
+                    str(session.get("projectTag") or ""),
+                    str(session.get("operationalCategory") or ""),
+                    _parse_int_env(str(session.get("billableSeconds", 0)), 0),
+                    _parse_int_env(str(session.get("administrativeSeconds", 0)), 0),
                 ),
             )
 
@@ -1190,21 +1361,31 @@ class InMemoryStore:
                 cursor.execute("select pg_advisory_xact_lock_shared(%s)", (self.SUPABASE_ADVISORY_LOCK_KEY,))
 
                 cursor.execute(
-                    f"select username, password_hash, name, role, initials from public.{users_table} order by username"
+                    f"""
+                    select username, password_hash, name, role, initials, department, timezone, is_active
+                    from public.{users_table}
+                    order by username
+                    """
                 )
                 users_rows = cursor.fetchall()
                 users: dict[str, dict[str, Any]] = {}
-                for username, password_hash, name, role, initials in users_rows:
-                    username_text = str(username or "")
-                    if not username_text:
+                for username, password_hash, name, role, initials, department, timezone, is_active in users_rows:
+                    normalized_user = self._normalize_user_record(
+                        str(username or ""),
+                        {
+                            "username": username,
+                            "passwordHash": password_hash,
+                            "name": name,
+                            "role": role,
+                            "initials": initials,
+                            "department": department,
+                            "timezone": timezone,
+                            "isActive": is_active,
+                        },
+                    )
+                    if not normalized_user:
                         continue
-                    users[username_text] = {
-                        "username": username_text,
-                        "passwordHash": str(password_hash or ""),
-                        "name": str(name or username_text),
-                        "role": str(role or "User"),
-                        "initials": str(initials or username_text[:1].upper()),
-                    }
+                    users[normalized_user["username"]] = normalized_user
 
                 cursor.execute(
                     f"select task_id, seq, action, user_name, timestamp from public.{task_activity_table} order by task_id, seq"
@@ -1226,6 +1407,7 @@ class InMemoryStore:
                     f"""
                     select id, client, project, task, staff, status, priority,
                            start_date, due_date, waiting_for, notes, parent_id,
+                           operational_category, approval_status, approved_by, approved_at,
                            created_at, updated_at, created_by, version
                     from public.{tasks_table}
                     order by id
@@ -1246,6 +1428,10 @@ class InMemoryStore:
                     waiting_for,
                     notes,
                     parent_id,
+                    operational_category,
+                    approval_status,
+                    approved_by,
+                    approved_at,
                     created_at,
                     updated_at,
                     created_by,
@@ -1265,6 +1451,10 @@ class InMemoryStore:
                             "waitingFor": str(waiting_for or ""),
                             "notes": str(notes or ""),
                             "parentId": self._coerce_id(parent_id),
+                            "operationalCategory": str(operational_category or ""),
+                            "approvalStatus": str(approval_status or "Pending"),
+                            "approvedBy": str(approved_by or "") or None,
+                            "approvedAt": approved_at,
                             "createdAt": created_at,
                             "updatedAt": updated_at,
                             "createdBy": str(created_by or "System"),
@@ -1308,7 +1498,8 @@ class InMemoryStore:
                 cursor.execute(
                     f"""
                     select id, username, login_time, logout_time, duration_seconds,
-                           active_seconds, idle_seconds, browser, device
+                           active_seconds, idle_seconds, browser, device,
+                           project_tag, operational_category, billable_seconds, administrative_seconds
                     from public.{sessions_table}
                     order by login_time desc
                     """
@@ -1325,6 +1516,10 @@ class InMemoryStore:
                         "idleSeconds": _parse_int_env(str(idle_seconds), 0),
                         "browser": browser,
                         "device": device,
+                        "projectTag": str(project_tag or ""),
+                        "operationalCategory": str(operational_category or ""),
+                        "billableSeconds": _parse_int_env(str(billable_seconds), 0),
+                        "administrativeSeconds": _parse_int_env(str(administrative_seconds), 0),
                     }
                     for (
                         session_id,
@@ -1336,6 +1531,10 @@ class InMemoryStore:
                         idle_seconds,
                         browser,
                         device,
+                        project_tag,
+                        operational_category,
+                        billable_seconds,
+                        administrative_seconds,
                     ) in session_rows
                     if str(session_id or "").strip() and str(username or "").strip()
                 ]
@@ -1646,16 +1845,13 @@ class InMemoryStore:
         user = self.users.get(username)
         if not user:
             raise UnauthorizedError("Invalid username or password")
+        if not self._coerce_bool(user.get("isActive", True)):
+            raise UnauthorizedError("User is inactive")
         if user["passwordHash"] != self._sha256(password):
             raise UnauthorizedError("Invalid username or password")
 
         token = self._issue_token(username)
-        profile = UserProfile(
-            username=user["username"],
-            name=user["name"],
-            role=user["role"],
-            initials=user["initials"],
-        )
+        profile = self._user_profile_from_record(user)
         return token, profile
 
     def change_password(self, username: str, current_password: str, new_password: str) -> None:
@@ -1672,12 +1868,9 @@ class InMemoryStore:
         if username not in self.users:
             raise UnauthorizedError("Invalid or expired token")
         user = self.users[username]
-        return UserProfile(
-            username=user["username"],
-            name=user["name"],
-            role=user["role"],
-            initials=user["initials"],
-        )
+        if not self._coerce_bool(user.get("isActive", True)):
+            raise UnauthorizedError("Invalid or expired token")
+        return self._user_profile_from_record(user)
 
     def logout(self, token: str) -> None:
         # Stateless token mode: logout is handled client-side by dropping the token.
@@ -1872,7 +2065,14 @@ class InMemoryStore:
 
         loaded_users = raw.get("users")
         if isinstance(loaded_users, dict):
-            self.users = loaded_users
+            normalized_users: dict[str, dict[str, Any]] = {}
+            loaded_user_map = cast(dict[Any, Any], loaded_users)
+            for fallback_username, raw_user in loaded_user_map.items():
+                normalized_user = self._normalize_user_record(str(fallback_username or ""), raw_user)
+                if normalized_user:
+                    normalized_users[normalized_user["username"]] = normalized_user
+            if normalized_users:
+                self.users = normalized_users
 
         skipped_tasks = 0
         skipped_clients = 0
@@ -1937,7 +2137,11 @@ class InMemoryStore:
         self.sessions = {}
         for item in sessions:
             try:
-                session = SessionOut.model_validate(item)
+                coerced_session = self._coerce_session_payload(item)
+                if not coerced_session:
+                    skipped_sessions += 1
+                    continue
+                session = SessionOut.model_validate(coerced_session)
                 self.sessions[session.id] = session
             except Exception:
                 skipped_sessions += 1

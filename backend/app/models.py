@@ -25,6 +25,9 @@ class UserProfile(BaseModel):
     name: str
     role: str
     initials: str
+    department: str | None = ""
+    timezone: str | None = "UTC"
+    isActive: bool = True
 
 
 class LoginRequest(BaseModel):
@@ -54,6 +57,7 @@ TaskStatus = Literal[
     "Completed",
 ]
 TaskPriority = Literal["High", "Medium", "Low"]
+TaskApprovalStatus = Literal["Pending", "Approved", "Rejected", "Not Required"]
 
 
 class ActivityEntry(BaseModel):
@@ -74,6 +78,10 @@ class TaskBase(BaseModel):
     waitingFor: str | None = ""
     notes: str | None = ""
     parentId: int | None = None
+    operationalCategory: str | None = ""
+    approvalStatus: TaskApprovalStatus = "Pending"
+    approvedBy: str | None = None
+    approvedAt: datetime | None = None
 
 
 class TaskCreate(TaskBase):
@@ -155,6 +163,10 @@ class PresenceOut(BaseModel):
 class SessionStartRequest(BaseModel):
     browser: str | None = None
     device: str | None = None
+    projectTag: str | None = ""
+    operationalCategory: str | None = ""
+    billableSeconds: int = 0
+    administrativeSeconds: int = 0
 
 
 class SessionHeartbeatRequest(BaseModel):
@@ -172,3 +184,7 @@ class SessionOut(BaseModel):
     idleSeconds: int = 0
     browser: str | None = None
     device: str | None = None
+    projectTag: str | None = ""
+    operationalCategory: str | None = ""
+    billableSeconds: int = 0
+    administrativeSeconds: int = 0

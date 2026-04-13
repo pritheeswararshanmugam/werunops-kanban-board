@@ -5,26 +5,34 @@
       "passwordHash": "f91b043302878951ce9258214033bd206ea0a92bb88931ba8bb6edb01b57d020",
       "name": "Pritheeswarar",
       "role": "Admin",
-      "initials": "P"
+      "initials": "P",
+      "department": "",
+      "timezone": "UTC",
+      "isActive": true
     },
     "Mubarak": {
       "username": "Mubarak",
       "passwordHash": "23fece5f1a2a4452cba0113271736a16d241201bef2fd15b72819582e13fb267",
       "name": "Mubarak",
       "role": "Manager",
-      "initials": "M"
+      "initials": "M",
+      "department": "",
+      "timezone": "UTC",
+      "isActive": true
     },
     "Sudhar": {
       "username": "Sudhar",
       "passwordHash": "56e89b1d6436fc86deea34dbb0306af59c40d29f20bc20b6efcb001cee9ae71b",
       "name": "Sudharshan",
       "role": "User",
-      "initials": "S"
+      "initials": "S",
+      "department": "",
+      "timezone": "UTC",
+      "isActive": true
     }
   },
   "tasks": [
     {
-      "id": 1,
       "client": "JS Roofing",
       "project": "House 12",
       "task": "Create PO fascia",
@@ -36,6 +44,11 @@
       "waitingFor": "Supplier",
       "notes": "Waiting for supplier pricing",
       "parentId": null,
+      "operationalCategory": "",
+      "approvalStatus": "Pending",
+      "approvedBy": null,
+      "approvedAt": null,
+      "id": 1,
       "createdAt": "2026-03-01T00:00:00Z",
       "updatedAt": "2026-03-01T00:00:00Z",
       "createdBy": "Pritheeswarar",
@@ -49,7 +62,6 @@
       "version": 1
     },
     {
-      "id": 2,
       "client": "A to Z Roofing",
       "project": "House 21",
       "task": "Confirm gutter color",
@@ -61,6 +73,11 @@
       "waitingFor": "Client",
       "notes": "Need client final color decision",
       "parentId": null,
+      "operationalCategory": "",
+      "approvalStatus": "Pending",
+      "approvedBy": null,
+      "approvedAt": null,
+      "id": 2,
       "createdAt": "2026-03-02T00:00:00Z",
       "updatedAt": "2026-03-02T00:00:00Z",
       "createdBy": "Pritheeswarar",
@@ -72,23 +89,81 @@
         }
       ],
       "version": 1
+    },
+    {
+      "client": "JS Roofing",
+      "project": "House 77",
+      "task": "Validate API smoke",
+      "staff": "Mubarak",
+      "status": "New",
+      "priority": "Low",
+      "startDate": "2026-03-12",
+      "dueDate": "2026-03-15",
+      "waitingFor": "",
+      "notes": "",
+      "parentId": null,
+      "operationalCategory": "",
+      "approvalStatus": "Pending",
+      "approvedBy": null,
+      "approvedAt": null,
+      "id": 3,
+      "createdAt": "2026-04-13T09:14:42.773223Z",
+      "updatedAt": "2026-04-13T09:14:42.773223Z",
+      "createdBy": "Pritheeswarar",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-04-13T09:14:42.773223Z"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "client": "JS Roofing",
+      "project": "House Lock",
+      "task": "Lock contention test",
+      "staff": "Mubarak",
+      "status": "New",
+      "priority": "Medium",
+      "startDate": "2026-03-13",
+      "dueDate": "2026-03-20",
+      "waitingFor": "",
+      "notes": "",
+      "parentId": null,
+      "operationalCategory": "",
+      "approvalStatus": "Pending",
+      "approvedBy": null,
+      "approvedAt": null,
+      "id": 4,
+      "createdAt": "2026-04-13T09:14:42.804801Z",
+      "updatedAt": "2026-04-13T09:14:42.804801Z",
+      "createdBy": "Pritheeswarar",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-04-13T09:14:42.804801Z"
+        }
+      ],
+      "version": 1
     }
   ],
   "clients": [
     {
-      "id": 1,
       "name": "JS Roofing",
       "contact": "John Smith",
       "email": "john@jsroofing.com",
       "phone": "555-0100",
+      "id": 1,
       "version": 1
     },
     {
-      "id": 2,
       "name": "A to Z Roofing",
       "contact": "Alice",
       "email": "alice@atoz.com",
       "phone": "555-0101",
+      "id": 2,
       "version": 1
     }
   ],
@@ -114,6 +189,6 @@
     }
   ],
   "task_comments": {},
-  "next_task_id": 3,
+  "next_task_id": 5,
   "next_client_id": 3
 }

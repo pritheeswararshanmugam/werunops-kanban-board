@@ -57,30 +57,36 @@ It supports two practical runtime styles:
 - UI lock awareness to avoid editing collisions.
 
 ### Kanban and Task Views
+
 - Kanban board for drag-and-drop workflow movement.
 - All Tasks view with filtering/search and quick actions.
 - Today view for short-term execution focus.
 - Undo/redo stack for recent task mutations.
 
 ### Client Management
+
 - Create, edit, delete clients.
 - Validation preventing client deletion when active tasks exist.
 - Client-task relationship used throughout task creation and filtering.
 
 ### Presence and Session Tracking
+
 - Set and list user presence (online/offline plus device/browser context).
 - Session start, heartbeat, and end.
 - Session duration split into active and idle seconds.
 - Session-level reporting and CSV export support.
 
 ### Dashboard and Analytics
+
 - Operational dashboard with metrics cards.
 - Charts and summaries for team activity.
 - Session analytics and performance-oriented indicators.
 - Refreshable data panels for current status.
 
 ### Admin Portal
+
 Admin users get a dedicated operations portal with:
+
 - Overview metrics and heatmap/charts.
 - Session filters and saved filter sets.
 - Session/table exports (CSV/JSON).
@@ -98,16 +104,19 @@ Admin users get a dedicated operations portal with:
 ## 4) Data and Persistence Model
 
 The backend store supports multiple drivers:
+
 - file (local JSON state file),
 - firebase (Realtime Database),
 - supabase (REST table payload row).
 
 Driver selection logic:
+
 - explicit environment variable wins,
 - otherwise auto-detects from available credentials,
 - falls back to file mode when cloud credentials are missing.
 
 Persisted entities include:
+
 - users,
 - tasks,
 - clients,
@@ -123,6 +132,7 @@ Persisted entities include:
 ## 5) Offline and Reliability Features
 
 Frontend reliability features include:
+
 - service worker registration,
 - offline banner and status UI,
 - offline action queue,
@@ -143,6 +153,7 @@ Note: for production-grade hardening, teams typically add stronger token lifecyc
 ## 7) API Surface (High-Level)
 
 Primary API domains:
+
 - Health and root discovery.
 - Auth: login, me, logout, change-password.
 - Tasks: CRUD, status patch, restore, bulk delete.
@@ -170,6 +181,7 @@ Primary API domains:
 ## 9) Deployment and Environment Strategy
 
 Typical intended setup:
+
 - Frontend hosted as static site (GitHub Pages).
 - Backend hosted on Vercel (Python serverless entrypoint).
 - Data layer on Firebase or Supabase (file mode for local/dev and deterministic tests).
@@ -179,12 +191,14 @@ Runtime config allows team-level defaults for backend URL and feature flags, wit
 ## 10) Testing Strategy
 
 Automated E2E testing is set up using Playwright with:
+
 - deterministic seeded backend state before runs,
 - backend and frontend web servers started by Playwright,
 - smoke and extended UI flows,
 - targeted project splits for stability (bulk/timing/extended).
 
 Covered scenarios include:
+
 - sign-in and landing flow,
 - creating and deleting tasks,
 - full flow for adding/removing client and related task.
@@ -195,6 +209,7 @@ WeRunOps is designed as a practical operations cockpit.
 It combines task execution, collaboration safety, activity visibility, and admin governance in one app so teams can run daily work reliably, even with multi-user edits and occasional offline conditions.
 
 If you want, this can be expanded into a second markdown file with:
+
 - end-user SOPs by role,
 - backend endpoint reference table,
 - and a visual system architecture diagram.

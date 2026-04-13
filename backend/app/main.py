@@ -3,7 +3,9 @@ from __future__ import annotations
 import uuid
 import os
 import json
+import hashlib
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any, cast
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
@@ -40,374 +42,60 @@ from app.store import ConflictError, UnauthorizedError, store
 
 app = FastAPI(title="WeRunOps Backend API", version="1.0.0")
 
+ROLE_ACCESS_LABELS = {
+    "Admin": "Super Admin",
+    "Manager": "Manager",
+    "User": "Operator",
+}
 
-@app.middleware("http")
-async def refresh_remote_state_middleware(request: Request, call_next: RequestResponseEndpoint) -> Response:
-    path = request.url.path or ""
-    should_refresh = path.startswith("/api/v1/") and path not in {"/api/v1/health", "/api/v1"}
+ROLE_NAME_ALIASES = {
+    "admin": "Admin",
+    "super admin": "Admin",
+    "super_admin": "Admin",
+    "manager": "Manager",
+    "operator": "User",
+    "user": "User",
+}
 
-    if should_refresh:
-        try:
-            store.refresh_remote_state_if_needed(min_interval_seconds=1.5)
-        except Exception as error:
-            store.state_driver_note = f"remote refresh failed before request: {error}"
+ROLE_CAPABILITIES = {
+    "Admin": {
+        "viewOverview": True,
+        "manageUsers": True,
+        "manageRoles": True,
+        "manageTasks": True,
+        "approveTasks": True,
+        "manageAutomation": True,
+        "viewAudit": True,
+        "scheduleReports": True,
+    },
+    "Manager": {
+        "viewOverview": True,
+        "manageUsers": False,
+        "manageRoles": False,
+        "manageTasks": True,
+        "approveTasks": True,
+        "manageAutomation": False,
+        "viewAudit": True,
+        "scheduleReports": True,
+    },
+    "User": {
+        "viewOverview": False,
+        "manageUsers": False,
+        "manageRoles": False,
+        "manageTasks": False,
+        "approveTasks": False,
+        "manageAutomation": False,
+        "viewAudit": False,
+        "scheduleReports": False,
+    },
+}
 
-    return await call_next(request)
-
-
-def _get_env_compat(names: tuple[str, ...], suffixes: tuple[str, ...], default: str = "") -> str:
-    for name in names:
-        value = (os.getenv(name) or "").strip()
-        if value:
-            return value
-
-    env_items = sorted(os.environ.items(), key=lambda item: item[0])
-    for suffix in suffixes:
-        expected = suffix.upper()
-        for key, raw_value in env_items:
-            if not key.upper().endswith(expected):
-                continue
-            value = (raw_value or "").strip()
-            if value:
-                return value
-
-    return default
-
-
-cors_origins_raw = _get_env_compat(
-    names=("CORS_ALLOW_ORIGINS",),
-    suffixes=("_CORS_ALLOW_ORIGINS",),
-    default="*",
-)
-allow_origins = [item.strip() for item in cors_origins_raw.split(",") if item.strip()] or ["*"]
-allow_credentials = allow_origins != ["*"]
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=allow_origins,
-    allow_credentials=allow_credentials,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
-def build_meta(request: Request) -> APIMeta:
-    return APIMeta(
-        requestId=request.headers.get("x-request-id", str(uuid.uuid4())),
-        timestamp=datetime.now(UTC),
-    )
+ADMIN_PORTAL_TEMPLATE = Path(__file__).with_name("admin_portal_template.html")
 
 
-def build_response(data: object, request: Request) -> APIResponse:
-    return APIResponse(data=data, meta=build_meta(request))
+LEGACY_PORTAL_TEMPLATE = """
 
 
-def parse_bearer(authorization: str | None) -> str:
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing bearer token")
-    return authorization.removeprefix("Bearer ").strip()
-
-
-def current_user(authorization: str | None = Header(default=None, alias="Authorization")) -> UserProfile:
-    token = parse_bearer(authorization)
-    try:
-        return store.user_from_token(token)
-    except UnauthorizedError as error:
-        raise HTTPException(status_code=401, detail=str(error)) from error
-
-
-def ensure_task_not_locked_by_other(task_id: int, user: UserProfile) -> None:
-    lock = store.lock_for_task(task_id)
-    if lock and lock.lockedBy != user.username:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "TASK_LOCKED",
-                "taskId": task_id,
-                "lockedBy": lock.lockedBy,
-                "lockedByName": lock.lockedByName,
-                "expiresAt": lock.expiresAt.isoformat(),
-            },
-        )
-
-
-def current_admin_user(authorization: str | None = Header(default=None, alias="Authorization")) -> UserProfile:
-    user, _ = resolve_admin_user(None, authorization)
-    return user
-
-
-def resolve_admin_user(access_token: str | None, authorization: str | None) -> tuple[UserProfile, str]:
-    token = ""
-    if authorization and authorization.lower().startswith("bearer "):
-        token = authorization[7:].strip()
-    if not token and access_token:
-        token = access_token.strip()
-    if not token:
-        raise HTTPException(status_code=401, detail="Missing bearer token")
-
-    try:
-        user = store.user_from_token(token)
-    except UnauthorizedError as error:
-        raise HTTPException(status_code=401, detail=str(error)) from error
-
-    if user.role.lower() != "admin":
-        raise HTTPException(status_code=403, detail="Admin role required")
-
-    return user, token
-
-
-def admin_log_event(admin: UserProfile, action: str, details: dict[str, Any] | None = None) -> None:
-    entry: dict[str, Any] = {
-        "id": f"audit_{uuid.uuid4().hex[:10]}",
-        "timestamp": datetime.now(UTC).isoformat(),
-        "admin": admin.username,
-        "adminName": admin.name,
-        "action": action,
-        "details": details or {},
-    }
-    store.admin_audit_logs.insert(0, entry)
-    if len(store.admin_audit_logs) > 1000:
-        store.admin_audit_logs = store.admin_audit_logs[:1000]
-    store.save_state()
-
-
-@app.get("/")
-def root(request: Request):
-    return build_response(
-        {
-            "service": "WeRunOps Backend API",
-            "version": "1.0.0",
-            "docs": "/docs",
-            "health": "/api/v1/health",
-        },
-        request,
-    )
-
-
-@app.get("/api/v1/health")
-def health(request: Request):
-    return build_response(
-        {
-            "status": "ok",
-            "stateDriver": store.state_driver,
-            "stateDriverNote": store.state_driver_note,
-            "stateDriverDebug": store.env_debug,
-        },
-        request,
-    )
-
-@app.post("/api/v1/testing/reset-state", response_model=APIResponse)
-def testing_reset_state(request: Request):
-    if store.state_driver != "file":
-        raise HTTPException(status_code=400, detail="State reset is supported only in file mode")
-
-    seed_path = store.state_file.with_name("state_store.seed.json")
-    if not seed_path.exists():
-        raise HTTPException(status_code=404, detail="Seed state file not found")
-
-    store.state_file.write_text(seed_path.read_text(encoding="utf-8"), encoding="utf-8")
-    store.reload_state()
-    return build_response(
-        {
-            "reset": True,
-            "tasks": len(store.tasks),
-            "clients": len(store.clients),
-        },
-        request,
-    )
-
-
-@app.get("/api/v1")
-def api_root(request: Request):
-    return build_response(
-        {
-            "service": "WeRunOps Backend API",
-            "version": "1.0.0",
-            "health": "/api/v1/health",
-            "docs": "/docs",
-            "auth": "/api/v1/auth/login",
-        },
-        request,
-    )
-
-
-@app.get("/api/v1/admin/portal", response_class=HTMLResponse)
-def admin_portal(
-    authorization: str | None = Header(default=None, alias="Authorization"),
-    access_token: str | None = Query(default=None, alias="accessToken"),
-):
-        _, token = resolve_admin_user(access_token, authorization)
-        now = datetime.now(UTC)
-        bootstrap: dict[str, Any] = {
-                "generatedAt": now.isoformat(),
-                "sessions": [item.model_dump(mode="json") for item in sorted(store.sessions.values(), key=lambda x: x.loginTime, reverse=True)[:2000]],
-                "tasks": [item.model_dump(mode="json") for item in sorted(store.tasks.values(), key=lambda x: x.updatedAt, reverse=True)[:2000]],
-                "presence": [item.model_dump(mode="json") for item in store.presence.values()],
-                "users": [
-                        {
-                                "username": value.get("username"),
-                                "name": value.get("name"),
-                                "role": value.get("role"),
-                                "initials": value.get("initials"),
-                        }
-                        for value in store.users.values()
-                ],
-                "savedFilters": store.saved_filter_sets,
-                "automationRules": store.automation_rules,
-        }
-        bootstrap_json = json.dumps(bootstrap).replace("</", "<\\/")
-
-        html = """
-<!doctype html>
-<html lang='en'>
-<head>
-    <meta charset='utf-8' />
-    <meta name='viewport' content='width=device-width, initial-scale=1' />
-    <title>WeRunOps Admin Operations Portal</title>
-    <style>
-        :root { --bg:#f6f8fc; --ink:#1f2937; --muted:#6b7280; --line:#e5e7eb; --panel:#ffffff; --brand:#0f766e; --warn:#b45309; --danger:#b91c1c; }
-        * { box-sizing: border-box; }
-        body { margin:0; padding:18px; font-family: Segoe UI, Arial, sans-serif; color: var(--ink); background: var(--bg); }
-        h1 { margin:0; font-size: 30px; }
-        .muted { color: var(--muted); margin-top: 6px; }
-        .tabs { margin-top: 12px; display:flex; gap:8px; flex-wrap:wrap; }
-        .tab { border:1px solid #d1d5db; background:#fff; border-radius:8px; padding:8px 12px; cursor:pointer; font-weight:600; }
-        .tab.active { background:var(--brand); color:#fff; border-color:var(--brand); }
-        .section { display:none; margin-top: 12px; }
-        .section.active { display:block; }
-        .panel { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px; margin-top:10px; }
-        .row { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; }
-        .row.center { align-items:center; }
-        .field { display:flex; flex-direction:column; gap:5px; min-width:170px; }
-        .field label { font-size:12px; color:var(--muted); font-weight:600; }
-        .field input,.field select,.field textarea { border:1px solid #d1d5db; border-radius:8px; padding:8px; font-size:14px; }
-        .btn { border:1px solid #d1d5db; background:#fff; border-radius:8px; padding:8px 12px; min-height:36px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; }
-        .btn:hover { background:#f9fafb; }
-        .btn:disabled { opacity:0.55; cursor:not-allowed; }
-        .btn.primary { background:var(--brand); color:#fff; border-color:var(--brand); }
-        .btn.primary:hover { background:#0c615a; }
-        .btn.warn { background:#fff7ed; border-color:#fdba74; color:var(--warn); }
-        .btn.danger { background:#fef2f2; border-color:#fecaca; color:var(--danger); }
-        .cards { display:grid; grid-template-columns: repeat(auto-fit,minmax(160px,1fr)); gap:8px; margin-top:10px; }
-        .card { background:#fff; border:1px solid var(--line); border-radius:10px; padding:10px; }
-        .card small { color:var(--muted); text-transform:uppercase; font-size:11px; }
-        .card div { font-size:24px; font-weight:700; margin-top:4px; }
-        .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
-        .table-wrap { max-height:340px; overflow:auto; border:1px solid var(--line); border-radius:10px; }
-        table { width:100%; border-collapse:collapse; font-size:13px; }
-        th,td { border:1px solid var(--line); padding:7px; text-align:left; }
-        th { background:#f9fafb; position:sticky; top:0; }
-        .pill { display:inline-block; border-radius:999px; padding:2px 8px; font-size:12px; border:1px solid #d1d5db; }
-        .heatmap { display:grid; grid-template-columns:repeat(12,1fr); gap:4px; }
-        .heat { height:20px; border-radius:4px; }
-        canvas { width:100%; max-width:100%; height:260px; border:1px solid var(--line); border-radius:10px; background:#fff; }
-        .notice { margin-top:10px; padding:10px 12px; border-radius:10px; border:1px solid #fecaca; background:#fef2f2; color:#991b1b; display:none; }
-        @media (max-width:1000px){ .grid2 { grid-template-columns:1fr; } }
-    </style>
-</head>
-<body>
-    <h1>WeRunOps Admin Operations Portal</h1>
-    <p class='muted'>Operations dashboard for sessions, tasks, users, automation rules, and audit activity.</p>
-    <div class='notice' id='global-error'></div>
-
-    <div class='tabs' id='tabs'></div>
-
-    <section id='sec-overview' class='section active'>
-        <div class='panel'>
-            <div class='row'>
-                <div class='field'><label>User</label><select id='flt-user'><option value=''>All users</option></select></div>
-                <div class='field'><label>Session From</label><input id='flt-from' type='date'/></div>
-                <div class='field'><label>Session To</label><input id='flt-to' type='date'/></div>
-                <div class='field' style='min-width:220px'><label>Session Search</label><input id='flt-session-search' type='text' placeholder='User/device/session id'/></div>
-                <button class='btn primary' id='btn-apply'>Apply</button>
-                <button class='btn' id='btn-reset'>Reset</button>
-            </div>
-            <div class='row' style='margin-top:10px'>
-                <div class='field' style='min-width:220px'><label>Save Current Session Filter</label><input id='save-filter-name' type='text' placeholder='My filter name'/></div>
-                <button class='btn' id='btn-save-filter'>Save Filter</button>
-                <div class='field' style='min-width:220px'><label>Saved Filters</label><select id='saved-filters-select'><option value=''>Select filter</option></select></div>
-                <button class='btn' id='btn-load-filter'>Load Saved</button>
-                <button class='btn danger' id='btn-delete-filter'>Delete Saved</button>
-            </div>
-        </div>
-        <div class='cards'>
-            <div class='card'><small>Filtered Sessions</small><div id='m-sessions'>0</div></div>
-            <div class='card'><small>Duration Hours</small><div id='m-hours'>0</div></div>
-            <div class='card'><small>Active Ratio %</small><div id='m-active-ratio'>0</div></div>
-            <div class='card'><small>Open Tasks</small><div id='m-open'>0</div></div>
-            <div class='card'><small>Completed Tasks</small><div id='m-complete'>0</div></div>
-            <div class='card'><small>Efficiency Score</small><div id='m-eff'>0</div></div>
-        </div>
-        <div class='grid2'>
-            <div class='panel'>
-                <h3>Daily Hours by User</h3>
-                <canvas id='chart-hours' width='700' height='260'></canvas>
-            </div>
-            <div class='panel'>
-                <h3>Peak Activity Heatmap</h3>
-                <div id='heatmap' class='heatmap'></div>
-            </div>
-        </div>
-        <div class='grid2'>
-            <div class='panel'>
-                <h3>Session Summary by User</h3>
-                <div class='table-wrap'><table><thead><tr><th>User</th><th>Sessions</th><th>Duration</th><th>Active</th><th>Idle</th><th>Efficiency</th></tr></thead><tbody id='tbl-summary'></tbody></table></div>
-            </div>
-            <div class='panel'>
-                <h3>Live Monitoring & Alerts</h3>
-                <div class='row center'>
-                    <div class='pill' id='ticker-online'>Online: 0</div>
-                    <div class='pill' id='ticker-hours'>Today Hours: 0</div>
-                    <div class='pill' id='ticker-tasks'>Done Today: 0</div>
-                    <button class='btn' id='btn-live-refresh'>Refresh Now</button>
-                </div>
-                <div class='table-wrap' style='margin-top:10px'><table><thead><tr><th>Alert</th><th>Severity</th><th>Details</th><th>When</th></tr></thead><tbody id='tbl-alerts'></tbody></table></div>
-            </div>
-        </div>
-    </section>
-
-    <section id='sec-sessions' class='section'>
-        <div class='panel'>
-            <div class='row'>
-                <button class='btn' id='btn-export-csv'>Export Sessions CSV</button>
-                <button class='btn' id='btn-export-json'>Export Filtered JSON</button>
-                <button class='btn' id='btn-report-weekly'>Weekly Team Summary</button>
-                <button class='btn' id='btn-report-monthly'>Monthly Attendance</button>
-            </div>
-            <div class='table-wrap' style='margin-top:10px'><table><thead><tr><th>ID</th><th>User</th><th>Login</th><th>Logout</th><th>Duration</th><th>Active</th><th>Idle</th><th>Device</th></tr></thead><tbody id='tbl-sessions'></tbody></table></div>
-        </div>
-    </section>
-
-    <section id='sec-tasks' class='section'>
-        <div class='panel'>
-            <h3>Task Operations</h3>
-            <div class='row'>
-                <div class='field'><label>Task Status Filter</label><select id='task-status-filter'><option value=''>All statuses</option></select></div>
-                <div class='field' style='min-width:260px'><label>Task Search</label><input id='task-search-filter' type='text' placeholder='Task/client/staff'/></div>
-                <button class='btn' id='btn-task-apply'>Apply Task Filter</button>
-                <button class='btn' id='btn-task-reset'>Reset Task Filter</button>
-            </div>
-            <div class='row' style='margin-top:10px'>
-                <div class='field'><label>Task IDs (comma separated)</label><input id='bulk-task-ids' type='text' placeholder='1,2,3'/></div>
-                <div class='field'><label>New Status</label><select id='bulk-status'><option value=''>No change</option></select></div>
-                <div class='field'><label>Reassign Staff</label><input id='bulk-staff' type='text' placeholder='Mubarak'/></div>
-                <button class='btn primary' id='btn-bulk-update'>Apply Bulk Update</button>
-            </div>
-            <div class='row' style='margin-top:10px'>
-                <div class='field' style='min-width:120px'><label>Task ID</label><input id='comment-task-id' type='number'/></div>
-                <div class='field' style='min-width:300px'><label>Add Comment</label><textarea id='comment-text' rows='2'></textarea></div>
-                <button class='btn' id='btn-add-comment'>Add Comment</button>
-                <button class='btn' id='btn-view-comments'>View Comments</button>
-            </div>
-            <div class='table-wrap' style='margin-top:10px'><table><thead><tr><th>ID</th><th>Client</th><th>Task</th><th>Staff</th><th>Status</th><th>Due</th></tr></thead><tbody id='tbl-tasks'></tbody></table></div>
-            <div class='table-wrap' style='margin-top:10px'><table><thead><tr><th>Task</th><th>Comment</th><th>By</th><th>Time</th></tr></thead><tbody id='tbl-comments'></tbody></table></div>
-        </div>
-    </section>
-
-    <section id='sec-users' class='section'>
-        <div class='panel'>
-            <h3>User Management & Profiles</h3>
-            <div class='table-wrap'><table><thead><tr><th>Username</th><th>Name</th><th>Role</th><th>Sessions</th><th>Total Hours</th><th>Update Role</th></tr></thead><tbody id='tbl-users'></tbody></table></div>
         </div>
     </section>
 
@@ -419,6 +107,16 @@ def admin_portal(
                 <button class='btn warn' id='btn-run-actions'>Run Scheduled Actions Now</button>
             </div>
             <div class='table-wrap' style='margin-top:10px'><table><thead><tr><th>ID</th><th>Name</th><th>Trigger</th><th>Action</th><th>Enabled</th><th>Toggle</th></tr></thead><tbody id='tbl-rules'></tbody></table></div>
+            <h3 style='margin-top:16px'>Report Schedules</h3>
+            <div class='row'>
+                <div class='field'><label>Schedule Name</label><input id='schedule-name' type='text' placeholder='Daily Login Digest'/></div>
+                <div class='field'><label>Trigger</label><input id='schedule-trigger' type='text' placeholder='weekday_1800'/></div>
+                <div class='field'><label>Report</label><select id='schedule-report'><option value='weekly-summary'>Weekly Summary</option><option value='monthly-attendance'>Monthly Attendance</option><option value='login-history'>Login History</option><option value='staff-utilization'>Staff Utilization</option><option value='project-billing'>Project Billing</option><option value='task-approvals'>Task Approvals</option></select></div>
+                <div class='field'><label>Format</label><select id='schedule-format'><option value='json'>JSON</option><option value='csv'>CSV</option></select></div>
+                <div class='field' style='min-width:260px'><label>Recipients</label><input id='schedule-recipients' type='text' placeholder='ops@example.com, admin@example.com'/></div>
+                <button class='btn primary' id='btn-create-schedule'>Create Schedule</button>
+            </div>
+            <div class='table-wrap' style='margin-top:10px'><table><thead><tr><th>ID</th><th>Name</th><th>Trigger</th><th>Report</th><th>Format</th><th>Enabled</th><th>Delete</th></tr></thead><tbody id='tbl-schedules'></tbody></table></div>
         </div>
     </section>
 
@@ -729,9 +427,9 @@ def admin_portal(
 
         function exportSessionsCsv(){
             const sessions = filterSessions();
-            const header = 'id,username,loginTime,logoutTime,durationSeconds,activeSeconds,idleSeconds\n';
+            const header = 'id,username,loginTime,logoutTime,durationSeconds,activeSeconds,idleSeconds\\n';
             const body = sessions.map(s => [s.id, s.username, s.loginTime, s.logoutTime || '', toNum(s.durationSeconds), toNum(s.activeSeconds), toNum(s.idleSeconds)]
-                .map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+                .map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\\n');
             const blob = new Blob([header + body], { type:'text/csv' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a'); a.href = url; a.download = `werunops-sessions-${new Date().toISOString().slice(0,10)}.csv`; a.click(); URL.revokeObjectURL(url);
@@ -859,9 +557,454 @@ def admin_portal(
 </body>
 </html>
 """
-        html = html.replace("__BOOTSTRAP_JSON__", bootstrap_json)
-        html = html.replace("__WERUNOPS_ADMIN_TOKEN__", token)
-        return HTMLResponse(content=html)
+if False:
+    legacy_html = LEGACY_PORTAL_TEMPLATE
+    legacy_html = legacy_html.replace("__BOOTSTRAP_JSON__", "disabled")
+    legacy_html = legacy_html.replace("__WERUNOPS_ADMIN_TOKEN__", "disabled")
+
+
+@app.middleware("http")
+async def refresh_remote_state_middleware(request: Request, call_next: RequestResponseEndpoint) -> Response:
+    path = request.url.path or ""
+    should_refresh = path.startswith("/api/v1/") and path not in {"/api/v1/health", "/api/v1"}
+
+    if should_refresh:
+        try:
+            store.refresh_remote_state_if_needed(min_interval_seconds=1.5)
+        except Exception as error:
+            store.state_driver_note = f"remote refresh failed before request: {error}"
+
+    return await call_next(request)
+
+
+def _get_env_compat(names: tuple[str, ...], suffixes: tuple[str, ...], default: str = "") -> str:
+    for name in names:
+        value = (os.getenv(name) or "").strip()
+        if value:
+            return value
+
+    env_items = sorted(os.environ.items(), key=lambda item: item[0])
+    for suffix in suffixes:
+        expected = suffix.upper()
+        for key, raw_value in env_items:
+            if not key.upper().endswith(expected):
+                continue
+            value = (raw_value or "").strip()
+            if value:
+                return value
+
+    return default
+
+
+cors_origins_raw = _get_env_compat(
+    names=("CORS_ALLOW_ORIGINS",),
+    suffixes=("_CORS_ALLOW_ORIGINS",),
+    default="*",
+)
+allow_origins = [item.strip() for item in cors_origins_raw.split(",") if item.strip()] or ["*"]
+allow_credentials = allow_origins != ["*"]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allow_origins,
+    allow_credentials=allow_credentials,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+def build_meta(request: Request) -> APIMeta:
+    return APIMeta(
+        requestId=request.headers.get("x-request-id", str(uuid.uuid4())),
+        timestamp=datetime.now(UTC),
+    )
+
+
+def build_response(data: object, request: Request) -> APIResponse:
+    return APIResponse(data=data, meta=build_meta(request))
+
+
+def parse_bearer(authorization: str | None) -> str:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing bearer token")
+    return authorization.removeprefix("Bearer ").strip()
+
+
+def current_user(authorization: str | None = Header(default=None, alias="Authorization")) -> UserProfile:
+    token = parse_bearer(authorization)
+    try:
+        return store.user_from_token(token)
+    except UnauthorizedError as error:
+        raise HTTPException(status_code=401, detail=str(error)) from error
+
+
+def ensure_task_not_locked_by_other(task_id: int, user: UserProfile) -> None:
+    lock = store.lock_for_task(task_id)
+    if lock and lock.lockedBy != user.username:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "TASK_LOCKED",
+                "taskId": task_id,
+                "lockedBy": lock.lockedBy,
+                "lockedByName": lock.lockedByName,
+                "expiresAt": lock.expiresAt.isoformat(),
+            },
+        )
+
+
+def normalized_role(value: Any) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return "User"
+    mapped = ROLE_NAME_ALIASES.get(raw.lower())
+    if mapped:
+        return mapped
+    titled = raw.title()
+    return titled if titled in ROLE_CAPABILITIES else "User"
+
+
+def role_access_label(role: Any) -> str:
+    return ROLE_ACCESS_LABELS.get(normalized_role(role), ROLE_ACCESS_LABELS["User"])
+
+
+def role_capabilities(role: Any) -> dict[str, bool]:
+    normalized = normalized_role(role)
+    return dict(ROLE_CAPABILITIES.get(normalized, ROLE_CAPABILITIES["User"]))
+
+
+def require_admin_capability(user: UserProfile, capability: str) -> None:
+    capabilities = role_capabilities(user.role)
+    if not capabilities.get(capability, False):
+        raise HTTPException(status_code=403, detail=f"Missing capability: {capability}")
+
+
+def sha256_hex(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def coerce_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    return str(value or "").strip().lower() in {"1", "true", "yes", "y", "on", "active"}
+
+
+def serialize_admin_user(username: str, raw_user: dict[str, Any] | None) -> dict[str, Any] | None:
+    if raw_user is None:
+        return None
+
+    role = normalized_role(raw_user.get("role"))
+    sessions = [session for session in store.sessions.values() if session.username == username]
+    last_login = max((session.loginTime for session in sessions), default=None)
+    open_task_count = sum(1 for task in store.tasks.values() if task.staff == username and task.status != "Completed")
+    completed_task_count = sum(1 for task in store.tasks.values() if task.staff == username and task.status == "Completed")
+    name = str(raw_user.get("name") or username).strip() or username
+    initials = str(raw_user.get("initials") or name[:1] or username[:1]).strip()[:1].upper() or username[:1].upper()
+
+    return {
+        "username": username,
+        "name": name,
+        "role": role,
+        "accessLevel": role_access_label(role),
+        "capabilities": role_capabilities(role),
+        "initials": initials,
+        "department": str(raw_user.get("department") or "").strip(),
+        "timezone": str(raw_user.get("timezone") or "UTC").strip() or "UTC",
+        "isActive": coerce_bool(raw_user.get("isActive", True)),
+        "sessionCount": len(sessions),
+        "openTaskCount": open_task_count,
+        "completedTaskCount": completed_task_count,
+        "lastLoginTime": last_login.isoformat() if last_login else None,
+    }
+
+
+def build_user_directory() -> list[dict[str, Any]]:
+    rank = {"Admin": 0, "Manager": 1, "User": 2}
+    rows = [
+        serialized
+        for username, raw_user in store.users.items()
+        for serialized in [serialize_admin_user(username, raw_user)]
+        if serialized is not None
+    ]
+    return sorted(rows, key=lambda item: (rank.get(str(item.get("role") or "User"), 99), str(item.get("name") or item.get("username") or "").lower()))
+
+
+def build_project_map(tasks: list[TaskOut]) -> list[dict[str, Any]]:
+    grouped: dict[tuple[str, str], dict[str, Any]] = {}
+    for task in tasks:
+        project = (task.project or "").strip() or "Unmapped"
+        category = (task.operationalCategory or "").strip() or "General"
+        key = (project, category)
+        bucket = grouped.setdefault(
+            key,
+            {
+                "project": project,
+                "category": category,
+                "taskCount": 0,
+                "openTaskCount": 0,
+                "completedTaskCount": 0,
+                "pendingApprovalCount": 0,
+                "staff": set(),
+            },
+        )
+        bucket["taskCount"] += 1
+        if task.status == "Completed":
+            bucket["completedTaskCount"] += 1
+        else:
+            bucket["openTaskCount"] += 1
+        if task.approvalStatus == "Pending":
+            bucket["pendingApprovalCount"] += 1
+        cast(set[str], bucket["staff"]).add(task.staff)
+
+    return [
+        {
+            **{key: value for key, value in bucket.items() if key != "staff"},
+            "staff": sorted(cast(set[str], bucket["staff"])),
+        }
+        for _, bucket in sorted(grouped.items(), key=lambda item: (item[0][0].lower(), item[0][1].lower()))
+    ]
+
+
+def list_report_schedules() -> list[dict[str, Any]]:
+    schedules = [
+        rule
+        for rule in store.automation_rules
+        if str(rule.get("action") or "") == "send_report"
+    ]
+    return sorted(schedules, key=lambda item: str(item.get("name") or item.get("id") or "").lower())
+
+
+def build_operations_snapshot(sessions: list[SessionOut], tasks: list[TaskOut]) -> dict[str, Any]:
+    total_duration = sum(session.durationSeconds for session in sessions)
+    active_duration = sum(session.activeSeconds for session in sessions)
+    idle_duration = sum(session.idleSeconds for session in sessions)
+    billable_duration = sum(session.billableSeconds for session in sessions)
+    administrative_duration = sum(session.administrativeSeconds for session in sessions)
+    completed_tasks = sum(1 for task in tasks if task.status == "Completed")
+    open_tasks = sum(1 for task in tasks if task.status != "Completed")
+    pending_approvals = sum(1 for task in tasks if task.approvalStatus == "Pending")
+
+    overdue_tasks = 0
+    today = datetime.now(UTC).date()
+    for task in tasks:
+        if task.status == "Completed" or not task.dueDate:
+            continue
+        try:
+            if datetime.fromisoformat(task.dueDate).date() < today:
+                overdue_tasks += 1
+        except ValueError:
+            continue
+
+    by_user: dict[str, dict[str, Any]] = {}
+    for session in sessions:
+        bucket = by_user.setdefault(
+            session.username,
+            {
+                "sessionCount": 0,
+                "durationSeconds": 0,
+                "activeDurationSeconds": 0,
+                "idleDurationSeconds": 0,
+                "billableSeconds": 0,
+                "administrativeSeconds": 0,
+            },
+        )
+        bucket["sessionCount"] += 1
+        bucket["durationSeconds"] += session.durationSeconds
+        bucket["activeDurationSeconds"] += session.activeSeconds
+        bucket["idleDurationSeconds"] += session.idleSeconds
+        bucket["billableSeconds"] += session.billableSeconds
+        bucket["administrativeSeconds"] += session.administrativeSeconds
+
+    efficiency_by_user: dict[str, dict[str, Any]] = {}
+    for username, bucket in by_user.items():
+        user_completed_tasks = sum(1 for task in tasks if task.staff == username and task.status == "Completed")
+        efficiency_by_user[username] = {
+            **bucket,
+            "completedTasks": user_completed_tasks,
+            "durationHours": round(bucket["durationSeconds"] / 3600, 2),
+            "activeRatio": round((bucket["activeDurationSeconds"] / max(1, bucket["durationSeconds"])) * 100, 2),
+            "efficiencyScore": round(((user_completed_tasks * 3600) + bucket["activeDurationSeconds"]) / max(1, bucket["durationSeconds"]), 2),
+        }
+
+    return {
+        "sessionCount": len(sessions),
+        "taskCount": len(tasks),
+        "durationSeconds": total_duration,
+        "activeDurationSeconds": active_duration,
+        "idleDurationSeconds": idle_duration,
+        "billableSeconds": billable_duration,
+        "administrativeSeconds": administrative_duration,
+        "completedTasks": completed_tasks,
+        "openTasks": open_tasks,
+        "pendingApprovalTasks": pending_approvals,
+        "overdueTasks": overdue_tasks,
+        "efficiencyByUser": efficiency_by_user,
+    }
+
+
+def reassign_tasks(source_username: str, target_username: str, actor_name: str, include_completed: bool) -> list[int]:
+    changed_ids: list[int] = []
+    changed_at = datetime.now(UTC)
+    for task_id, task in list(store.tasks.items()):
+        if task.staff != source_username:
+            continue
+        if not include_completed and task.status == "Completed":
+            continue
+        updated = task.model_copy(
+            update={
+                "staff": target_username,
+                "updatedAt": changed_at,
+                "version": task.version + 1,
+            }
+        )
+        updated.activityLog.append(
+            ActivityEntry(
+                action=f"Reassigned from {source_username} to {target_username}",
+                user=actor_name,
+                timestamp=changed_at,
+            )
+        )
+        store.tasks[task_id] = updated
+        changed_ids.append(task_id)
+    return changed_ids
+
+
+def resolve_admin_user(access_token: str | None, authorization: str | None) -> tuple[UserProfile, str]:
+    token = ""
+    if authorization and authorization.lower().startswith("bearer "):
+        token = authorization[7:].strip()
+    if not token and access_token:
+        token = access_token.strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing bearer token")
+
+    try:
+        user = store.user_from_token(token)
+    except UnauthorizedError as error:
+        raise HTTPException(status_code=401, detail=str(error)) from error
+
+    if not role_capabilities(user.role).get("viewOverview", False):
+        raise HTTPException(status_code=403, detail="Admin or manager role required")
+
+    return user, token
+
+
+def current_admin_user(authorization: str | None = Header(default=None, alias="Authorization")) -> UserProfile:
+    user, _ = resolve_admin_user(None, authorization)
+    return user
+
+
+def admin_log_event(admin: UserProfile, action: str, details: dict[str, Any] | None = None) -> None:
+    entry: dict[str, Any] = {
+        "id": f"audit_{uuid.uuid4().hex[:10]}",
+        "timestamp": datetime.now(UTC).isoformat(),
+        "admin": admin.username,
+        "adminName": admin.name,
+        "action": action,
+        "details": details or {},
+    }
+    store.admin_audit_logs.insert(0, entry)
+    if len(store.admin_audit_logs) > 1000:
+        store.admin_audit_logs = store.admin_audit_logs[:1000]
+    store.save_state()
+
+
+@app.get("/")
+def root(request: Request):
+    return build_response(
+        {
+            "service": "WeRunOps Backend API",
+            "version": "1.0.0",
+            "docs": "/docs",
+            "health": "/api/v1/health",
+        },
+        request,
+    )
+
+
+@app.get("/api/v1/health")
+def health(request: Request):
+    return build_response(
+        {
+            "status": "ok",
+            "stateDriver": store.state_driver,
+            "stateDriverNote": store.state_driver_note,
+            "stateDriverDebug": store.env_debug,
+        },
+        request,
+    )
+
+
+@app.post("/api/v1/testing/reset-state", response_model=APIResponse)
+def testing_reset_state(request: Request):
+    if store.state_driver != "file":
+        raise HTTPException(status_code=400, detail="State reset is supported only in file mode")
+
+    seed_path = store.state_file.with_name("state_store.seed.json")
+    if not seed_path.exists():
+        raise HTTPException(status_code=404, detail="Seed state file not found")
+
+    store.state_file.write_text(seed_path.read_text(encoding="utf-8"), encoding="utf-8")
+    store.reload_state()
+    return build_response(
+        {
+            "reset": True,
+            "tasks": len(store.tasks),
+            "clients": len(store.clients),
+        },
+        request,
+    )
+
+
+@app.get("/api/v1")
+def api_root(request: Request):
+    return build_response(
+        {
+            "service": "WeRunOps Backend API",
+            "version": "1.0.0",
+            "health": "/api/v1/health",
+            "docs": "/docs",
+            "auth": "/api/v1/auth/login",
+        },
+        request,
+    )
+
+
+@app.get("/api/v1/admin/portal", response_class=HTMLResponse)
+def admin_portal(
+    authorization: str | None = Header(default=None, alias="Authorization"),
+    access_token: str | None = Query(default=None, alias="accessToken"),
+):
+    admin, token = resolve_admin_user(access_token, authorization)
+    now = datetime.now(UTC)
+    sessions = sorted(store.sessions.values(), key=lambda item: item.loginTime, reverse=True)[:2000]
+    tasks = sorted(store.tasks.values(), key=lambda item: item.updatedAt, reverse=True)[:2000]
+    bootstrap: dict[str, Any] = {
+        "generatedAt": now.isoformat(),
+        "currentAdmin": {
+            "username": admin.username,
+            "name": admin.name,
+            "role": normalized_role(admin.role),
+            "accessLevel": role_access_label(admin.role),
+            "capabilities": role_capabilities(admin.role),
+        },
+        "snapshot": build_operations_snapshot(sessions, tasks),
+        "sessions": [item.model_dump(mode="json") for item in sessions],
+        "tasks": [item.model_dump(mode="json") for item in tasks],
+        "presence": [item.model_dump(mode="json") for item in store.presence.values()],
+        "users": build_user_directory(),
+        "savedFilters": store.saved_filter_sets,
+        "automationRules": store.automation_rules,
+        "reportSchedules": list_report_schedules(),
+    }
+    bootstrap_json = json.dumps(bootstrap).replace("</", "<\\/")
+
+    html = ADMIN_PORTAL_TEMPLATE.read_text(encoding="utf-8")
+    html = html.replace("__BOOTSTRAP_JSON__", bootstrap_json)
+    html = html.replace("__WERUNOPS_ADMIN_TOKEN__", token)
+    return HTMLResponse(content=html)
 
 
 @app.get("/admin/portal", response_class=HTMLResponse)
@@ -880,6 +1023,9 @@ def admin_operations(
     to_date: str | None = Query(default=None),
     status: str | None = Query(default=None),
     task_search: str | None = Query(default=None),
+    project: str | None = Query(default=None),
+    category: str | None = Query(default=None),
+    approval_status: str | None = Query(default=None),
     _: UserProfile = Depends(current_admin_user),
 ):
     sessions = sorted(store.sessions.values(), key=lambda item: item.loginTime, reverse=True)
@@ -900,35 +1046,36 @@ def admin_operations(
     if status:
         tasks = [item for item in tasks if item.status == status]
 
+    if project:
+        tasks = [item for item in tasks if (item.project or "") == project]
+        sessions = [item for item in sessions if (item.projectTag or "") == project]
+
+    if category:
+        tasks = [item for item in tasks if (item.operationalCategory or "") == category]
+        sessions = [item for item in sessions if (item.operationalCategory or "") == category]
+
+    if approval_status:
+        tasks = [item for item in tasks if item.approvalStatus == approval_status]
+
     if task_search:
         needle = task_search.lower()
         tasks = [
             item
             for item in tasks
-            if needle in item.task.lower() or needle in item.client.lower() or needle in item.staff.lower()
+            if needle in item.task.lower()
+            or needle in item.client.lower()
+            or needle in item.staff.lower()
+            or needle in (item.project or "").lower()
+            or needle in (item.operationalCategory or "").lower()
         ]
 
-    by_user: dict[str, dict[str, int]] = {}
-    for item in sessions:
-        bucket = by_user.setdefault(item.username, {"sessionCount": 0, "durationSeconds": 0, "activeSeconds": 0, "idleSeconds": 0})
-        bucket["sessionCount"] += 1
-        bucket["durationSeconds"] += item.durationSeconds
-        bucket["activeSeconds"] += item.activeSeconds
-        bucket["idleSeconds"] += item.idleSeconds
-
-    payload: dict[str, Any] = {
-        "summaryByUser": by_user,
-        "recentSessions": [session.model_dump(mode="json") for session in sessions[:200]],
-        "tasks": [task.model_dump(mode="json") for task in tasks[:300]],
-        "efficiencyByUser": {
-            user: round((bucket["activeSeconds"] / max(1, bucket["durationSeconds"])) * 100, 2)
-            for user, bucket in by_user.items()
-        },
-        "totalSessions": len(sessions),
-        "totalTasks": len(tasks),
-        "openTasks": sum(1 for task in tasks if task.status != "Completed"),
-        "onlineUsers": sum(1 for item in store.presence.values() if item.online),
-    }
+    payload = build_operations_snapshot(sessions, tasks)
+    payload.update(
+        {
+            "recentSessions": [session.model_dump(mode="json") for session in sessions[:200]],
+            "tasks": [task.model_dump(mode="json") for task in tasks[:300]],
+        }
+    )
     return build_response(payload, request)
 
 
@@ -982,22 +1129,14 @@ def admin_alerts(request: Request, _: UserProfile = Depends(current_admin_user))
 
 @app.get("/api/v1/admin/users", response_model=APIResponse)
 def admin_users(request: Request, _: UserProfile = Depends(current_admin_user)):
-    users = [
-        {
-            "username": value.get("username"),
-            "name": value.get("name"),
-            "role": value.get("role"),
-            "initials": value.get("initials"),
-        }
-        for value in store.users.values()
-    ]
-    return build_response(users, request)
+    return build_response(build_user_directory(), request)
 
 
 @app.patch("/api/v1/admin/users/{username}/role", response_model=APIResponse)
 async def admin_update_user_role(username: str, request: Request, admin: UserProfile = Depends(current_admin_user)):
+    require_admin_capability(admin, "manageRoles")
     payload = await request.json()
-    role = str(payload.get("role") or "").strip()
+    role = normalized_role(str(payload.get("role") or "").strip())
     allowed = {"Admin", "Manager", "User"}
     if role not in allowed:
         raise HTTPException(status_code=400, detail="Invalid role")
@@ -1006,11 +1145,151 @@ async def admin_update_user_role(username: str, request: Request, admin: UserPro
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
+    if username == admin.username and role != "Admin":
+        raise HTTPException(status_code=400, detail="You cannot remove your own super admin access")
+
     previous = user.get("role")
     user["role"] = role
     store.save_state()
     admin_log_event(admin, "user_role_updated", {"username": username, "from": previous, "to": role})
-    return build_response({"ok": True, "username": username, "role": role}, request)
+    return build_response({"ok": True, "username": username, "role": role, "accessLevel": role_access_label(role)}, request)
+
+
+@app.post("/api/v1/admin/users", response_model=APIResponse)
+async def admin_create_user(request: Request, admin: UserProfile = Depends(current_admin_user)):
+    require_admin_capability(admin, "manageUsers")
+    payload = await request.json()
+    username = str(payload.get("username") or "").strip()
+    name = str(payload.get("name") or "").strip()
+    password = str(payload.get("password") or "").strip()
+    role = normalized_role(str(payload.get("role") or "User"))
+    department = str(payload.get("department") or "").strip()
+    timezone = str(payload.get("timezone") or "UTC").strip() or "UTC"
+    initials_source = str(payload.get("initials") or name or username).strip()
+
+    if not username or not name or not password:
+        raise HTTPException(status_code=400, detail="Username, name, and password are required")
+    if username in store.users:
+        raise HTTPException(status_code=409, detail="User already exists")
+
+    store.users[username] = {
+        "username": username,
+        "passwordHash": sha256_hex(password),
+        "name": name,
+        "role": role,
+        "initials": (initials_source[:1] or username[:1]).upper(),
+        "department": department,
+        "timezone": timezone,
+        "isActive": True,
+    }
+    store.save_state()
+    admin_log_event(admin, "user_created", {"username": username, "role": role, "department": department})
+    return build_response(serialize_admin_user(username, store.users[username]), request)
+
+
+@app.patch("/api/v1/admin/users/{username}", response_model=APIResponse)
+async def admin_update_user_profile(username: str, request: Request, admin: UserProfile = Depends(current_admin_user)):
+    require_admin_capability(admin, "manageUsers")
+    user = store.users.get(username)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    payload = await request.json()
+    reassign_to = str(payload.get("reassignTo") or "").strip()
+    password = str(payload.get("password") or "").strip()
+    deactivating = "isActive" in payload and not coerce_bool(payload.get("isActive"))
+    if deactivating and username == admin.username:
+        raise HTTPException(status_code=400, detail="You cannot deactivate your own account")
+
+    reassigned_task_ids: list[int] = []
+    open_tasks = [task.id for task in store.tasks.values() if task.staff == username and task.status != "Completed"]
+    if deactivating and open_tasks:
+        if not reassign_to:
+            raise HTTPException(status_code=400, detail="Reassign target required before deactivating a user with open tasks")
+        if reassign_to not in store.users:
+            raise HTTPException(status_code=404, detail="Reassign target not found")
+        reassigned_task_ids = reassign_tasks(username, reassign_to, admin.name, include_completed=False)
+
+    if "name" in payload:
+        user["name"] = str(payload.get("name") or user.get("name") or username).strip() or username
+    if "department" in payload:
+        user["department"] = str(payload.get("department") or "").strip()
+    if "timezone" in payload:
+        user["timezone"] = str(payload.get("timezone") or "UTC").strip() or "UTC"
+    if "initials" in payload:
+        initials = str(payload.get("initials") or "").strip()
+        user["initials"] = (initials[:1] or str(user.get("name") or username)[:1]).upper()
+    if "isActive" in payload:
+        user["isActive"] = coerce_bool(payload.get("isActive"))
+    if password:
+        user["passwordHash"] = sha256_hex(password)
+
+    store.save_state()
+    admin_log_event(
+        admin,
+        "user_profile_updated",
+        {"username": username, "reassignedTaskIds": reassigned_task_ids, "isActive": user.get("isActive", True)},
+    )
+    response = serialize_admin_user(username, user)
+    if response is None:
+        raise HTTPException(status_code=500, detail="Unable to serialize user")
+    response["reassignedTaskIds"] = reassigned_task_ids
+    return build_response(response, request)
+
+
+@app.post("/api/v1/admin/users/{username}/reassign", response_model=APIResponse)
+async def admin_reassign_user_tasks(username: str, request: Request, admin: UserProfile = Depends(current_admin_user)):
+    require_admin_capability(admin, "manageTasks")
+    if username not in store.users:
+        raise HTTPException(status_code=404, detail="Source user not found")
+
+    payload = await request.json()
+    target_username = str(payload.get("reassignTo") or "").strip()
+    include_completed = coerce_bool(payload.get("includeCompleted", False))
+    if not target_username:
+        raise HTTPException(status_code=400, detail="Reassign target is required")
+    if target_username not in store.users:
+        raise HTTPException(status_code=404, detail="Reassign target not found")
+
+    changed_ids = reassign_tasks(username, target_username, admin.name, include_completed=include_completed)
+    store.save_state()
+    admin_log_event(admin, "tasks_reassigned", {"from": username, "to": target_username, "taskIds": changed_ids})
+    return build_response({"from": username, "to": target_username, "taskIds": changed_ids, "count": len(changed_ids)}, request)
+
+
+@app.get("/api/v1/admin/project-map", response_model=APIResponse)
+def admin_project_map(request: Request, _: UserProfile = Depends(current_admin_user)):
+    return build_response(build_project_map(list(store.tasks.values())), request)
+
+
+@app.patch("/api/v1/admin/tasks/{task_id}/approval", response_model=APIResponse)
+async def admin_update_task_approval(task_id: int, request: Request, admin: UserProfile = Depends(current_admin_user)):
+    require_admin_capability(admin, "approveTasks")
+    task = store.tasks.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    payload = await request.json()
+    approval_status = str(payload.get("approvalStatus") or "").strip()
+    allowed = {"Pending", "Approved", "Rejected", "Not Required"}
+    if approval_status not in allowed:
+        raise HTTPException(status_code=400, detail="Invalid approval status")
+
+    now = datetime.now(UTC)
+    updated = task.model_copy(
+        update={
+            "approvalStatus": approval_status,
+            "approvedBy": admin.name if approval_status in {"Approved", "Rejected"} else None,
+            "approvedAt": now if approval_status in {"Approved", "Rejected"} else None,
+            "updatedAt": now,
+            "version": task.version + 1,
+        }
+    )
+    updated.activityLog.append(ActivityEntry(action=f"Approval set to {approval_status}", user=admin.name, timestamp=now))
+    store.tasks[task_id] = updated
+    store.save_state()
+    admin_log_event(admin, "task_approval_updated", {"taskId": task_id, "approvalStatus": approval_status})
+    return build_response(updated.model_dump(), request)
 
 
 @app.get("/api/v1/admin/filters", response_model=APIResponse)
@@ -1051,6 +1330,7 @@ def admin_delete_filter(name: str, request: Request, admin: UserProfile = Depend
 
 @app.post("/api/v1/admin/tasks/bulk-update", response_model=APIResponse)
 async def admin_bulk_update_tasks(request: Request, admin: UserProfile = Depends(current_admin_user)):
+    require_admin_capability(admin, "manageTasks")
     payload = await request.json()
     raw_task_ids = payload.get("taskIds")
     task_ids: list[int] = []
@@ -1063,6 +1343,9 @@ async def admin_bulk_update_tasks(request: Request, admin: UserProfile = Depends
                 continue
     status = payload.get("status")
     staff = payload.get("staff")
+    project = str(payload.get("project") or "").strip()
+    category = str(payload.get("operationalCategory") or "").strip()
+    approval_status = str(payload.get("approvalStatus") or "").strip()
 
     updated = 0
     changed_ids: list[int] = []
@@ -1075,6 +1358,14 @@ async def admin_bulk_update_tasks(request: Request, admin: UserProfile = Depends
             updates["status"] = status
         if staff:
             updates["staff"] = staff
+        if project:
+            updates["project"] = project
+        if category:
+            updates["operationalCategory"] = category
+        if approval_status:
+            updates["approvalStatus"] = approval_status
+            updates["approvedBy"] = admin.name if approval_status in {"Approved", "Rejected"} else None
+            updates["approvedAt"] = datetime.now(UTC) if approval_status in {"Approved", "Rejected"} else None
         mutated = task.model_copy(update=updates)
         mutated.activityLog.append(ActivityEntry(action="Bulk update from admin portal", user=admin.name, timestamp=datetime.now(UTC)))
         store.tasks[task_id] = mutated
@@ -1124,8 +1415,58 @@ def admin_automation_rules(request: Request, _: UserProfile = Depends(current_ad
     return build_response(store.automation_rules, request)
 
 
+@app.get("/api/v1/admin/report-schedules", response_model=APIResponse)
+def admin_report_schedules(request: Request, _: UserProfile = Depends(current_admin_user)):
+    return build_response(list_report_schedules(), request)
+
+
+@app.post("/api/v1/admin/report-schedules", response_model=APIResponse)
+async def admin_create_report_schedule(request: Request, admin: UserProfile = Depends(current_admin_user)):
+    require_admin_capability(admin, "scheduleReports")
+    payload = cast(dict[str, Any], await request.json())
+    name = str(payload.get("name") or "").strip()
+    trigger = str(payload.get("trigger") or "manual").strip() or "manual"
+    report_name = str(payload.get("reportName") or "weekly-summary").strip() or "weekly-summary"
+    fmt = str(payload.get("format") or "json").strip() or "json"
+    recipients_raw: Any = payload.get("recipients")
+    recipients_source = cast(list[Any], recipients_raw) if isinstance(recipients_raw, list) else []
+    recipients = [str(item).strip() for item in recipients_source if str(item).strip()]
+    if not name:
+        raise HTTPException(status_code=400, detail="Schedule name is required")
+
+    schedule: dict[str, Any] = {
+        "id": f"report_schedule_{uuid.uuid4().hex[:10]}",
+        "name": name,
+        "trigger": trigger,
+        "action": "send_report",
+        "enabled": True,
+        "reportName": report_name,
+        "format": fmt,
+        "recipients": recipients,
+    }
+    store.automation_rules.append(schedule)
+    store.save_state()
+    admin_log_event(admin, "report_schedule_created", {"id": schedule["id"], "reportName": report_name})
+    return build_response(schedule, request)
+
+
+@app.delete("/api/v1/admin/report-schedules/{schedule_id}", response_model=APIResponse)
+def admin_delete_report_schedule(schedule_id: str, request: Request, admin: UserProfile = Depends(current_admin_user)):
+    require_admin_capability(admin, "scheduleReports")
+    before = len(store.automation_rules)
+    store.automation_rules = [
+        rule for rule in store.automation_rules if not (str(rule.get("id") or "") == schedule_id and str(rule.get("action") or "") == "send_report")
+    ]
+    deleted = len(store.automation_rules) != before
+    if deleted:
+        store.save_state()
+        admin_log_event(admin, "report_schedule_deleted", {"id": schedule_id})
+    return build_response({"deleted": deleted, "id": schedule_id}, request)
+
+
 @app.patch("/api/v1/admin/automation-rules/{rule_id}/toggle", response_model=APIResponse)
 def admin_toggle_rule(rule_id: str, request: Request, admin: UserProfile = Depends(current_admin_user)):
+    require_admin_capability(admin, "manageAutomation")
     for rule in store.automation_rules:
         if str(rule.get("id")) == rule_id:
             rule["enabled"] = not bool(rule.get("enabled"))
@@ -1137,6 +1478,7 @@ def admin_toggle_rule(rule_id: str, request: Request, admin: UserProfile = Depen
 
 @app.post("/api/v1/admin/scheduled-actions/run", response_model=APIResponse)
 def admin_run_scheduled_actions(request: Request, admin: UserProfile = Depends(current_admin_user)):
+    require_admin_capability(admin, "manageAutomation")
     archived = 0
     threshold = datetime.now(UTC) - timedelta(days=30)
     for task in store.tasks.values():
@@ -1146,6 +1488,9 @@ def admin_run_scheduled_actions(request: Request, admin: UserProfile = Depends(c
     result: dict[str, Any] = {
         "archivedCandidates": archived,
         "rulesEvaluated": len(store.automation_rules),
+        "scheduledReportsQueued": sum(
+            1 for rule in store.automation_rules if str(rule.get("action") or "") == "send_report" and bool(rule.get("enabled", True))
+        ),
         "ranAt": datetime.now(UTC).isoformat(),
     }
     admin_log_event(admin, "scheduled_actions_run", result)
@@ -1192,11 +1537,92 @@ def admin_report(report_name: str, request: Request, _: UserProfile = Depends(cu
         }
         return build_response({"report": report_name, "from": from_day.isoformat(), "to": today.isoformat(), "byUser": normalized}, request)
 
+    if report_name == "login-history":
+        username = str(request.query_params.get("username") or "").strip()
+        scoped_sessions = [item for item in sessions if not username or item.username == username]
+        payload = build_operations_snapshot(scoped_sessions, tasks)
+        payload.update(
+            {
+                "report": report_name,
+                "username": username or None,
+                "sessions": [item.model_dump(mode="json") for item in scoped_sessions[:500]],
+            }
+        )
+        return build_response(payload, request)
+
+    if report_name == "staff-utilization":
+        days = max(1, min(90, int(request.query_params.get("days") or "30")))
+        from_day = today - timedelta(days=days)
+        scoped_sessions = [item for item in sessions if item.loginTime.date() >= from_day]
+        by_user: dict[str, dict[str, Any]] = {}
+        for item in scoped_sessions:
+            bucket = by_user.setdefault(
+                item.username,
+                {"durationSeconds": 0, "activeSeconds": 0, "billableSeconds": 0, "administrativeSeconds": 0, "sessionCount": 0},
+            )
+            bucket["durationSeconds"] += item.durationSeconds
+            bucket["activeSeconds"] += item.activeSeconds
+            bucket["billableSeconds"] += item.billableSeconds
+            bucket["administrativeSeconds"] += item.administrativeSeconds
+            bucket["sessionCount"] += 1
+        for username, bucket in by_user.items():
+            bucket["activeRatio"] = round((bucket["activeSeconds"] / max(1, bucket["durationSeconds"])) * 100, 2)
+            bucket["durationHours"] = round(bucket["durationSeconds"] / 3600, 2)
+            bucket["billableHours"] = round(bucket["billableSeconds"] / 3600, 2)
+            bucket["administrativeHours"] = round(bucket["administrativeSeconds"] / 3600, 2)
+            bucket["openTasks"] = sum(1 for task in tasks if task.staff == username and task.status != "Completed")
+        return build_response({"report": report_name, "from": from_day.isoformat(), "to": today.isoformat(), "byUser": by_user}, request)
+
+    if report_name == "project-billing":
+        scoped_sessions = sessions
+        by_project: dict[str, dict[str, Any]] = {}
+        for item in scoped_sessions:
+            project = (item.projectTag or "").strip() or "Unmapped"
+            bucket = by_project.setdefault(
+                project,
+                {"sessionCount": 0, "durationSeconds": 0, "billableSeconds": 0, "administrativeSeconds": 0, "categories": set()},
+            )
+            bucket["sessionCount"] += 1
+            bucket["durationSeconds"] += item.durationSeconds
+            bucket["billableSeconds"] += item.billableSeconds
+            bucket["administrativeSeconds"] += item.administrativeSeconds
+            if item.operationalCategory:
+                cast(set[str], bucket["categories"]).add(item.operationalCategory)
+        for task in tasks:
+            project = (task.project or "").strip() or "Unmapped"
+            bucket = by_project.setdefault(
+                project,
+                {"sessionCount": 0, "durationSeconds": 0, "billableSeconds": 0, "administrativeSeconds": 0, "categories": set()},
+            )
+            if task.operationalCategory:
+                cast(set[str], bucket["categories"]).add(task.operationalCategory)
+        normalized = {
+            project: {
+                **{key: value for key, value in bucket.items() if key != "categories"},
+                "durationHours": round(cast(int, bucket["durationSeconds"]) / 3600, 2),
+                "billableHours": round(cast(int, bucket["billableSeconds"]) / 3600, 2),
+                "administrativeHours": round(cast(int, bucket["administrativeSeconds"]) / 3600, 2),
+                "categories": sorted(cast(set[str], bucket["categories"])),
+            }
+            for project, bucket in by_project.items()
+        }
+        return build_response({"report": report_name, "byProject": normalized}, request)
+
+    if report_name == "task-approvals":
+        grouped = {
+            "Pending": [task.model_dump(mode="json") for task in tasks if task.approvalStatus == "Pending"],
+            "Approved": [task.model_dump(mode="json") for task in tasks if task.approvalStatus == "Approved"],
+            "Rejected": [task.model_dump(mode="json") for task in tasks if task.approvalStatus == "Rejected"],
+            "Not Required": [task.model_dump(mode="json") for task in tasks if task.approvalStatus == "Not Required"],
+        }
+        return build_response({"report": report_name, "counts": {key: len(value) for key, value in grouped.items()}, "groups": grouped}, request)
+
     raise HTTPException(status_code=404, detail="Unknown report")
 
 
 @app.get("/api/v1/admin/audit-logs", response_model=APIResponse)
-def admin_audit_logs(request: Request, _: UserProfile = Depends(current_admin_user)):
+def admin_audit_logs(request: Request, admin: UserProfile = Depends(current_admin_user)):
+    require_admin_capability(admin, "viewAudit")
     return build_response(store.admin_audit_logs[:500], request)
 
 
@@ -1359,7 +1785,7 @@ def list_clients(request: Request, _: UserProfile = Depends(current_user)):
 def create_client(payload: ClientCreate, request: Request, _: UserProfile = Depends(current_user)):
     client_id = store.next_client_id
     store.next_client_id += 1
-    client = ClientOut(id=client_id, version=1, **payload.model_dump())
+    client = ClientOut.model_validate({"id": client_id, "version": 1, **payload.model_dump()})
     store.clients[client_id] = client
     store.save_state()
     return build_response(client.model_dump(), request)
@@ -1423,6 +1849,10 @@ def start_session(payload: SessionStartRequest, request: Request, user: UserProf
         loginTime=datetime.now(UTC),
         browser=payload.browser,
         device=payload.device,
+        projectTag=payload.projectTag,
+        operationalCategory=payload.operationalCategory,
+        billableSeconds=payload.billableSeconds,
+        administrativeSeconds=payload.administrativeSeconds,
     )
     store.sessions[session_id] = session
     store.save_state()

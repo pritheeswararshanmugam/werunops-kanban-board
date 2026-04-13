@@ -1,0 +1,856 @@
+<!doctype html>
+<html lang='en'>
+<head>
+    <meta charset='utf-8' />
+    <meta name='viewport' content='width=device-width, initial-scale=1' />
+    <title>WeRunOps Admin Operations Portal</title>
+    <style>
+        :root { --bg:#f6f8fc; --ink:#1f2937; --muted:#6b7280; --line:#e5e7eb; --panel:#ffffff; --brand:#0f766e; --warn:#b45309; --danger:#b91c1c; }
+        * { box-sizing: border-box; }
+        body { margin:0; padding:18px; font-family: Segoe UI, Arial, sans-serif; color: var(--ink); background: var(--bg); }
+        h1 { margin:0; font-size:30px; }
+        h3 { margin:0 0 8px; }
+        .muted { color: var(--muted); margin-top:6px; }
+        .tabs { margin-top:12px; display:flex; gap:8px; flex-wrap:wrap; }
+        .tab { border:1px solid #d1d5db; background:#fff; border-radius:8px; padding:8px 12px; cursor:pointer; font-weight:600; }
+        .tab.active { background:var(--brand); color:#fff; border-color:var(--brand); }
+        .section { display:none; margin-top:12px; }
+        .section.active { display:block; }
+        .panel { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px; margin-top:10px; }
+        .row { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; }
+        .row.center { align-items:center; }
+        .field { display:flex; flex-direction:column; gap:5px; min-width:170px; }
+        .field label { font-size:12px; color:var(--muted); font-weight:600; }
+        .field input,.field select,.field textarea { border:1px solid #d1d5db; border-radius:8px; padding:8px; font-size:14px; }
+        .btn { border:1px solid #d1d5db; background:#fff; border-radius:8px; padding:8px 12px; min-height:36px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; }
+        .btn:hover { background:#f9fafb; }
+        .btn:disabled { opacity:0.55; cursor:not-allowed; }
+        .btn.primary { background:var(--brand); color:#fff; border-color:var(--brand); }
+        .btn.primary:hover { background:#0c615a; }
+        .btn.warn { background:#fff7ed; border-color:#fdba74; color:var(--warn); }
+        .btn.danger { background:#fef2f2; border-color:#fecaca; color:var(--danger); }
+        .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:8px; margin-top:10px; }
+        .card { background:#fff; border:1px solid var(--line); border-radius:10px; padding:10px; }
+        .card small { color:var(--muted); text-transform:uppercase; font-size:11px; }
+        .card div { font-size:24px; font-weight:700; margin-top:4px; }
+        .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+        .table-wrap { max-height:340px; overflow:auto; border:1px solid var(--line); border-radius:10px; }
+        table { width:100%; border-collapse:collapse; font-size:13px; }
+        th,td { border:1px solid var(--line); padding:7px; text-align:left; vertical-align:top; }
+        th { background:#f9fafb; position:sticky; top:0; }
+        .pill { display:inline-block; border-radius:999px; padding:2px 8px; font-size:12px; border:1px solid #d1d5db; }
+        .heatmap { display:grid; grid-template-columns:repeat(12,1fr); gap:4px; }
+        .heat { height:20px; border-radius:4px; }
+        canvas { width:100%; max-width:100%; height:260px; border:1px solid var(--line); border-radius:10px; background:#fff; }
+        .notice { margin-top:10px; padding:10px 12px; border-radius:10px; border:1px solid #fecaca; background:#fef2f2; color:#991b1b; display:none; }
+        .empty { color:var(--muted); text-align:center; }
+        @media (max-width:1000px){ .grid2 { grid-template-columns:1fr; } }
+    </style>
+</head>
+<body>
+    <h1>WeRunOps Admin Operations Portal</h1>
+    <p class='muted'>Operations dashboard for sessions, tasks, users, automation rules, report schedules, and audit activity.</p>
+    <div class='notice' id='global-error'></div>
+
+    <div class='tabs' id='tabs'></div>
+
+    <section id='sec-overview' class='section active'>
+        <div class='panel'>
+            <div class='row'>
+                <div class='field'><label>User</label><select id='flt-user'><option value=''>All users</option></select></div>
+                <div class='field'><label>Project</label><select id='flt-project'><option value=''>All projects</option></select></div>
+                <div class='field'><label>Category</label><select id='flt-category'><option value=''>All categories</option></select></div>
+                <div class='field'><label>Session From</label><input id='flt-from' type='date'/></div>
+                <div class='field'><label>Session To</label><input id='flt-to' type='date'/></div>
+                <div class='field' style='min-width:220px'><label>Session Search</label><input id='flt-session-search' type='text' placeholder='User/device/session id'/></div>
+                <button class='btn primary' id='btn-apply'>Apply</button>
+                <button class='btn' id='btn-reset'>Reset</button>
+            </div>
+            <div class='row' style='margin-top:10px'>
+                <div class='field' style='min-width:220px'><label>Save Current Session Filter</label><input id='save-filter-name' type='text' placeholder='My filter name'/></div>
+                <button class='btn' id='btn-save-filter'>Save Filter</button>
+                <div class='field' style='min-width:220px'><label>Saved Filters</label><select id='saved-filters-select'><option value=''>Select filter</option></select></div>
+                <button class='btn' id='btn-load-filter'>Load Saved</button>
+                <button class='btn danger' id='btn-delete-filter'>Delete Saved</button>
+            </div>
+        </div>
+        <div class='cards'>
+            <div class='card'><small>Filtered Sessions</small><div id='m-sessions'>0</div></div>
+            <div class='card'><small>Duration Hours</small><div id='m-hours'>0</div></div>
+            <div class='card'><small>Active Ratio %</small><div id='m-active-ratio'>0</div></div>
+            <div class='card'><small>Open Tasks</small><div id='m-open'>0</div></div>
+            <div class='card'><small>Completed Tasks</small><div id='m-complete'>0</div></div>
+            <div class='card'><small>Efficiency Score</small><div id='m-eff'>0</div></div>
+            <div class='card'><small>Pending Approvals</small><div id='m-pending-approval'>0</div></div>
+            <div class='card'><small>Overdue Tasks</small><div id='m-overdue'>0</div></div>
+            <div class='card'><small>Billable Hours</small><div id='m-billable'>0</div></div>
+            <div class='card'><small>Admin Hours</small><div id='m-admin-hours'>0</div></div>
+        </div>
+        <div class='grid2'>
+            <div class='panel'>
+                <h3>Daily Hours by User</h3>
+                <canvas id='chart-hours' width='700' height='260'></canvas>
+            </div>
+            <div class='panel'>
+                <h3>Peak Activity Heatmap</h3>
+                <div id='heatmap' class='heatmap'></div>
+            </div>
+        </div>
+        <div class='grid2'>
+            <div class='panel'>
+                <h3>Session Summary by User</h3>
+                <div class='table-wrap'><table><thead><tr><th>User</th><th>Sessions</th><th>Duration</th><th>Active</th><th>Idle</th><th>Efficiency</th></tr></thead><tbody id='tbl-summary'></tbody></table></div>
+            </div>
+            <div class='panel'>
+                <h3>Live Monitoring & Alerts</h3>
+                <div class='row center'>
+                    <div class='pill' id='ticker-online'>Online: 0</div>
+                    <div class='pill' id='ticker-hours'>Today Hours: 0</div>
+                    <div class='pill' id='ticker-tasks'>Done Today: 0</div>
+                    <button class='btn' id='btn-live-refresh'>Refresh Now</button>
+                </div>
+                <div class='table-wrap' style='margin-top:10px'><table><thead><tr><th>Alert</th><th>Severity</th><th>Details</th><th>When</th></tr></thead><tbody id='tbl-alerts'></tbody></table></div>
+            </div>
+        </div>
+    </section>
+
+    <section id='sec-sessions' class='section'>
+        <div class='panel'>
+            <div class='row'>
+                <button class='btn' id='btn-export-csv'>Export Sessions CSV</button>
+                <button class='btn' id='btn-export-json'>Export Filtered JSON</button>
+                <button class='btn' id='btn-report-weekly'>Weekly Team Summary</button>
+                <button class='btn' id='btn-report-monthly'>Monthly Attendance</button>
+                <button class='btn' id='btn-report-login-history'>Login History</button>
+                <button class='btn' id='btn-report-utilization'>Staff Utilization</button>
+                <button class='btn' id='btn-report-billing'>Project Billing</button>
+                <button class='btn' id='btn-report-approvals'>Task Approvals</button>
+            </div>
+            <div class='table-wrap' style='margin-top:10px'><table><thead><tr><th>ID</th><th>User</th><th>Project</th><th>Category</th><th>Login</th><th>Logout</th><th>Duration</th><th>Active</th><th>Idle</th><th>Device</th></tr></thead><tbody id='tbl-sessions'></tbody></table></div>
+        </div>
+    </section>
+
+    <section id='sec-tasks' class='section'>
+        <div class='panel'>
+            <h3>Task Operations</h3>
+            <div class='row'>
+                <div class='field'><label>Task Status Filter</label><select id='task-status-filter'><option value=''>All statuses</option></select></div>
+                <div class='field' style='min-width:260px'><label>Task Search</label><input id='task-search-filter' type='text' placeholder='Task/client/staff/project'/></div>
+                <button class='btn' id='btn-task-apply'>Apply Task Filter</button>
+                <button class='btn' id='btn-task-reset'>Reset Task Filter</button>
+            </div>
+            <div class='row' style='margin-top:10px'>
+                <div class='field'><label>Task IDs (comma separated)</label><input id='bulk-task-ids' type='text' placeholder='1,2,3'/></div>
+                <div class='field'><label>New Status</label><select id='bulk-status'><option value=''>No change</option></select></div>
+                <div class='field'><label>Reassign Staff</label><input id='bulk-staff' type='text' placeholder='Mubarak'/></div>
+                <div class='field'><label>Project</label><input id='bulk-project' type='text' placeholder='House 12'/></div>
+                <div class='field'><label>Category</label><input id='bulk-category' type='text' placeholder='Estimating'/></div>
+                <div class='field'><label>Approval</label><select id='bulk-approval'><option value=''>No change</option><option>Pending</option><option>Approved</option><option>Rejected</option><option>Not Required</option></select></div>
+                <button class='btn primary' id='btn-bulk-update'>Apply Bulk Update</button>
+            </div>
+            <div class='row' style='margin-top:10px'>
+                <div class='field' style='min-width:120px'><label>Approval Task ID</label><input id='approval-task-id' type='number'/></div>
+                <div class='field'><label>Approval Status</label><select id='approval-status'><option>Pending</option><option>Approved</option><option>Rejected</option><option>Not Required</option></select></div>
+                <button class='btn' id='btn-apply-approval'>Apply Approval</button>
+            </div>
+            <div class='row' style='margin-top:10px'>
+                <div class='field' style='min-width:120px'><label>Task ID</label><input id='comment-task-id' type='number'/></div>
+                <div class='field' style='min-width:300px'><label>Add Comment</label><textarea id='comment-text' rows='2'></textarea></div>
+                <button class='btn' id='btn-add-comment'>Add Comment</button>
+                <button class='btn' id='btn-view-comments'>View Comments</button>
+            </div>
+            <div class='table-wrap' style='margin-top:10px'><table><thead><tr><th>ID</th><th>Client</th><th>Project</th><th>Task</th><th>Staff</th><th>Category</th><th>Status</th><th>Approval</th><th>Due</th></tr></thead><tbody id='tbl-tasks'></tbody></table></div>
+            <div class='table-wrap' style='margin-top:10px'><table><thead><tr><th>Project</th><th>Category</th><th>Tasks</th><th>Open</th><th>Completed</th><th>Pending Approval</th><th>Staff</th></tr></thead><tbody id='tbl-project-map'></tbody></table></div>
+            <div class='table-wrap' style='margin-top:10px'><table><thead><tr><th>Task</th><th>Comment</th><th>By</th><th>Time</th></tr></thead><tbody id='tbl-comments'></tbody></table></div>
+        </div>
+    </section>
+
+    <section id='sec-users' class='section'>
+        <div class='panel'>
+            <h3>User Management & Profiles</h3>
+            <div class='row'>
+                <div class='field'><label>Username</label><input id='new-user-username' type='text' placeholder='new.user'/></div>
+                <div class='field'><label>Name</label><input id='new-user-name' type='text' placeholder='New User'/></div>
+                <div class='field'><label>Password</label><input id='new-user-password' type='password' placeholder='Temporary password'/></div>
+                <div class='field'><label>Role</label><select id='new-user-role'><option>Manager</option><option>User</option><option>Admin</option></select></div>
+                <div class='field'><label>Department</label><input id='new-user-department' type='text' placeholder='Operations'/></div>
+                <div class='field'><label>Timezone</label><input id='new-user-timezone' type='text' placeholder='Asia/Kolkata'/></div>
+                <button class='btn primary' id='btn-create-user'>Create User</button>
+            </div>
+            <div class='table-wrap' style='margin-top:10px'><table><thead><tr><th>Username</th><th>Name</th><th>Access</th><th>Department</th><th>Timezone</th><th>Active</th><th>Sessions</th><th>Open Tasks</th><th>Last Login</th><th>Actions</th></tr></thead><tbody id='tbl-users'></tbody></table></div>
+        </div>
+    </section>
+
+    <section id='sec-automation' class='section'>
+        <div class='panel'>
+            <h3>Automation & Scheduled Actions</h3>
+            <div class='row'>
+                <button class='btn' id='btn-refresh-rules'>Refresh Rules</button>
+                <button class='btn warn' id='btn-run-actions'>Run Scheduled Actions Now</button>
+            </div>
+            <div class='table-wrap' style='margin-top:10px'><table><thead><tr><th>ID</th><th>Name</th><th>Trigger</th><th>Action</th><th>Enabled</th><th>Toggle</th></tr></thead><tbody id='tbl-rules'></tbody></table></div>
+            <h3 style='margin-top:16px'>Report Schedules</h3>
+            <div class='row'>
+                <div class='field'><label>Schedule Name</label><input id='schedule-name' type='text' placeholder='Daily Login Digest'/></div>
+                <div class='field'><label>Trigger</label><input id='schedule-trigger' type='text' placeholder='weekday_1800'/></div>
+                <div class='field'><label>Report</label><select id='schedule-report'><option value='weekly-summary'>Weekly Summary</option><option value='monthly-attendance'>Monthly Attendance</option><option value='login-history'>Login History</option><option value='staff-utilization'>Staff Utilization</option><option value='project-billing'>Project Billing</option><option value='task-approvals'>Task Approvals</option></select></div>
+                <div class='field'><label>Format</label><select id='schedule-format'><option value='json'>JSON</option><option value='csv'>CSV</option></select></div>
+                <div class='field' style='min-width:260px'><label>Recipients</label><input id='schedule-recipients' type='text' placeholder='ops@example.com, admin@example.com'/></div>
+                <button class='btn primary' id='btn-create-schedule'>Create Schedule</button>
+            </div>
+            <div class='table-wrap' style='margin-top:10px'><table><thead><tr><th>ID</th><th>Name</th><th>Trigger</th><th>Report</th><th>Format</th><th>Enabled</th><th>Delete</th></tr></thead><tbody id='tbl-schedules'></tbody></table></div>
+        </div>
+    </section>
+
+    <section id='sec-compliance' class='section'>
+        <div class='panel'>
+            <h3>Compliance & Audit</h3>
+            <div class='row'>
+                <button class='btn' id='btn-refresh-audit'>Refresh Audit</button>
+                <button class='btn' id='btn-export-audit'>Export Audit JSON</button>
+            </div>
+            <div class='table-wrap' style='margin-top:10px'><table><thead><tr><th>Time</th><th>Admin</th><th>Action</th><th>Details</th></tr></thead><tbody id='tbl-audit'></tbody></table></div>
+        </div>
+    </section>
+
+    <script id='portal-data' type='application/json'>__BOOTSTRAP_JSON__</script>
+    <script>
+        window.__ADMIN_TOKEN__ = '__WERUNOPS_ADMIN_TOKEN__';
+        const RAW = JSON.parse(document.getElementById('portal-data').textContent || '{}');
+        const API_BASE = '/api/v1/admin';
+        const currentAdmin = RAW.currentAdmin || {};
+        const adminCapabilities = currentAdmin.capabilities || {};
+        const state = { user:'', project:'', category:'', from:'', to:'', sessionSearch:'', taskStatus:'', taskSearch:'' };
+        const cache = {
+            users: Array.isArray(RAW.users) ? RAW.users.slice() : [],
+            schedules: Array.isArray(RAW.reportSchedules) ? RAW.reportSchedules.slice() : [],
+        };
+        const tabs = [
+            ['overview','Overview'],
+            ['sessions','Sessions & Reports'],
+            ['tasks','Task Ops'],
+            ['users','Users'],
+            ['automation','Automation'],
+            ['compliance','Compliance'],
+        ];
+        const el = (id) => document.getElementById(id);
+        const toNum = (value) => Number(value || 0);
+        const hours = (seconds) => (toNum(seconds) / 3600).toFixed(1);
+        const fmt = (value) => value ? new Date(value).toLocaleString() : '-';
+        const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[ch]));
+
+        function showError(message) {
+            const node = el('global-error');
+            if (!node) return;
+            node.textContent = message;
+            node.style.display = 'block';
+        }
+
+        function clearError() {
+            const node = el('global-error');
+            if (!node) return;
+            node.textContent = '';
+            node.style.display = 'none';
+        }
+
+        function downloadJson(data, fileName) {
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type:'application/json' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = fileName;
+            link.click();
+            URL.revokeObjectURL(url);
+        }
+
+        async function apiFetch(path, options = {}) {
+            const response = await fetch(path, {
+                ...options,
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${window.__ADMIN_TOKEN__}`,
+                    ...(options.headers || {}),
+                },
+            });
+            if (!response.ok) {
+                const message = response.status === 401 || response.status === 403
+                    ? 'Admin session is missing or expired. Re-open portal from the dashboard after signing in again.'
+                    : `Request failed (${response.status}).`;
+                showError(message);
+                throw new Error(message);
+            }
+            clearError();
+            return response;
+        }
+
+        function syncUserFilterOptions(users = cache.users) {
+            const select = el('flt-user');
+            if (!select) return;
+            const previous = select.value || state.user || '';
+            select.innerHTML = "<option value=''>All users</option>";
+            Array.from(new Set((users || []).map((user) => user.username).filter(Boolean))).sort().forEach((username) => {
+                const option = document.createElement('option');
+                option.value = username;
+                option.textContent = username;
+                select.appendChild(option);
+            });
+            select.value = previous;
+        }
+
+        function appendOptions(selectId, values) {
+            const node = el(selectId);
+            if (!node) return;
+            values.forEach((value) => {
+                const option = document.createElement('option');
+                option.value = value;
+                option.textContent = value;
+                node.appendChild(option);
+            });
+        }
+
+        function initTabs() {
+            const host = el('tabs');
+            host.innerHTML = tabs.map(([id, label], index) => `<button class='tab ${index === 0 ? 'active' : ''}' data-sec='${id}'>${label}</button>`).join('');
+            host.addEventListener('click', (event) => {
+                const button = event.target.closest('.tab');
+                if (!button) return;
+                document.querySelectorAll('.tab').forEach((tab) => tab.classList.remove('active'));
+                button.classList.add('active');
+                document.querySelectorAll('.section').forEach((section) => section.classList.remove('active'));
+                const section = el(`sec-${button.dataset.sec}`);
+                if (section) section.classList.add('active');
+            });
+        }
+
+        function filterSessions() {
+            return (RAW.sessions || []).filter((session) => {
+                if (state.user && session.username !== state.user) return false;
+                if (state.project && String(session.projectTag || '') !== state.project) return false;
+                if (state.category && String(session.operationalCategory || '') !== state.category) return false;
+                const login = session.loginTime ? new Date(session.loginTime) : null;
+                if (state.from && login && login < new Date(`${state.from}T00:00:00`)) return false;
+                if (state.to && login && login > new Date(`${state.to}T23:59:59`)) return false;
+                const needle = state.sessionSearch.toLowerCase();
+                if (!needle) return true;
+                const haystack = `${String(session.id || '')} ${String(session.username || '')} ${String(session.device || '')} ${String(session.projectTag || '')} ${String(session.operationalCategory || '')}`.toLowerCase();
+                return haystack.includes(needle);
+            });
+        }
+
+        function filterTasks() {
+            const needle = state.taskSearch.toLowerCase();
+            return (RAW.tasks || []).filter((task) => {
+                if (state.taskStatus && task.status !== state.taskStatus) return false;
+                if (state.project && String(task.project || '') !== state.project) return false;
+                if (state.category && String(task.operationalCategory || '') !== state.category) return false;
+                if (!needle) return true;
+                const haystack = `${String(task.task || '')} ${String(task.client || '')} ${String(task.staff || '')} ${String(task.project || '')} ${String(task.operationalCategory || '')}`.toLowerCase();
+                return haystack.includes(needle);
+            });
+        }
+
+        function buildProjectMap(tasks) {
+            const grouped = {};
+            tasks.forEach((task) => {
+                const project = String(task.project || '').trim() || 'Unmapped';
+                const category = String(task.operationalCategory || '').trim() || 'General';
+                const key = `${project}::${category}`;
+                if (!grouped[key]) {
+                    grouped[key] = { project, category, taskCount: 0, openTaskCount: 0, completedTaskCount: 0, pendingApprovalCount: 0, staff: new Set() };
+                }
+                grouped[key].taskCount += 1;
+                if (task.status === 'Completed') grouped[key].completedTaskCount += 1;
+                else grouped[key].openTaskCount += 1;
+                if (task.approvalStatus === 'Pending') grouped[key].pendingApprovalCount += 1;
+                if (task.staff) grouped[key].staff.add(task.staff);
+            });
+            return Object.values(grouped).map((bucket) => ({ ...bucket, staff: Array.from(bucket.staff).sort() }));
+        }
+
+        function renderCharts(sessions) {
+            const canvas = el('chart-hours');
+            if (!canvas) return;
+            const context = canvas.getContext('2d');
+            if (!context) return;
+            const totals = {};
+            sessions.forEach((session) => {
+                const username = session.username || 'Unknown';
+                totals[username] = (totals[username] || 0) + toNum(session.durationSeconds);
+            });
+            context.clearRect(0, 0, canvas.width, canvas.height);
+            const labels = Object.keys(totals);
+            const values = labels.map((label) => totals[label] / 3600);
+            const max = Math.max(1, ...values, 1);
+            labels.forEach((label, index) => {
+                const y = 20 + index * 35;
+                const width = Math.round((values[index] / max) * (canvas.width - 170));
+                context.fillStyle = '#0f766e';
+                context.fillRect(130, y, width, 20);
+                context.fillStyle = '#1f2937';
+                context.fillText(label, 10, y + 14);
+                context.fillText(`${values[index].toFixed(1)}h`, 135 + width, y + 14);
+            });
+
+            const heat = {};
+            sessions.forEach((session) => {
+                const login = new Date(session.loginTime || Date.now());
+                const key = `${login.getDay()}-${login.getHours()}`;
+                heat[key] = (heat[key] || 0) + toNum(session.durationSeconds);
+            });
+            const heatEl = el('heatmap');
+            const heatMax = Math.max(1, ...Object.values(heat), 1);
+            heatEl.innerHTML = '';
+            for (let day = 0; day < 7; day += 1) {
+                for (let hourBlock = 0; hourBlock < 12; hourBlock += 1) {
+                    const hour = hourBlock * 2;
+                    const value = heat[`${day}-${hour}`] || 0;
+                    const alpha = Math.max(0.08, value / heatMax);
+                    const cell = document.createElement('div');
+                    cell.className = 'heat';
+                    cell.style.background = `rgba(15,118,110,${alpha.toFixed(2)})`;
+                    cell.title = `Day ${day}, ${hour}:00 => ${Math.round(value / 60)} min`;
+                    heatEl.appendChild(cell);
+                }
+            }
+        }
+
+        function renderOverview() {
+            const sessions = filterSessions();
+            const tasks = filterTasks();
+            const totalDuration = sessions.reduce((sum, session) => sum + toNum(session.durationSeconds), 0);
+            const activeDuration = sessions.reduce((sum, session) => sum + toNum(session.activeSeconds), 0);
+            const billableDuration = sessions.reduce((sum, session) => sum + toNum(session.billableSeconds), 0);
+            const administrativeDuration = sessions.reduce((sum, session) => sum + toNum(session.administrativeSeconds), 0);
+            const completedTasks = tasks.filter((task) => task.status === 'Completed').length;
+            const openTasks = tasks.filter((task) => task.status !== 'Completed').length;
+            const pendingApprovals = tasks.filter((task) => task.approvalStatus === 'Pending').length;
+            const overdueTasks = tasks.filter((task) => task.status !== 'Completed' && task.dueDate && new Date(task.dueDate) < new Date()).length;
+            const efficiency = totalDuration > 0 ? ((completedTasks * 3600 + activeDuration) / Math.max(1, totalDuration)).toFixed(2) : '0.00';
+
+            el('m-sessions').textContent = String(sessions.length);
+            el('m-hours').textContent = hours(totalDuration);
+            el('m-active-ratio').textContent = totalDuration > 0 ? ((activeDuration / totalDuration) * 100).toFixed(0) : '0';
+            el('m-open').textContent = String(openTasks);
+            el('m-complete').textContent = String(completedTasks);
+            el('m-eff').textContent = efficiency;
+            el('m-pending-approval').textContent = String(pendingApprovals);
+            el('m-overdue').textContent = String(overdueTasks);
+            el('m-billable').textContent = hours(billableDuration);
+            el('m-admin-hours').textContent = hours(administrativeDuration);
+
+            const byUser = {};
+            sessions.forEach((session) => {
+                const username = session.username || 'Unknown';
+                if (!byUser[username]) byUser[username] = { count: 0, duration: 0, active: 0, idle: 0 };
+                byUser[username].count += 1;
+                byUser[username].duration += toNum(session.durationSeconds);
+                byUser[username].active += toNum(session.activeSeconds);
+                byUser[username].idle += toNum(session.idleSeconds);
+            });
+            el('tbl-summary').innerHTML = Object.entries(byUser)
+                .sort((a, b) => b[1].duration - a[1].duration)
+                .map(([username, bucket]) => `<tr><td>${escapeHtml(username)}</td><td>${bucket.count}</td><td>${bucket.duration}</td><td>${bucket.active}</td><td>${bucket.idle}</td><td>${((bucket.active / Math.max(1, bucket.duration)) * 100).toFixed(0)}%</td></tr>`)
+                .join('') || "<tr><td colspan='6' class='empty'>No data</td></tr>";
+
+            renderCharts(sessions);
+        }
+
+        function renderSessionsAndTasks() {
+            const sessions = filterSessions();
+            const tasks = filterTasks();
+            const projectMap = buildProjectMap(tasks);
+            el('tbl-sessions').innerHTML = sessions.slice(0, 400).map((session) => `<tr><td>${escapeHtml(session.id)}</td><td>${escapeHtml(session.username)}</td><td>${escapeHtml(session.projectTag || '-')}</td><td>${escapeHtml(session.operationalCategory || '-')}</td><td>${fmt(session.loginTime)}</td><td>${fmt(session.logoutTime)}</td><td>${toNum(session.durationSeconds)}</td><td>${toNum(session.activeSeconds)}</td><td>${toNum(session.idleSeconds)}</td><td>${escapeHtml(session.device || '-')}</td></tr>`).join('') || "<tr><td colspan='10' class='empty'>No sessions</td></tr>";
+            el('tbl-tasks').innerHTML = tasks.slice(0, 500).map((task) => `<tr><td>${task.id}</td><td>${escapeHtml(task.client)}</td><td>${escapeHtml(task.project || '-')}</td><td>${escapeHtml(task.task)}</td><td>${escapeHtml(task.staff)}</td><td>${escapeHtml(task.operationalCategory || '-')}</td><td>${escapeHtml(task.status)}</td><td>${escapeHtml(task.approvalStatus || 'Pending')}</td><td>${escapeHtml(task.dueDate || '-')}</td></tr>`).join('') || "<tr><td colspan='9' class='empty'>No tasks</td></tr>";
+            el('tbl-project-map').innerHTML = projectMap.map((item) => `<tr><td>${escapeHtml(item.project)}</td><td>${escapeHtml(item.category)}</td><td>${item.taskCount}</td><td>${item.openTaskCount}</td><td>${item.completedTaskCount}</td><td>${item.pendingApprovalCount}</td><td>${escapeHtml(item.staff.join(', '))}</td></tr>`).join('') || "<tr><td colspan='7' class='empty'>No mapped tasks</td></tr>";
+        }
+
+        async function renderMonitoring() {
+            try {
+                const response = await apiFetch(`${API_BASE}/alerts`);
+                const payload = (await response.json()).data || {};
+                const alerts = payload.alerts || [];
+                el('tbl-alerts').innerHTML = alerts.map((alert) => `<tr><td>${escapeHtml(alert.title)}</td><td>${escapeHtml(alert.severity)}</td><td>${escapeHtml(alert.details)}</td><td>${fmt(alert.timestamp)}</td></tr>`).join('') || "<tr><td colspan='4' class='empty'>No active alerts</td></tr>";
+                el('ticker-online').textContent = `Online: ${payload.onlineUsers || 0}`;
+                el('ticker-hours').textContent = `Today Hours: ${hours(payload.todayDurationSeconds || 0)}`;
+                el('ticker-tasks').textContent = `Done Today: ${payload.completedToday || 0}`;
+            } catch (error) {
+                /* ignore */
+            }
+        }
+
+        async function renderUsers() {
+            try {
+                const response = await apiFetch(`${API_BASE}/users`);
+                cache.users = (await response.json()).data || [];
+                syncUserFilterOptions(cache.users);
+            } catch (error) {
+                el('tbl-users').innerHTML = "<tr><td colspan='10' class='empty'>Unable to load users.</td></tr>";
+                return;
+            }
+            const roleDisabled = adminCapabilities.manageRoles ? '' : 'disabled';
+            const userDisabled = adminCapabilities.manageUsers ? '' : 'disabled';
+            const taskDisabled = adminCapabilities.manageTasks ? '' : 'disabled';
+            el('tbl-users').innerHTML = cache.users.map((user) => `
+                <tr>
+                    <td>${escapeHtml(user.username)}</td>
+                    <td>${escapeHtml(user.name)}</td>
+                    <td>${escapeHtml(user.accessLevel || user.role)}</td>
+                    <td>${escapeHtml(user.department || '-')}</td>
+                    <td>${escapeHtml(user.timezone || 'UTC')}</td>
+                    <td>${user.isActive ? 'Active' : 'Inactive'}</td>
+                    <td>${toNum(user.sessionCount)}</td>
+                    <td>${toNum(user.openTaskCount)}</td>
+                    <td>${fmt(user.lastLoginTime)}</td>
+                    <td>
+                        <select class='role-edit' data-user='${escapeHtml(user.username)}' ${roleDisabled}>
+                            <option ${user.role === 'Admin' ? 'selected' : ''}>Admin</option>
+                            <option ${user.role === 'Manager' ? 'selected' : ''}>Manager</option>
+                            <option ${user.role === 'User' ? 'selected' : ''}>User</option>
+                        </select>
+                        <button class='btn role-save' data-user='${escapeHtml(user.username)}' ${roleDisabled}>Save</button>
+                        <button class='btn user-edit' data-user='${escapeHtml(user.username)}' ${userDisabled}>Edit</button>
+                        <button class='btn ${user.isActive ? 'warn' : 'primary'} user-toggle' data-user='${escapeHtml(user.username)}' data-active='${user.isActive ? '1' : '0'}' ${userDisabled}>${user.isActive ? 'Deactivate' : 'Activate'}</button>
+                        <button class='btn user-reassign' data-user='${escapeHtml(user.username)}' ${taskDisabled}>Reassign</button>
+                    </td>
+                </tr>`).join('') || "<tr><td colspan='10' class='empty'>No users</td></tr>";
+        }
+
+        async function renderAutomation() {
+            try {
+                const response = await apiFetch(`${API_BASE}/automation-rules`);
+                const rules = ((await response.json()).data || []).filter((rule) => rule.action !== 'send_report');
+                el('tbl-rules').innerHTML = rules.map((rule) => `<tr><td>${escapeHtml(rule.id)}</td><td>${escapeHtml(rule.name)}</td><td>${escapeHtml(rule.trigger)}</td><td>${escapeHtml(rule.action)}</td><td>${rule.enabled ? 'Yes' : 'No'}</td><td><button class='btn toggle-rule' data-rule='${escapeHtml(rule.id)}' ${adminCapabilities.manageAutomation ? '' : 'disabled'}>Toggle</button></td></tr>`).join('') || "<tr><td colspan='6' class='empty'>No rules</td></tr>";
+            } catch (error) {
+                el('tbl-rules').innerHTML = "<tr><td colspan='6' class='empty'>Unable to load rules.</td></tr>";
+            }
+
+            try {
+                const response = await apiFetch(`${API_BASE}/report-schedules`);
+                cache.schedules = (await response.json()).data || [];
+                el('tbl-schedules').innerHTML = cache.schedules.map((schedule) => `<tr><td>${escapeHtml(schedule.id)}</td><td>${escapeHtml(schedule.name)}</td><td>${escapeHtml(schedule.trigger)}</td><td>${escapeHtml(schedule.reportName)}</td><td>${escapeHtml(schedule.format)}</td><td>${schedule.enabled ? 'Yes' : 'No'}</td><td><button class='btn danger delete-schedule' data-schedule='${escapeHtml(schedule.id)}' ${adminCapabilities.scheduleReports ? '' : 'disabled'}>Delete</button></td></tr>`).join('') || "<tr><td colspan='7' class='empty'>No report schedules</td></tr>";
+            } catch (error) {
+                el('tbl-schedules').innerHTML = "<tr><td colspan='7' class='empty'>Unable to load report schedules.</td></tr>";
+            }
+        }
+
+        async function renderAudit() {
+            if (!adminCapabilities.viewAudit) {
+                el('tbl-audit').innerHTML = "<tr><td colspan='4' class='empty'>Audit log visibility is restricted for your role.</td></tr>";
+                return;
+            }
+            try {
+                const response = await apiFetch(`${API_BASE}/audit-logs`);
+                const logs = (await response.json()).data || [];
+                el('tbl-audit').innerHTML = logs.map((entry) => `<tr><td>${fmt(entry.timestamp)}</td><td>${escapeHtml(entry.adminName || entry.admin)}</td><td>${escapeHtml(entry.action)}</td><td>${escapeHtml(JSON.stringify(entry.details || {}))}</td></tr>`).join('') || "<tr><td colspan='4' class='empty'>No audit records</td></tr>";
+            } catch (error) {
+                el('tbl-audit').innerHTML = "<tr><td colspan='4' class='empty'>Unable to load audit logs.</td></tr>";
+            }
+        }
+
+        async function refreshSavedFilterOptions() {
+            const select = el('saved-filters-select');
+            if (!select) return;
+            const previous = select.value;
+            select.innerHTML = "<option value=''>Select filter</option>";
+            const response = await apiFetch(`${API_BASE}/filters`);
+            const items = (await response.json()).data || [];
+            items.forEach((item) => {
+                const option = document.createElement('option');
+                option.value = item.name;
+                option.textContent = item.name;
+                select.appendChild(option);
+            });
+            if (previous) select.value = previous;
+        }
+
+        async function saveFilter() {
+            const name = (el('save-filter-name').value || '').trim();
+            if (!name) return;
+            await apiFetch(`${API_BASE}/filters`, { method:'POST', body: JSON.stringify({ name, filters: state }) });
+            el('save-filter-name').value = '';
+            await refreshSavedFilterOptions();
+            alert('Filter saved.');
+        }
+
+        async function loadSavedFilter() {
+            const selectedName = el('saved-filters-select').value;
+            if (!selectedName) return;
+            const response = await apiFetch(`${API_BASE}/filters`);
+            const items = (await response.json()).data || [];
+            const match = items.find((item) => item.name === selectedName);
+            if (!match) return;
+            Object.assign(state, match.filters || {});
+            el('flt-user').value = state.user || '';
+            el('flt-project').value = state.project || '';
+            el('flt-category').value = state.category || '';
+            el('flt-from').value = state.from || '';
+            el('flt-to').value = state.to || '';
+            el('flt-session-search').value = state.sessionSearch || '';
+            el('task-status-filter').value = state.taskStatus || '';
+            el('task-search-filter').value = state.taskSearch || '';
+            await applyFilters();
+        }
+
+        async function deleteSavedFilter() {
+            const selectedName = el('saved-filters-select').value;
+            if (!selectedName) return;
+            await apiFetch(`${API_BASE}/filters/${encodeURIComponent(selectedName)}`, { method:'DELETE' });
+            await refreshSavedFilterOptions();
+        }
+
+        function exportFilteredJson() {
+            downloadJson({ generatedAt: RAW.generatedAt, filters: state, sessions: filterSessions(), tasks: filterTasks() }, `werunops-admin-${new Date().toISOString().slice(0, 10)}.json`);
+        }
+
+        function exportSessionsCsv() {
+            const sessions = filterSessions();
+            const header = 'id,username,projectTag,operationalCategory,loginTime,logoutTime,durationSeconds,activeSeconds,idleSeconds\n';
+            const body = sessions.map((session) => [session.id, session.username, session.projectTag || '', session.operationalCategory || '', session.loginTime, session.logoutTime || '', toNum(session.durationSeconds), toNum(session.activeSeconds), toNum(session.idleSeconds)].map((value) => `"${String(value).replace(/"/g, '""')}"`).join(',')).join('\n');
+            const blob = new Blob([header + body], { type:'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `werunops-sessions-${new Date().toISOString().slice(0, 10)}.csv`;
+            link.click();
+            URL.revokeObjectURL(url);
+        }
+
+        async function runReport(reportName, query = '') {
+            const response = await apiFetch(`${API_BASE}/reports/${reportName}${query}`);
+            const payload = (await response.json()).data || {};
+            downloadJson(payload, `werunops-${reportName}-${new Date().toISOString().slice(0, 10)}.json`);
+        }
+
+        async function applyFilters() {
+            state.user = el('flt-user').value;
+            state.project = el('flt-project').value;
+            state.category = el('flt-category').value;
+            state.from = el('flt-from').value;
+            state.to = el('flt-to').value;
+            state.sessionSearch = el('flt-session-search').value || '';
+            state.taskStatus = el('task-status-filter').value;
+            state.taskSearch = el('task-search-filter').value || '';
+            renderOverview();
+            renderSessionsAndTasks();
+            await renderMonitoring();
+        }
+
+        async function createUser() {
+            if (!adminCapabilities.manageUsers) return;
+            const payload = {
+                username: (el('new-user-username').value || '').trim(),
+                name: (el('new-user-name').value || '').trim(),
+                password: (el('new-user-password').value || '').trim(),
+                role: el('new-user-role').value,
+                department: (el('new-user-department').value || '').trim(),
+                timezone: (el('new-user-timezone').value || '').trim() || 'UTC',
+            };
+            if (!payload.username || !payload.name || !payload.password) return;
+            await apiFetch(`${API_BASE}/users`, { method:'POST', body: JSON.stringify(payload) });
+            ['new-user-username','new-user-name','new-user-password','new-user-department','new-user-timezone'].forEach((id) => { if (el(id)) el(id).value = ''; });
+            location.reload();
+        }
+
+        async function applyTaskApproval() {
+            if (!adminCapabilities.approveTasks) return;
+            const taskId = parseInt(el('approval-task-id').value, 10);
+            if (!Number.isFinite(taskId)) return;
+            await apiFetch(`${API_BASE}/tasks/${taskId}/approval`, { method:'PATCH', body: JSON.stringify({ approvalStatus: el('approval-status').value }) });
+            location.reload();
+        }
+
+        async function createSchedule() {
+            if (!adminCapabilities.scheduleReports) return;
+            const payload = {
+                name: (el('schedule-name').value || '').trim(),
+                trigger: (el('schedule-trigger').value || '').trim() || 'manual',
+                reportName: el('schedule-report').value,
+                format: el('schedule-format').value,
+                recipients: String(el('schedule-recipients').value || '').split(',').map((item) => item.trim()).filter(Boolean),
+            };
+            if (!payload.name) return;
+            await apiFetch(`${API_BASE}/report-schedules`, { method:'POST', body: JSON.stringify(payload) });
+            ['schedule-name','schedule-trigger','schedule-recipients'].forEach((id) => { if (el(id)) el(id).value = ''; });
+            await renderAutomation();
+            await renderAudit();
+        }
+
+        function initFilters() {
+            syncUserFilterOptions(cache.users);
+            appendOptions('task-status-filter', Array.from(new Set((RAW.tasks || []).map((task) => task.status).filter(Boolean))).sort());
+            appendOptions('bulk-status', Array.from(new Set((RAW.tasks || []).map((task) => task.status).filter(Boolean))).sort());
+            appendOptions('flt-project', Array.from(new Set([...(RAW.tasks || []).map((task) => task.project), ...(RAW.sessions || []).map((session) => session.projectTag)].filter(Boolean))).sort());
+            appendOptions('flt-category', Array.from(new Set([...(RAW.tasks || []).map((task) => task.operationalCategory), ...(RAW.sessions || []).map((session) => session.operationalCategory)].filter(Boolean))).sort());
+        }
+
+        function bindActions() {
+            el('btn-apply').addEventListener('click', applyFilters);
+            el('btn-reset').addEventListener('click', () => {
+                state.user = ''; state.project = ''; state.category = ''; state.from = ''; state.to = ''; state.sessionSearch = '';
+                ['flt-user','flt-project','flt-category','flt-from','flt-to','flt-session-search'].forEach((id) => { if (el(id)) el(id).value = ''; });
+                applyFilters();
+            });
+            el('btn-task-apply').addEventListener('click', applyFilters);
+            el('btn-task-reset').addEventListener('click', () => {
+                state.taskStatus = ''; state.taskSearch = '';
+                el('task-status-filter').value = '';
+                el('task-search-filter').value = '';
+                applyFilters();
+            });
+            el('btn-save-filter').addEventListener('click', saveFilter);
+            el('btn-load-filter').addEventListener('click', loadSavedFilter);
+            el('btn-delete-filter').addEventListener('click', deleteSavedFilter);
+            el('btn-export-json').addEventListener('click', exportFilteredJson);
+            el('btn-export-csv').addEventListener('click', exportSessionsCsv);
+            el('btn-live-refresh').addEventListener('click', renderMonitoring);
+            el('btn-report-weekly').addEventListener('click', () => runReport('weekly-summary'));
+            el('btn-report-monthly').addEventListener('click', () => runReport('monthly-attendance'));
+            el('btn-report-login-history').addEventListener('click', () => runReport('login-history', state.user ? `?username=${encodeURIComponent(state.user)}` : ''));
+            el('btn-report-utilization').addEventListener('click', () => runReport('staff-utilization'));
+            el('btn-report-billing').addEventListener('click', () => runReport('project-billing'));
+            el('btn-report-approvals').addEventListener('click', () => runReport('task-approvals'));
+            el('btn-bulk-update').addEventListener('click', async () => {
+                const taskIds = String(el('bulk-task-ids').value || '').split(',').map((value) => parseInt(value.trim(), 10)).filter((value) => Number.isFinite(value));
+                const payload = {
+                    taskIds,
+                    status: el('bulk-status').value || null,
+                    staff: (el('bulk-staff').value || '').trim() || null,
+                    project: (el('bulk-project').value || '').trim() || null,
+                    operationalCategory: (el('bulk-category').value || '').trim() || null,
+                    approvalStatus: el('bulk-approval').value || null,
+                };
+                await apiFetch(`${API_BASE}/tasks/bulk-update`, { method:'POST', body: JSON.stringify(payload) });
+                location.reload();
+            });
+            el('btn-apply-approval').addEventListener('click', applyTaskApproval);
+            el('btn-create-user').addEventListener('click', createUser);
+            el('btn-add-comment').addEventListener('click', async () => {
+                const taskId = parseInt(el('comment-task-id').value, 10);
+                const comment = (el('comment-text').value || '').trim();
+                if (!Number.isFinite(taskId) || !comment) return;
+                await apiFetch(`${API_BASE}/tasks/${taskId}/comments`, { method:'POST', body: JSON.stringify({ comment }) });
+                el('comment-text').value = '';
+                alert('Comment added.');
+            });
+            el('btn-view-comments').addEventListener('click', async () => {
+                const taskId = parseInt(el('comment-task-id').value, 10);
+                if (!Number.isFinite(taskId)) return;
+                const response = await apiFetch(`${API_BASE}/tasks/${taskId}/comments`);
+                const rows = (await response.json()).data || [];
+                el('tbl-comments').innerHTML = rows.map((comment) => `<tr><td>${taskId}</td><td>${escapeHtml(comment.comment)}</td><td>${escapeHtml(comment.user)}</td><td>${fmt(comment.timestamp)}</td></tr>`).join('') || "<tr><td colspan='4' class='empty'>No comments</td></tr>";
+            });
+            el('btn-refresh-rules').addEventListener('click', renderAutomation);
+            el('btn-create-schedule').addEventListener('click', createSchedule);
+            el('btn-run-actions').addEventListener('click', async () => {
+                if (!adminCapabilities.manageAutomation) return;
+                const response = await apiFetch(`${API_BASE}/scheduled-actions/run`, { method:'POST' });
+                downloadJson((await response.json()).data || {}, `werunops-scheduled-actions-${new Date().toISOString().slice(0, 10)}.json`);
+                await renderAutomation();
+                await renderAudit();
+            });
+            el('btn-refresh-audit').addEventListener('click', renderAudit);
+            el('btn-export-audit').addEventListener('click', async () => {
+                const response = await apiFetch(`${API_BASE}/audit-logs`);
+                downloadJson((await response.json()).data || [], `werunops-audit-${new Date().toISOString().slice(0, 10)}.json`);
+            });
+
+            document.body.addEventListener('click', async (event) => {
+                const roleSave = event.target.closest('.role-save');
+                if (roleSave && adminCapabilities.manageRoles) {
+                    const username = roleSave.getAttribute('data-user');
+                    const select = document.querySelector(`select.role-edit[data-user='${username}']`);
+                    if (!select) return;
+                    await apiFetch(`${API_BASE}/users/${encodeURIComponent(username)}/role`, { method:'PATCH', body: JSON.stringify({ role: select.value }) });
+                    location.reload();
+                    return;
+                }
+
+                const userEdit = event.target.closest('.user-edit');
+                if (userEdit && adminCapabilities.manageUsers) {
+                    const username = userEdit.getAttribute('data-user');
+                    const user = cache.users.find((item) => item.username === username);
+                    if (!user) return;
+                    const name = prompt('Name', user.name || username);
+                    if (name === null) return;
+                    const department = prompt('Department', user.department || '');
+                    if (department === null) return;
+                    const timezone = prompt('Timezone', user.timezone || 'UTC');
+                    if (timezone === null) return;
+                    const password = prompt('Optional new password (leave blank to keep current password)', '');
+                    const payload = { name, department, timezone };
+                    if (password) payload.password = password;
+                    await apiFetch(`${API_BASE}/users/${encodeURIComponent(username)}`, { method:'PATCH', body: JSON.stringify(payload) });
+                    location.reload();
+                    return;
+                }
+
+                const userToggle = event.target.closest('.user-toggle');
+                if (userToggle && adminCapabilities.manageUsers) {
+                    const username = userToggle.getAttribute('data-user');
+                    const isActive = userToggle.getAttribute('data-active') === '1';
+                    const user = cache.users.find((item) => item.username === username);
+                    let reassignTo = '';
+                    if (isActive && user && toNum(user.openTaskCount) > 0) {
+                        reassignTo = prompt('Reassign open tasks to which user before deactivation?', '') || '';
+                        if (!reassignTo) return;
+                    }
+                    await apiFetch(`${API_BASE}/users/${encodeURIComponent(username)}`, { method:'PATCH', body: JSON.stringify({ isActive: !isActive, reassignTo }) });
+                    location.reload();
+                    return;
+                }
+
+                const userReassign = event.target.closest('.user-reassign');
+                if (userReassign && adminCapabilities.manageTasks) {
+                    const username = userReassign.getAttribute('data-user');
+                    const reassignTo = prompt(`Reassign tasks from ${username} to:`, '') || '';
+                    if (!reassignTo) return;
+                    const includeCompleted = confirm('Include completed tasks in the reassignment?');
+                    await apiFetch(`${API_BASE}/users/${encodeURIComponent(username)}/reassign`, { method:'POST', body: JSON.stringify({ reassignTo, includeCompleted }) });
+                    location.reload();
+                    return;
+                }
+
+                const toggle = event.target.closest('.toggle-rule');
+                if (toggle && adminCapabilities.manageAutomation) {
+                    const ruleId = toggle.getAttribute('data-rule');
+                    await apiFetch(`${API_BASE}/automation-rules/${encodeURIComponent(ruleId)}/toggle`, { method:'PATCH' });
+                    await renderAutomation();
+                    await renderAudit();
+                    return;
+                }
+
+                const deleteSchedule = event.target.closest('.delete-schedule');
+                if (deleteSchedule && adminCapabilities.scheduleReports) {
+                    const scheduleId = deleteSchedule.getAttribute('data-schedule');
+                    await apiFetch(`${API_BASE}/report-schedules/${encodeURIComponent(scheduleId)}`, { method:'DELETE' });
+                    await renderAutomation();
+                    await renderAudit();
+                }
+            });
+
+            ['flt-user','flt-project','flt-category','flt-from','flt-to'].forEach((id) => el(id).addEventListener('change', applyFilters));
+            el('flt-session-search').addEventListener('input', applyFilters);
+            el('task-status-filter').addEventListener('change', applyFilters);
+            el('task-search-filter').addEventListener('input', applyFilters);
+        }
+
+        async function boot() {
+            try {
+                initTabs();
+                initFilters();
+                bindActions();
+                await applyFilters();
+                await refreshSavedFilterOptions();
+                await renderUsers();
+                await renderAutomation();
+                await renderAudit();
+                setInterval(renderMonitoring, 30000);
+            } catch (error) {
+                showError('Portal initialization failed. Refresh and retry from dashboard.');
+            }
+        }
+
+        boot();
+    </script>
+</body>
+</html>

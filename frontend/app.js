@@ -2708,9 +2708,10 @@ function updateHeaderProfile() {
 
     const adminPortalBtn = document.getElementById('btn-open-admin-portal');
     if (adminPortalBtn) {
-        const isAdmin = String(currentUser.role || '').toLowerCase() === 'admin';
-        adminPortalBtn.classList.toggle('hidden', !isAdmin);
-        if (!isAdmin) {
+        const portalEligibleRoles = new Set(['admin', 'manager']);
+        const canOpenPortal = portalEligibleRoles.has(String(currentUser.role || '').toLowerCase());
+        adminPortalBtn.classList.toggle('hidden', !canOpenPortal);
+        if (!canOpenPortal) {
             adminPortalBtn.setAttribute('href', '#');
             adminPortalBtn.removeAttribute('target');
             adminPortalBtn.removeAttribute('rel');
@@ -2790,8 +2791,9 @@ function getAdminPortalUrl() {
 }
 
 function openAdminPortal() {
-    if (!currentUser || String(currentUser.role || '').toLowerCase() !== 'admin') {
-        showNotification('Access Denied', 'Admin role is required to open backend portal.', 'warning');
+    const portalEligibleRoles = new Set(['admin', 'manager']);
+    if (!currentUser || !portalEligibleRoles.has(String(currentUser.role || '').toLowerCase())) {
+        showNotification('Access Denied', 'Admin or manager role is required to open backend portal.', 'warning');
         return false;
     }
     const url = getAdminPortalUrl();
