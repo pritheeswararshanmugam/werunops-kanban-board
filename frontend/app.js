@@ -1609,21 +1609,37 @@ window.markAsComplete = async function (taskId) {
 
 function populateSelects(config) {
     const selectors = [
-        { id: 'task-client', options: config.clients.map(c => c.name).sort() },
-        { id: 'task-staff', options: config.staff },
-        { id: 'task-status', options: config.statuses },
+        { id: 'task-client', options: Array.isArray(config?.clients) ? config.clients.map(c => c.name).sort() : [] },
+        { id: 'task-staff', options: Array.isArray(config?.staff) ? config.staff : [] },
+        { id: 'task-status', options: Array.isArray(config?.statuses) ? config.statuses : [] },
     ];
 
     selectors.forEach(sel => {
         const el = document.getElementById(sel.id);
         if (!el) return;
-        el.innerHTML = '';
-        sel.options.forEach(opt => {
+        const previousValue = el.value;
+        const nextOptions = sel.options.map(opt => String(opt ?? ''));
+        const currentOptions = Array.from(el.options).map(option => option.value);
+        const optionsUnchanged = currentOptions.length === nextOptions.length
+            && currentOptions.every((value, index) => value === nextOptions[index]);
+
+        // Skip unnecessary DOM rewrites so background polling does not reset in-progress form edits.
+        if (!optionsUnchanged) {
+            el.innerHTML = '';
+        }
+
+        nextOptions.forEach(opt => {
             const optionEl = document.createElement('option');
-            optionEl.value = String(opt ?? '');
-            optionEl.textContent = String(opt ?? '');
-            el.appendChild(optionEl);
+            optionEl.value = opt;
+            optionEl.textContent = opt;
+            if (!optionsUnchanged) {
+                el.appendChild(optionEl);
+            }
         });
+
+        if (previousValue && nextOptions.includes(previousValue)) {
+            el.value = previousValue;
+        }
     });
 }
 
@@ -2694,6 +2710,16 @@ function updateHeaderProfile() {
     if (adminPortalBtn) {
         const isAdmin = String(currentUser.role || '').toLowerCase() === 'admin';
         adminPortalBtn.classList.toggle('hidden', !isAdmin);
+        if (!isAdmin) {
+            adminPortalBtn.setAttribute('href', '#');
+            adminPortalBtn.removeAttribute('target');
+            adminPortalBtn.removeAttribute('rel');
+        } else {
+            const portalUrl = getAdminPortalUrl();
+            adminPortalBtn.setAttribute('href', portalUrl || '#');
+            adminPortalBtn.setAttribute('target', '_blank');
+            adminPortalBtn.setAttribute('rel', 'noopener noreferrer');
+        }
     }
     
     const presenceList = document.getElementById('header-presence-list');
@@ -2752,32 +2778,35 @@ function updateHeaderProfile() {
     }
 }
 
+function getAdminPortalUrl() {
+    if (!store.isBackendReady() || !currentUser?.accessToken) {
+        return '';
+    }
+    const baseApi = (CONFIG.backendApiBase || '').replace(/\/+$/, '');
+    if (!baseApi) {
+        return '';
+    }
+    return `${baseApi}/admin/portal?accessToken=${encodeURIComponent(currentUser.accessToken)}`;
+}
+
 function openAdminPortal() {
     if (!currentUser || String(currentUser.role || '').toLowerCase() !== 'admin') {
         showNotification('Access Denied', 'Admin role is required to open backend portal.', 'warning');
-        return;
+        return false;
     }
-    if (!store.isBackendReady() || !currentUser.accessToken) {
+    const url = getAdminPortalUrl();
+    if (!url) {
         showNotification('Backend Not Connected', 'Connect backend API to open admin portal.', 'warning');
-        return;
+        return false;
     }
 
-    const baseApi = (CONFIG.backendApiBase || '').replace(/\/+$/, '');
-    const url = `${baseApi}/admin/portal?accessToken=${encodeURIComponent(currentUser.accessToken)}`;
-
-    const opened = window.open(url, '_blank', 'noopener,noreferrer');
+    const opened = window.open(url, '_blank');
     if (opened) {
-        return;
+        return true;
     }
 
-    const fallbackLink = document.createElement('a');
-    fallbackLink.href = url;
-    fallbackLink.target = '_blank';
-    fallbackLink.rel = 'noopener noreferrer';
-    fallbackLink.style.display = 'none';
-    document.body.appendChild(fallbackLink);
-    fallbackLink.click();
-    fallbackLink.remove();
+    window.location.assign(url);
+    return false;
 }
 
 function setupProfileModal() {
@@ -2788,9 +2817,15 @@ function setupProfileModal() {
     if (!modalProfile || !btnOpen) return;
 
     adminPortalBtn?.addEventListener('click', (e) => {
-        e.preventDefault();
         document.getElementById('header-user-panel')?.classList.add('hidden');
-        openAdminPortal();
+        const portalUrl = getAdminPortalUrl();
+        if (!portalUrl) {
+            e.preventDefault();
+            showNotification('Backend Not Connected', 'Connect backend API to open admin portal.', 'warning');
+            return;
+        }
+        // Use native anchor navigation in direct click context to minimize popup-blocker interference.
+        adminPortalBtn.setAttribute('href', portalUrl);
     });
 
     function closeProfile() {
