@@ -29,6 +29,16 @@
       "department": "",
       "timezone": "UTC",
       "isActive": true
+    },
+    "PortalVerify1776074314913": {
+      "username": "PortalVerify1776074314913",
+      "passwordHash": "9d6ca2185eba968706ba9ef07abde8e2dd8d7555f2d2590968a402318ac8cf9c",
+      "name": "Portal Verify User",
+      "role": "Manager",
+      "initials": "P",
+      "department": "QA",
+      "timezone": "UTC",
+      "isActive": true
     }
   },
   "tasks": [
@@ -89,64 +99,6 @@
         }
       ],
       "version": 1
-    },
-    {
-      "client": "JS Roofing",
-      "project": "House 77",
-      "task": "Validate API smoke",
-      "staff": "Mubarak",
-      "status": "New",
-      "priority": "Low",
-      "startDate": "2026-03-12",
-      "dueDate": "2026-03-15",
-      "waitingFor": "",
-      "notes": "",
-      "parentId": null,
-      "operationalCategory": "",
-      "approvalStatus": "Pending",
-      "approvedBy": null,
-      "approvedAt": null,
-      "id": 3,
-      "createdAt": "2026-04-13T09:14:42.773223Z",
-      "updatedAt": "2026-04-13T09:14:42.773223Z",
-      "createdBy": "Pritheeswarar",
-      "activityLog": [
-        {
-          "action": "Task created",
-          "user": "Pritheeswarar",
-          "timestamp": "2026-04-13T09:14:42.773223Z"
-        }
-      ],
-      "version": 1
-    },
-    {
-      "client": "JS Roofing",
-      "project": "House Lock",
-      "task": "Lock contention test",
-      "staff": "Mubarak",
-      "status": "New",
-      "priority": "Medium",
-      "startDate": "2026-03-13",
-      "dueDate": "2026-03-20",
-      "waitingFor": "",
-      "notes": "",
-      "parentId": null,
-      "operationalCategory": "",
-      "approvalStatus": "Pending",
-      "approvedBy": null,
-      "approvedAt": null,
-      "id": 4,
-      "createdAt": "2026-04-13T09:14:42.804801Z",
-      "updatedAt": "2026-04-13T09:14:42.804801Z",
-      "createdBy": "Pritheeswarar",
-      "activityLog": [
-        {
-          "action": "Task created",
-          "user": "Pritheeswarar",
-          "timestamp": "2026-04-13T09:14:42.804801Z"
-        }
-      ],
-      "version": 1
     }
   ],
   "clients": [
@@ -167,10 +119,58 @@
       "version": 1
     }
   ],
-  "presence": [],
-  "sessions": [],
+  "presence": [
+    {
+      "username": "Eshwar",
+      "online": true,
+      "lastSeen": "2026-04-13T09:58:27.223154Z",
+      "browser": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.7632.6 Safari/537.36 Edg/145.0.7632.6",
+      "device": "Web"
+    }
+  ],
+  "sessions": [
+    {
+      "id": "sess_0d6e541dad9e",
+      "username": "Eshwar",
+      "loginTime": "2026-04-13T09:58:27.167142Z",
+      "logoutTime": null,
+      "durationSeconds": 0,
+      "activeSeconds": 0,
+      "idleSeconds": 0,
+      "browser": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.7632.6 Safari/537.36 Edg/145.0.7632.6",
+      "device": "Web",
+      "projectTag": "",
+      "operationalCategory": "",
+      "billableSeconds": 0,
+      "administrativeSeconds": 0
+    }
+  ],
   "task_locks": [],
-  "admin_audit_logs": [],
+  "admin_audit_logs": [
+    {
+      "id": "audit_3b26239b28",
+      "timestamp": "2026-04-13T09:58:35.692279+00:00",
+      "admin": "Eshwar",
+      "adminName": "Pritheeswarar",
+      "action": "task_comment_added",
+      "details": {
+        "taskId": 1,
+        "commentId": "c_8531b32a"
+      }
+    },
+    {
+      "id": "audit_e03f647645",
+      "timestamp": "2026-04-13T09:58:35.207981+00:00",
+      "admin": "Eshwar",
+      "adminName": "Pritheeswarar",
+      "action": "user_created",
+      "details": {
+        "username": "PortalVerify1776074314913",
+        "role": "Manager",
+        "department": "QA"
+      }
+    }
+  ],
   "saved_filter_sets": [],
   "automation_rules": [
     {
@@ -188,7 +188,18 @@
       "action": "notify_admin"
     }
   ],
-  "task_comments": {},
-  "next_task_id": 5,
+  "task_comments": {
+    "1": [
+      {
+        "id": "c_8531b32a",
+        "taskId": 1,
+        "comment": "Portal verification comment",
+        "user": "Pritheeswarar",
+        "username": "Eshwar",
+        "timestamp": "2026-04-13T09:58:35.690769+00:00"
+      }
+    ]
+  },
+  "next_task_id": 3,
   "next_client_id": 3
 }

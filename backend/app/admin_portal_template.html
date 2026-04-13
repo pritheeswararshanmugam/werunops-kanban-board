@@ -34,17 +34,39 @@
         .card small { color:var(--muted); text-transform:uppercase; font-size:11px; }
         .card div { font-size:24px; font-weight:700; margin-top:4px; }
         .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+        .toolbar-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:10px; align-items:end; }
+        .actions-row { display:flex; gap:10px; flex-wrap:wrap; align-items:end; margin-top:10px; }
+        .panel-header { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:10px; }
+        .panel-header p { margin:2px 0 0; color:var(--muted); font-size:12px; max-width:560px; }
+        .stack { display:flex; flex-direction:column; gap:10px; }
         .table-wrap { max-height:340px; overflow:auto; border:1px solid var(--line); border-radius:10px; }
         table { width:100%; border-collapse:collapse; font-size:13px; }
         th,td { border:1px solid var(--line); padding:7px; text-align:left; vertical-align:top; }
         th { background:#f9fafb; position:sticky; top:0; }
         .pill { display:inline-block; border-radius:999px; padding:2px 8px; font-size:12px; border:1px solid #d1d5db; }
-        .heatmap { display:grid; grid-template-columns:repeat(12,1fr); gap:4px; }
-        .heat { height:20px; border-radius:4px; }
-        canvas { width:100%; max-width:100%; height:260px; border:1px solid var(--line); border-radius:10px; background:#fff; }
+        .bar-chart { display:flex; flex-direction:column; gap:10px; min-height:260px; }
+        .bar-chart-row { display:grid; grid-template-columns:140px 1fr 64px; gap:12px; align-items:center; }
+        .bar-chart-label { font-size:13px; font-weight:600; color:var(--ink); }
+        .bar-chart-track { height:18px; border-radius:999px; background:#e2e8f0; overflow:hidden; position:relative; }
+        .bar-chart-fill { height:100%; border-radius:999px; background:linear-gradient(90deg, #0f766e, #0f766e 70%, #115e59); }
+        .bar-chart-value { font-size:12px; font-weight:700; color:var(--muted); text-align:right; }
+        .heatmap-shell { display:flex; flex-direction:column; gap:8px; min-height:260px; }
+        .heatmap-head { display:grid; grid-template-columns:92px repeat(12, minmax(0, 1fr)); gap:4px; font-size:11px; color:var(--muted); }
+        .heatmap-time { text-align:center; }
+        .heatmap-row { display:grid; grid-template-columns:92px 1fr; gap:8px; align-items:center; }
+        .heatmap-date { font-size:12px; font-weight:600; color:var(--ink); }
+        .heatmap-cells { display:grid; grid-template-columns:repeat(12, minmax(0, 1fr)); gap:4px; }
+        .heat-cell { height:22px; border-radius:6px; }
         .notice { margin-top:10px; padding:10px 12px; border-radius:10px; border:1px solid #fecaca; background:#fef2f2; color:#991b1b; display:none; }
         .empty { color:var(--muted); text-align:center; }
-        @media (max-width:1000px){ .grid2 { grid-template-columns:1fr; } }
+        .section-note { color:var(--muted); font-size:12px; }
+        @media (max-width:1000px){
+            .grid2 { grid-template-columns:1fr; }
+            .bar-chart-row { grid-template-columns:1fr; }
+            .bar-chart-value { text-align:left; }
+            .heatmap-head { grid-template-columns:72px repeat(12, minmax(0, 1fr)); }
+            .heatmap-row { grid-template-columns:72px 1fr; }
+        }
     </style>
 </head>
 <body>
@@ -55,45 +77,71 @@
     <div class='tabs' id='tabs'></div>
 
     <section id='sec-overview' class='section active'>
-        <div class='panel'>
-            <div class='row'>
-                <div class='field'><label>User</label><select id='flt-user'><option value=''>All users</option></select></div>
-                <div class='field'><label>Project</label><select id='flt-project'><option value=''>All projects</option></select></div>
-                <div class='field'><label>Category</label><select id='flt-category'><option value=''>All categories</option></select></div>
-                <div class='field'><label>Session From</label><input id='flt-from' type='date'/></div>
-                <div class='field'><label>Session To</label><input id='flt-to' type='date'/></div>
-                <div class='field' style='min-width:220px'><label>Session Search</label><input id='flt-session-search' type='text' placeholder='User/device/session id'/></div>
-                <button class='btn primary' id='btn-apply'>Apply</button>
-                <button class='btn' id='btn-reset'>Reset</button>
+        <div class='grid2'>
+            <div class='panel'>
+                <div class='panel-header'>
+                    <div>
+                        <h3>Session Filters</h3>
+                        <p>Keep the overview focused without having to jump between tabs for basic filtering and saved views.</p>
+                    </div>
+                </div>
+                <div class='toolbar-grid'>
+                    <div class='field'><label>User</label><select id='flt-user'><option value=''>All users</option></select></div>
+                    <div class='field'><label>Project</label><select id='flt-project'><option value=''>All projects</option></select></div>
+                    <div class='field'><label>Category</label><select id='flt-category'><option value=''>All categories</option></select></div>
+                    <div class='field'><label>Session From</label><input id='flt-from' type='date'/></div>
+                    <div class='field'><label>Session To</label><input id='flt-to' type='date'/></div>
+                    <div class='field' style='grid-column:span 2'><label>Session Search</label><input id='flt-session-search' type='text' placeholder='User, device, project, session id'/></div>
+                </div>
+                <div class='actions-row'>
+                    <button class='btn primary' id='btn-apply'>Apply</button>
+                    <button class='btn' id='btn-reset'>Reset</button>
+                    <div class='field' style='min-width:220px'><label>Save Current Session Filter</label><input id='save-filter-name' type='text' placeholder='My filter name'/></div>
+                    <button class='btn' id='btn-save-filter'>Save Filter</button>
+                    <div class='field' style='min-width:220px'><label>Saved Filters</label><select id='saved-filters-select'><option value=''>Select filter</option></select></div>
+                    <button class='btn' id='btn-load-filter'>Load Saved</button>
+                    <button class='btn danger' id='btn-delete-filter'>Delete Saved</button>
+                </div>
             </div>
-            <div class='row' style='margin-top:10px'>
-                <div class='field' style='min-width:220px'><label>Save Current Session Filter</label><input id='save-filter-name' type='text' placeholder='My filter name'/></div>
-                <button class='btn' id='btn-save-filter'>Save Filter</button>
-                <div class='field' style='min-width:220px'><label>Saved Filters</label><select id='saved-filters-select'><option value=''>Select filter</option></select></div>
-                <button class='btn' id='btn-load-filter'>Load Saved</button>
-                <button class='btn danger' id='btn-delete-filter'>Delete Saved</button>
+            <div class='panel'>
+                <div class='panel-header'>
+                    <div>
+                        <h3>Operations Snapshot</h3>
+                        <p>Core utilization, task throughput, and approvals in a tighter summary block.</p>
+                    </div>
+                </div>
+                <div class='cards'>
+                    <div class='card'><small>Filtered Sessions</small><div id='m-sessions'>0</div></div>
+                    <div class='card'><small>Duration Hours</small><div id='m-hours'>0</div></div>
+                    <div class='card'><small>Active Ratio %</small><div id='m-active-ratio'>0</div></div>
+                    <div class='card'><small>Open Tasks</small><div id='m-open'>0</div></div>
+                    <div class='card'><small>Completed Tasks</small><div id='m-complete'>0</div></div>
+                    <div class='card'><small>Efficiency Score</small><div id='m-eff'>0</div></div>
+                    <div class='card'><small>Pending Approvals</small><div id='m-pending-approval'>0</div></div>
+                    <div class='card'><small>Overdue Tasks</small><div id='m-overdue'>0</div></div>
+                    <div class='card'><small>Billable Hours</small><div id='m-billable'>0</div></div>
+                    <div class='card'><small>Admin Hours</small><div id='m-admin-hours'>0</div></div>
+                </div>
             </div>
-        </div>
-        <div class='cards'>
-            <div class='card'><small>Filtered Sessions</small><div id='m-sessions'>0</div></div>
-            <div class='card'><small>Duration Hours</small><div id='m-hours'>0</div></div>
-            <div class='card'><small>Active Ratio %</small><div id='m-active-ratio'>0</div></div>
-            <div class='card'><small>Open Tasks</small><div id='m-open'>0</div></div>
-            <div class='card'><small>Completed Tasks</small><div id='m-complete'>0</div></div>
-            <div class='card'><small>Efficiency Score</small><div id='m-eff'>0</div></div>
-            <div class='card'><small>Pending Approvals</small><div id='m-pending-approval'>0</div></div>
-            <div class='card'><small>Overdue Tasks</small><div id='m-overdue'>0</div></div>
-            <div class='card'><small>Billable Hours</small><div id='m-billable'>0</div></div>
-            <div class='card'><small>Admin Hours</small><div id='m-admin-hours'>0</div></div>
         </div>
         <div class='grid2'>
             <div class='panel'>
-                <h3>Daily Hours by User</h3>
-                <canvas id='chart-hours' width='700' height='260'></canvas>
+                <div class='panel-header'>
+                    <div>
+                        <h3>Daily Hours by User</h3>
+                        <p>Readable bar rows with all available users, including zero-hour users, instead of raw canvas text.</p>
+                    </div>
+                </div>
+                <div id='chart-hours' class='bar-chart' aria-live='polite'></div>
             </div>
             <div class='panel'>
-                <h3>Peak Activity Heatmap</h3>
-                <div id='heatmap' class='heatmap'></div>
+                <div class='panel-header'>
+                    <div>
+                        <h3>Peak Activity Heatmap</h3>
+                        <p>Last seven calendar dates with two-hour time buckets, rather than anonymous weekday numbers.</p>
+                    </div>
+                </div>
+                <div id='heatmap' class='heatmap-shell' aria-live='polite'></div>
             </div>
         </div>
         <div class='grid2'>
@@ -131,37 +179,104 @@
     </section>
 
     <section id='sec-tasks' class='section'>
+        <div class='grid2'>
+            <div class='panel' data-task-panel='filters'>
+                <div class='panel-header'>
+                    <div>
+                        <h3>Task Filters</h3>
+                        <p>Use this narrow strip to control the task tables without mixing it with bulk edits.</p>
+                    </div>
+                </div>
+                <div class='toolbar-grid'>
+                    <div class='field'><label>Task Status Filter</label><select id='task-status-filter'><option value=''>All statuses</option></select></div>
+                    <div class='field' style='grid-column:span 2'><label>Task Search</label><input id='task-search-filter' type='text' placeholder='Task, client, staff, project'/></div>
+                </div>
+                <div class='actions-row'>
+                    <button class='btn' id='btn-task-apply'>Apply Task Filter</button>
+                    <button class='btn' id='btn-task-reset'>Reset Task Filter</button>
+                </div>
+            </div>
+            <div class='panel' data-task-panel='bulk'>
+                <div class='panel-header'>
+                    <div>
+                        <h3>Bulk Task Update</h3>
+                        <p>Keep high-impact task mutations grouped together instead of stacking every control in one long strip.</p>
+                    </div>
+                </div>
+                <div class='toolbar-grid'>
+                    <div class='field'><label>Task IDs</label><input id='bulk-task-ids' type='text' placeholder='1,2,3'/></div>
+                    <div class='field'><label>New Status</label><select id='bulk-status'><option value=''>No change</option></select></div>
+                    <div class='field'><label>Reassign Staff</label><input id='bulk-staff' type='text' placeholder='Mubarak'/></div>
+                    <div class='field'><label>Project</label><input id='bulk-project' type='text' placeholder='House 12'/></div>
+                    <div class='field'><label>Category</label><input id='bulk-category' type='text' placeholder='Estimating'/></div>
+                    <div class='field'><label>Approval</label><select id='bulk-approval'><option value=''>No change</option><option>Pending</option><option>Approved</option><option>Rejected</option><option>Not Required</option></select></div>
+                </div>
+                <div class='actions-row'>
+                    <button class='btn primary' id='btn-bulk-update'>Apply Bulk Update</button>
+                </div>
+            </div>
+        </div>
+        <div class='grid2'>
+            <div class='panel' data-task-panel='approval'>
+                <div class='panel-header'>
+                    <div>
+                        <h3>Approval Update</h3>
+                        <p>Single-task approval workflow separated from bulk edits.</p>
+                    </div>
+                </div>
+                <div class='toolbar-grid'>
+                    <div class='field'><label>Approval Task ID</label><input id='approval-task-id' type='number'/></div>
+                    <div class='field'><label>Approval Status</label><select id='approval-status'><option>Pending</option><option>Approved</option><option>Rejected</option><option>Not Required</option></select></div>
+                </div>
+                <div class='actions-row'>
+                    <button class='btn' id='btn-apply-approval'>Apply Approval</button>
+                </div>
+            </div>
+            <div class='panel' data-task-panel='comments'>
+                <div class='panel-header'>
+                    <div>
+                        <h3>Task Comments</h3>
+                        <p>Comment entry and lookup stay together so the comments table does not fight with edit controls.</p>
+                    </div>
+                </div>
+                <div class='toolbar-grid'>
+                    <div class='field'><label>Task ID</label><input id='comment-task-id' type='number'/></div>
+                    <div class='field' style='grid-column:span 2'><label>Add Comment</label><textarea id='comment-text' rows='2'></textarea></div>
+                </div>
+                <div class='actions-row'>
+                    <button class='btn' id='btn-add-comment'>Add Comment</button>
+                    <button class='btn' id='btn-view-comments'>View Comments</button>
+                </div>
+            </div>
+        </div>
+        <div class='grid2'>
+            <div class='panel'>
+                <div class='panel-header'>
+                    <div>
+                        <h3>Task Table</h3>
+                        <p>Operational task view after current filters are applied.</p>
+                    </div>
+                </div>
+                <div class='table-wrap'><table><thead><tr><th>ID</th><th>Client</th><th>Project</th><th>Task</th><th>Staff</th><th>Category</th><th>Status</th><th>Approval</th><th>Due</th></tr></thead><tbody id='tbl-tasks'></tbody></table></div>
+            </div>
+            <div class='panel'>
+                <div class='panel-header'>
+                    <div>
+                        <h3>Project Mapping</h3>
+                        <p>Project/category rollup stays separate from raw tasks to cut down scan fatigue.</p>
+                    </div>
+                </div>
+                <div class='table-wrap'><table><thead><tr><th>Project</th><th>Category</th><th>Tasks</th><th>Open</th><th>Completed</th><th>Pending Approval</th><th>Staff</th></tr></thead><tbody id='tbl-project-map'></tbody></table></div>
+            </div>
+        </div>
         <div class='panel'>
-            <h3>Task Operations</h3>
-            <div class='row'>
-                <div class='field'><label>Task Status Filter</label><select id='task-status-filter'><option value=''>All statuses</option></select></div>
-                <div class='field' style='min-width:260px'><label>Task Search</label><input id='task-search-filter' type='text' placeholder='Task/client/staff/project'/></div>
-                <button class='btn' id='btn-task-apply'>Apply Task Filter</button>
-                <button class='btn' id='btn-task-reset'>Reset Task Filter</button>
+            <div class='panel-header'>
+                <div>
+                    <h3>Recent Comment History</h3>
+                    <p>Comment output is isolated so the Task Ops page does not turn into one continuous control wall.</p>
+                </div>
             </div>
-            <div class='row' style='margin-top:10px'>
-                <div class='field'><label>Task IDs (comma separated)</label><input id='bulk-task-ids' type='text' placeholder='1,2,3'/></div>
-                <div class='field'><label>New Status</label><select id='bulk-status'><option value=''>No change</option></select></div>
-                <div class='field'><label>Reassign Staff</label><input id='bulk-staff' type='text' placeholder='Mubarak'/></div>
-                <div class='field'><label>Project</label><input id='bulk-project' type='text' placeholder='House 12'/></div>
-                <div class='field'><label>Category</label><input id='bulk-category' type='text' placeholder='Estimating'/></div>
-                <div class='field'><label>Approval</label><select id='bulk-approval'><option value=''>No change</option><option>Pending</option><option>Approved</option><option>Rejected</option><option>Not Required</option></select></div>
-                <button class='btn primary' id='btn-bulk-update'>Apply Bulk Update</button>
-            </div>
-            <div class='row' style='margin-top:10px'>
-                <div class='field' style='min-width:120px'><label>Approval Task ID</label><input id='approval-task-id' type='number'/></div>
-                <div class='field'><label>Approval Status</label><select id='approval-status'><option>Pending</option><option>Approved</option><option>Rejected</option><option>Not Required</option></select></div>
-                <button class='btn' id='btn-apply-approval'>Apply Approval</button>
-            </div>
-            <div class='row' style='margin-top:10px'>
-                <div class='field' style='min-width:120px'><label>Task ID</label><input id='comment-task-id' type='number'/></div>
-                <div class='field' style='min-width:300px'><label>Add Comment</label><textarea id='comment-text' rows='2'></textarea></div>
-                <button class='btn' id='btn-add-comment'>Add Comment</button>
-                <button class='btn' id='btn-view-comments'>View Comments</button>
-            </div>
-            <div class='table-wrap' style='margin-top:10px'><table><thead><tr><th>ID</th><th>Client</th><th>Project</th><th>Task</th><th>Staff</th><th>Category</th><th>Status</th><th>Approval</th><th>Due</th></tr></thead><tbody id='tbl-tasks'></tbody></table></div>
-            <div class='table-wrap' style='margin-top:10px'><table><thead><tr><th>Project</th><th>Category</th><th>Tasks</th><th>Open</th><th>Completed</th><th>Pending Approval</th><th>Staff</th></tr></thead><tbody id='tbl-project-map'></tbody></table></div>
-            <div class='table-wrap' style='margin-top:10px'><table><thead><tr><th>Task</th><th>Comment</th><th>By</th><th>Time</th></tr></thead><tbody id='tbl-comments'></tbody></table></div>
+            <div class='table-wrap'><table><thead><tr><th>Task</th><th>Comment</th><th>By</th><th>Time</th></tr></thead><tbody id='tbl-comments'></tbody></table></div>
         </div>
     </section>
 
@@ -207,7 +322,8 @@
             <h3>Compliance & Audit</h3>
             <div class='row'>
                 <button class='btn' id='btn-refresh-audit'>Refresh Audit</button>
-                <button class='btn' id='btn-export-audit'>Export Audit JSON</button>
+                <button class='btn' id='btn-export-audit'>Export Audit CSV</button>
+                <span class='section-note' id='audit-refresh-status'>Audit log has not been refreshed in this session.</span>
             </div>
             <div class='table-wrap' style='margin-top:10px'><table><thead><tr><th>Time</th><th>Admin</th><th>Action</th><th>Details</th></tr></thead><tbody id='tbl-audit'></tbody></table></div>
         </div>
@@ -218,12 +334,20 @@
         window.__ADMIN_TOKEN__ = '__WERUNOPS_ADMIN_TOKEN__';
         const RAW = JSON.parse(document.getElementById('portal-data').textContent || '{}');
         const API_BASE = '/api/v1/admin';
+        const PORTAL_UI_STATE_KEY = 'werunops_admin_portal_ui_v2';
         const currentAdmin = RAW.currentAdmin || {};
         const adminCapabilities = currentAdmin.capabilities || {};
         const state = { user:'', project:'', category:'', from:'', to:'', sessionSearch:'', taskStatus:'', taskSearch:'' };
         const cache = {
+            sessions: Array.isArray(RAW.sessions) ? RAW.sessions.slice() : [],
+            tasks: Array.isArray(RAW.tasks) ? RAW.tasks.slice() : [],
             users: Array.isArray(RAW.users) ? RAW.users.slice() : [],
+            rules: Array.isArray(RAW.automationRules) ? RAW.automationRules.slice() : [],
             schedules: Array.isArray(RAW.reportSchedules) ? RAW.reportSchedules.slice() : [],
+            auditLogs: [],
+            catalogSessions: Array.isArray(RAW.sessions) ? RAW.sessions.slice() : [],
+            catalogTasks: Array.isArray(RAW.tasks) ? RAW.tasks.slice() : [],
+            activeTab: 'overview',
         };
         const tabs = [
             ['overview','Overview'],
@@ -238,6 +362,40 @@
         const hours = (seconds) => (toNum(seconds) / 3600).toFixed(1);
         const fmt = (value) => value ? new Date(value).toLocaleString() : '-';
         const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[ch]));
+
+        function restoreUiState() {
+            try {
+                const raw = sessionStorage.getItem(PORTAL_UI_STATE_KEY);
+                if (!raw) return;
+                const parsed = JSON.parse(raw);
+                if (parsed && parsed.activeTab) {
+                    cache.activeTab = String(parsed.activeTab);
+                }
+            } catch (error) {
+                /* ignore invalid storage */
+            }
+        }
+
+        function persistUiState() {
+            try {
+                sessionStorage.setItem(PORTAL_UI_STATE_KEY, JSON.stringify({ activeTab: cache.activeTab }));
+            } catch (error) {
+                /* ignore storage failures */
+            }
+        }
+
+        function mergeRecords(existing, incoming, keyName) {
+            const merged = new Map();
+            (existing || []).forEach((item) => {
+                const key = item && item[keyName] != null ? String(item[keyName]) : '';
+                if (key) merged.set(key, item);
+            });
+            (incoming || []).forEach((item) => {
+                const key = item && item[keyName] != null ? String(item[keyName]) : '';
+                if (key) merged.set(key, item);
+            });
+            return Array.from(merged.values());
+        }
 
         function showError(message) {
             const node = el('global-error');
@@ -255,6 +413,33 @@
 
         function downloadJson(data, fileName) {
             const blob = new Blob([JSON.stringify(data, null, 2)], { type:'application/json' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = fileName;
+            link.click();
+            URL.revokeObjectURL(url);
+        }
+
+        function csvEscape(value) {
+            const normalized = value == null
+                ? ''
+                : Array.isArray(value)
+                    ? value.join('; ')
+                    : typeof value === 'object'
+                        ? JSON.stringify(value)
+                        : String(value);
+            return `"${normalized.replace(/"/g, '""')}"`;
+        }
+
+        function downloadCsvRows(rows, fileName) {
+            const normalizedRows = Array.isArray(rows) ? rows : [];
+            const keys = Array.from(new Set(normalizedRows.flatMap((row) => Object.keys(row || {}))));
+            const header = keys.length ? `${keys.join(',')}\n` : 'empty\n';
+            const body = normalizedRows.length
+                ? normalizedRows.map((row) => keys.map((key) => csvEscape(row[key])).join(',')).join('\n')
+                : '';
+            const blob = new Blob([header + body], { type:'text/csv' });
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
             link.href = url;
@@ -283,29 +468,35 @@
             return response;
         }
 
-        function syncUserFilterOptions(users = cache.users) {
-            const select = el('flt-user');
-            if (!select) return;
-            const previous = select.value || state.user || '';
-            select.innerHTML = "<option value=''>All users</option>";
-            Array.from(new Set((users || []).map((user) => user.username).filter(Boolean))).sort().forEach((username) => {
-                const option = document.createElement('option');
-                option.value = username;
-                option.textContent = username;
-                select.appendChild(option);
-            });
-            select.value = previous;
-        }
-
-        function appendOptions(selectId, values) {
+        function replaceSelectOptions(selectId, values, defaultLabel) {
             const node = el(selectId);
             if (!node) return;
-            values.forEach((value) => {
+            const previous = node.value;
+            node.innerHTML = `<option value=''>${defaultLabel}</option>`;
+            Array.from(new Set((values || []).filter(Boolean))).sort().forEach((value) => {
                 const option = document.createElement('option');
                 option.value = value;
                 option.textContent = value;
                 node.appendChild(option);
             });
+            if (previous && Array.from(node.options).some((option) => option.value === previous)) {
+                node.value = previous;
+            }
+        }
+
+        function syncFilterOptions() {
+            replaceSelectOptions('flt-user', cache.users.map((user) => user.username), 'All users');
+            replaceSelectOptions('flt-project', [...cache.catalogTasks.map((task) => task.project), ...cache.catalogSessions.map((session) => session.projectTag)], 'All projects');
+            replaceSelectOptions('flt-category', [...cache.catalogTasks.map((task) => task.operationalCategory), ...cache.catalogSessions.map((session) => session.operationalCategory)], 'All categories');
+            replaceSelectOptions('task-status-filter', cache.catalogTasks.map((task) => task.status), 'All statuses');
+            replaceSelectOptions('bulk-status', cache.catalogTasks.map((task) => task.status), 'No change');
+        }
+
+        function setActiveTab(tabId) {
+            cache.activeTab = tabId;
+            persistUiState();
+            document.querySelectorAll('.tab').forEach((tab) => tab.classList.toggle('active', tab.dataset.sec === tabId));
+            document.querySelectorAll('.section').forEach((section) => section.classList.toggle('active', section.id === `sec-${tabId}`));
         }
 
         function initTabs() {
@@ -314,16 +505,38 @@
             host.addEventListener('click', (event) => {
                 const button = event.target.closest('.tab');
                 if (!button) return;
-                document.querySelectorAll('.tab').forEach((tab) => tab.classList.remove('active'));
-                button.classList.add('active');
-                document.querySelectorAll('.section').forEach((section) => section.classList.remove('active'));
-                const section = el(`sec-${button.dataset.sec}`);
-                if (section) section.classList.add('active');
+                setActiveTab(button.dataset.sec);
             });
+            setActiveTab(tabs.some(([id]) => id === cache.activeTab) ? cache.activeTab : tabs[0][0]);
+        }
+
+        function buildOperationsQuery() {
+            const params = new URLSearchParams();
+            if (state.user) params.set('username', state.user);
+            if (state.from) params.set('from_date', `${state.from}T00:00:00`);
+            if (state.to) params.set('to_date', `${state.to}T23:59:59`);
+            if (state.taskStatus) params.set('status', state.taskStatus);
+            if (state.taskSearch) params.set('task_search', state.taskSearch);
+            if (state.project) params.set('project', state.project);
+            if (state.category) params.set('category', state.category);
+            return params.toString();
+        }
+
+        async function refreshOperationsData() {
+            const query = buildOperationsQuery();
+            const response = await apiFetch(`${API_BASE}/operations${query ? `?${query}` : ''}`);
+            const payload = (await response.json()).data || {};
+            const nextSessions = Array.isArray(payload.recentSessions) ? payload.recentSessions.slice() : [];
+            const nextTasks = Array.isArray(payload.tasks) ? payload.tasks.slice() : [];
+            cache.sessions = nextSessions;
+            cache.tasks = nextTasks;
+            cache.catalogSessions = mergeRecords(cache.catalogSessions, nextSessions, 'id');
+            cache.catalogTasks = mergeRecords(cache.catalogTasks, nextTasks, 'id');
+            syncFilterOptions();
         }
 
         function filterSessions() {
-            return (RAW.sessions || []).filter((session) => {
+            return cache.sessions.filter((session) => {
                 if (state.user && session.username !== state.user) return false;
                 if (state.project && String(session.projectTag || '') !== state.project) return false;
                 if (state.category && String(session.operationalCategory || '') !== state.category) return false;
@@ -339,7 +552,7 @@
 
         function filterTasks() {
             const needle = state.taskSearch.toLowerCase();
-            return (RAW.tasks || []).filter((task) => {
+            return cache.tasks.filter((task) => {
                 if (state.taskStatus && task.status !== state.taskStatus) return false;
                 if (state.project && String(task.project || '') !== state.project) return false;
                 if (state.category && String(task.operationalCategory || '') !== state.category) return false;
@@ -368,50 +581,137 @@
         }
 
         function renderCharts(sessions) {
-            const canvas = el('chart-hours');
-            if (!canvas) return;
-            const context = canvas.getContext('2d');
-            if (!context) return;
+            const chart = el('chart-hours');
+            const heatmap = el('heatmap');
+            if (!chart || !heatmap) return;
+
             const totals = {};
+            const namesByUsername = new Map(cache.users.map((user) => [user.username, user.name || user.username]));
+            cache.users.forEach((user) => {
+                if (user.username) totals[user.username] = 0;
+            });
             sessions.forEach((session) => {
                 const username = session.username || 'Unknown';
                 totals[username] = (totals[username] || 0) + toNum(session.durationSeconds);
             });
-            context.clearRect(0, 0, canvas.width, canvas.height);
-            const labels = Object.keys(totals);
+
+            const labels = Object.keys(totals).sort((left, right) => totals[right] - totals[left] || String(left).localeCompare(String(right)));
             const values = labels.map((label) => totals[label] / 3600);
             const max = Math.max(1, ...values, 1);
-            labels.forEach((label, index) => {
-                const y = 20 + index * 35;
-                const width = Math.round((values[index] / max) * (canvas.width - 170));
-                context.fillStyle = '#0f766e';
-                context.fillRect(130, y, width, 20);
-                context.fillStyle = '#1f2937';
-                context.fillText(label, 10, y + 14);
-                context.fillText(`${values[index].toFixed(1)}h`, 135 + width, y + 14);
-            });
 
-            const heat = {};
+            chart.innerHTML = labels.length
+                ? labels.map((label, index) => {
+                    const width = Math.max(6, Math.round((values[index] / max) * 100));
+                    const displayLabel = namesByUsername.get(label) || label;
+                    return `
+                        <div class='bar-chart-row' data-hours-chart-row>
+                            <div class='bar-chart-label'>${escapeHtml(displayLabel)}</div>
+                            <div class='bar-chart-track'><div class='bar-chart-fill' style='width:${width}%'></div></div>
+                            <div class='bar-chart-value'>${values[index].toFixed(1)}h</div>
+                        </div>`;
+                }).join('')
+                : "<div class='empty'>No session hours for the selected filters.</div>";
+
+            const buckets = {};
             sessions.forEach((session) => {
                 const login = new Date(session.loginTime || Date.now());
-                const key = `${login.getDay()}-${login.getHours()}`;
-                heat[key] = (heat[key] || 0) + toNum(session.durationSeconds);
+                const dateKey = login.toISOString().slice(0, 10);
+                const slotIndex = Math.floor(login.getHours() / 2);
+                buckets[`${dateKey}-${slotIndex}`] = (buckets[`${dateKey}-${slotIndex}`] || 0) + toNum(session.durationSeconds);
             });
-            const heatEl = el('heatmap');
-            const heatMax = Math.max(1, ...Object.values(heat), 1);
-            heatEl.innerHTML = '';
-            for (let day = 0; day < 7; day += 1) {
-                for (let hourBlock = 0; hourBlock < 12; hourBlock += 1) {
-                    const hour = hourBlock * 2;
-                    const value = heat[`${day}-${hour}`] || 0;
-                    const alpha = Math.max(0.08, value / heatMax);
-                    const cell = document.createElement('div');
-                    cell.className = 'heat';
-                    cell.style.background = `rgba(15,118,110,${alpha.toFixed(2)})`;
-                    cell.title = `Day ${day}, ${hour}:00 => ${Math.round(value / 60)} min`;
-                    heatEl.appendChild(cell);
-                }
+
+            const slotLabels = Array.from({ length: 12 }, (_, index) => `${String(index * 2).padStart(2, '0')}:00`);
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const dates = Array.from({ length: 7 }, (_, offset) => {
+                const day = new Date(today);
+                day.setDate(today.getDate() - (6 - offset));
+                return day;
+            });
+            const maxHeat = Math.max(1, ...Object.values(buckets), 1);
+
+            heatmap.innerHTML = `
+                <div class='heatmap-head'>
+                    <div></div>
+                    ${slotLabels.map((label) => `<div class='heatmap-time'>${label}</div>`).join('')}
+                </div>
+                <div class='stack'>
+                    ${dates.map((date) => {
+                        const dateKey = date.toISOString().slice(0, 10);
+                        const dateLabel = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+                        return `
+                            <div class='heatmap-row'>
+                                <div class='heatmap-date' data-heatmap-date>${dateLabel}</div>
+                                <div class='heatmap-cells'>
+                                    ${slotLabels.map((label, slotIndex) => {
+                                        const value = buckets[`${dateKey}-${slotIndex}`] || 0;
+                                        const alpha = Math.max(0.08, value / maxHeat);
+                                        return `<div class='heat-cell' style='background:rgba(15,118,110,${alpha.toFixed(2)})' title='${dateLabel}, ${label} => ${Math.round(value / 60)} min'></div>`;
+                                    }).join('')}
+                                </div>
+                            </div>`;
+                    }).join('')}
+                </div>`;
+        }
+
+        function setAuditStatus(message) {
+            const node = el('audit-refresh-status');
+            if (!node) return;
+            node.textContent = message;
+        }
+
+        function reportRows(reportName, payload) {
+            if (reportName === 'weekly-summary') {
+                return [{
+                    report: payload.report,
+                    from: payload.from,
+                    to: payload.to,
+                    sessions: payload.sessions,
+                    durationHours: payload.durationHours,
+                    completedTasks: payload.completedTasks,
+                    openTasks: payload.openTasks,
+                }];
             }
+            if (reportName === 'monthly-attendance') {
+                return Object.entries(payload.byUser || {}).map(([username, value]) => ({ username, ...value }));
+            }
+            if (reportName === 'login-history') {
+                return (payload.sessions || []).map((session) => ({
+                    id: session.id,
+                    username: session.username,
+                    projectTag: session.projectTag || '',
+                    operationalCategory: session.operationalCategory || '',
+                    loginTime: session.loginTime,
+                    logoutTime: session.logoutTime || '',
+                    durationSeconds: session.durationSeconds,
+                    activeSeconds: session.activeSeconds,
+                    idleSeconds: session.idleSeconds,
+                    device: session.device || '',
+                }));
+            }
+            if (reportName === 'staff-utilization') {
+                return Object.entries(payload.byUser || {}).map(([username, value]) => ({ username, ...value }));
+            }
+            if (reportName === 'project-billing') {
+                return Object.entries(payload.byProject || {}).map(([project, value]) => ({
+                    project,
+                    ...value,
+                    categories: Array.isArray(value.categories) ? value.categories.join('; ') : value.categories,
+                }));
+            }
+            if (reportName === 'task-approvals') {
+                return Object.entries(payload.groups || {}).flatMap(([approvalStatus, tasks]) => (tasks || []).map((task) => ({
+                    approvalStatus,
+                    id: task.id,
+                    client: task.client,
+                    project: task.project || '',
+                    task: task.task,
+                    staff: task.staff,
+                    status: task.status,
+                    dueDate: task.dueDate || '',
+                })));
+            }
+            return [];
         }
 
         function renderOverview() {
@@ -482,7 +782,7 @@
             try {
                 const response = await apiFetch(`${API_BASE}/users`);
                 cache.users = (await response.json()).data || [];
-                syncUserFilterOptions(cache.users);
+                syncFilterOptions();
             } catch (error) {
                 el('tbl-users').innerHTML = "<tr><td colspan='10' class='empty'>Unable to load users.</td></tr>";
                 return;
@@ -513,13 +813,15 @@
                         <button class='btn user-reassign' data-user='${escapeHtml(user.username)}' ${taskDisabled}>Reassign</button>
                     </td>
                 </tr>`).join('') || "<tr><td colspan='10' class='empty'>No users</td></tr>";
+            renderOverview();
         }
 
         async function renderAutomation() {
             try {
                 const response = await apiFetch(`${API_BASE}/automation-rules`);
-                const rules = ((await response.json()).data || []).filter((rule) => rule.action !== 'send_report');
-                el('tbl-rules').innerHTML = rules.map((rule) => `<tr><td>${escapeHtml(rule.id)}</td><td>${escapeHtml(rule.name)}</td><td>${escapeHtml(rule.trigger)}</td><td>${escapeHtml(rule.action)}</td><td>${rule.enabled ? 'Yes' : 'No'}</td><td><button class='btn toggle-rule' data-rule='${escapeHtml(rule.id)}' ${adminCapabilities.manageAutomation ? '' : 'disabled'}>Toggle</button></td></tr>`).join('') || "<tr><td colspan='6' class='empty'>No rules</td></tr>";
+                const allRules = (await response.json()).data || [];
+                cache.rules = allRules.filter((rule) => rule.action !== 'send_report');
+                el('tbl-rules').innerHTML = cache.rules.map((rule) => `<tr><td>${escapeHtml(rule.id)}</td><td>${escapeHtml(rule.name)}</td><td>${escapeHtml(rule.trigger)}</td><td>${escapeHtml(rule.action)}</td><td>${rule.enabled ? 'Yes' : 'No'}</td><td><button class='btn toggle-rule' data-rule='${escapeHtml(rule.id)}' ${adminCapabilities.manageAutomation ? '' : 'disabled'}>Toggle</button></td></tr>`).join('') || "<tr><td colspan='6' class='empty'>No rules</td></tr>";
             } catch (error) {
                 el('tbl-rules').innerHTML = "<tr><td colspan='6' class='empty'>Unable to load rules.</td></tr>";
             }
@@ -536,14 +838,18 @@
         async function renderAudit() {
             if (!adminCapabilities.viewAudit) {
                 el('tbl-audit').innerHTML = "<tr><td colspan='4' class='empty'>Audit log visibility is restricted for your role.</td></tr>";
+                setAuditStatus('Audit log visibility is restricted for your role.');
                 return;
             }
+            setAuditStatus('Refreshing audit log...');
             try {
                 const response = await apiFetch(`${API_BASE}/audit-logs`);
-                const logs = (await response.json()).data || [];
-                el('tbl-audit').innerHTML = logs.map((entry) => `<tr><td>${fmt(entry.timestamp)}</td><td>${escapeHtml(entry.adminName || entry.admin)}</td><td>${escapeHtml(entry.action)}</td><td>${escapeHtml(JSON.stringify(entry.details || {}))}</td></tr>`).join('') || "<tr><td colspan='4' class='empty'>No audit records</td></tr>";
+                cache.auditLogs = (await response.json()).data || [];
+                el('tbl-audit').innerHTML = cache.auditLogs.map((entry) => `<tr><td>${fmt(entry.timestamp)}</td><td>${escapeHtml(entry.adminName || entry.admin)}</td><td>${escapeHtml(entry.action)}</td><td>${escapeHtml(JSON.stringify(entry.details || {}))}</td></tr>`).join('') || "<tr><td colspan='4' class='empty'>No audit records</td></tr>";
+                setAuditStatus(`Refreshed ${new Date().toLocaleTimeString()} | ${cache.auditLogs.length} entries`);
             } catch (error) {
                 el('tbl-audit').innerHTML = "<tr><td colspan='4' class='empty'>Unable to load audit logs.</td></tr>";
+                setAuditStatus('Unable to refresh audit log.');
             }
         }
 
@@ -599,7 +905,7 @@
         }
 
         function exportFilteredJson() {
-            downloadJson({ generatedAt: RAW.generatedAt, filters: state, sessions: filterSessions(), tasks: filterTasks() }, `werunops-admin-${new Date().toISOString().slice(0, 10)}.json`);
+            downloadJson({ generatedAt: new Date().toISOString(), filters: state, sessions: filterSessions(), tasks: filterTasks() }, `werunops-admin-${new Date().toISOString().slice(0, 10)}.json`);
         }
 
         function exportSessionsCsv() {
@@ -618,7 +924,21 @@
         async function runReport(reportName, query = '') {
             const response = await apiFetch(`${API_BASE}/reports/${reportName}${query}`);
             const payload = (await response.json()).data || {};
-            downloadJson(payload, `werunops-${reportName}-${new Date().toISOString().slice(0, 10)}.json`);
+            const rows = reportRows(reportName, payload);
+            downloadCsvRows(rows, `werunops-${reportName}-${new Date().toISOString().slice(0, 10)}.csv`);
+        }
+
+        async function refreshOverviewData() {
+            await refreshOperationsData();
+            renderOverview();
+            renderSessionsAndTasks();
+            await renderMonitoring();
+        }
+
+        async function renderTaskComments(taskId) {
+            const response = await apiFetch(`${API_BASE}/tasks/${taskId}/comments`);
+            const rows = (await response.json()).data || [];
+            el('tbl-comments').innerHTML = rows.map((comment) => `<tr><td>${taskId}</td><td>${escapeHtml(comment.comment)}</td><td>${escapeHtml(comment.user)}</td><td>${fmt(comment.timestamp)}</td></tr>`).join('') || "<tr><td colspan='4' class='empty'>No comments</td></tr>";
         }
 
         async function applyFilters() {
@@ -630,9 +950,7 @@
             state.sessionSearch = el('flt-session-search').value || '';
             state.taskStatus = el('task-status-filter').value;
             state.taskSearch = el('task-search-filter').value || '';
-            renderOverview();
-            renderSessionsAndTasks();
-            await renderMonitoring();
+            await refreshOverviewData();
         }
 
         async function createUser() {
@@ -648,7 +966,8 @@
             if (!payload.username || !payload.name || !payload.password) return;
             await apiFetch(`${API_BASE}/users`, { method:'POST', body: JSON.stringify(payload) });
             ['new-user-username','new-user-name','new-user-password','new-user-department','new-user-timezone'].forEach((id) => { if (el(id)) el(id).value = ''; });
-            location.reload();
+            await renderUsers();
+            await renderAudit();
         }
 
         async function applyTaskApproval() {
@@ -656,7 +975,8 @@
             const taskId = parseInt(el('approval-task-id').value, 10);
             if (!Number.isFinite(taskId)) return;
             await apiFetch(`${API_BASE}/tasks/${taskId}/approval`, { method:'PATCH', body: JSON.stringify({ approvalStatus: el('approval-status').value }) });
-            location.reload();
+            await refreshOverviewData();
+            await renderAudit();
         }
 
         async function createSchedule() {
@@ -676,18 +996,14 @@
         }
 
         function initFilters() {
-            syncUserFilterOptions(cache.users);
-            appendOptions('task-status-filter', Array.from(new Set((RAW.tasks || []).map((task) => task.status).filter(Boolean))).sort());
-            appendOptions('bulk-status', Array.from(new Set((RAW.tasks || []).map((task) => task.status).filter(Boolean))).sort());
-            appendOptions('flt-project', Array.from(new Set([...(RAW.tasks || []).map((task) => task.project), ...(RAW.sessions || []).map((session) => session.projectTag)].filter(Boolean))).sort());
-            appendOptions('flt-category', Array.from(new Set([...(RAW.tasks || []).map((task) => task.operationalCategory), ...(RAW.sessions || []).map((session) => session.operationalCategory)].filter(Boolean))).sort());
+            syncFilterOptions();
         }
 
         function bindActions() {
             el('btn-apply').addEventListener('click', applyFilters);
             el('btn-reset').addEventListener('click', () => {
-                state.user = ''; state.project = ''; state.category = ''; state.from = ''; state.to = ''; state.sessionSearch = '';
-                ['flt-user','flt-project','flt-category','flt-from','flt-to','flt-session-search'].forEach((id) => { if (el(id)) el(id).value = ''; });
+                state.user = ''; state.project = ''; state.category = ''; state.from = ''; state.to = ''; state.sessionSearch = ''; state.taskStatus = ''; state.taskSearch = '';
+                ['flt-user','flt-project','flt-category','flt-from','flt-to','flt-session-search','task-status-filter','task-search-filter'].forEach((id) => { if (el(id)) el(id).value = ''; });
                 applyFilters();
             });
             el('btn-task-apply').addEventListener('click', applyFilters);
@@ -720,7 +1036,8 @@
                     approvalStatus: el('bulk-approval').value || null,
                 };
                 await apiFetch(`${API_BASE}/tasks/bulk-update`, { method:'POST', body: JSON.stringify(payload) });
-                location.reload();
+                await refreshOverviewData();
+                await renderAudit();
             });
             el('btn-apply-approval').addEventListener('click', applyTaskApproval);
             el('btn-create-user').addEventListener('click', createUser);
@@ -730,14 +1047,13 @@
                 if (!Number.isFinite(taskId) || !comment) return;
                 await apiFetch(`${API_BASE}/tasks/${taskId}/comments`, { method:'POST', body: JSON.stringify({ comment }) });
                 el('comment-text').value = '';
-                alert('Comment added.');
+                await renderTaskComments(taskId);
+                await renderAudit();
             });
             el('btn-view-comments').addEventListener('click', async () => {
                 const taskId = parseInt(el('comment-task-id').value, 10);
                 if (!Number.isFinite(taskId)) return;
-                const response = await apiFetch(`${API_BASE}/tasks/${taskId}/comments`);
-                const rows = (await response.json()).data || [];
-                el('tbl-comments').innerHTML = rows.map((comment) => `<tr><td>${taskId}</td><td>${escapeHtml(comment.comment)}</td><td>${escapeHtml(comment.user)}</td><td>${fmt(comment.timestamp)}</td></tr>`).join('') || "<tr><td colspan='4' class='empty'>No comments</td></tr>";
+                await renderTaskComments(taskId);
             });
             el('btn-refresh-rules').addEventListener('click', renderAutomation);
             el('btn-create-schedule').addEventListener('click', createSchedule);
@@ -750,8 +1066,15 @@
             });
             el('btn-refresh-audit').addEventListener('click', renderAudit);
             el('btn-export-audit').addEventListener('click', async () => {
-                const response = await apiFetch(`${API_BASE}/audit-logs`);
-                downloadJson((await response.json()).data || [], `werunops-audit-${new Date().toISOString().slice(0, 10)}.json`);
+                if (!cache.auditLogs.length) {
+                    await renderAudit();
+                }
+                downloadCsvRows(cache.auditLogs.map((entry) => ({
+                    time: entry.timestamp,
+                    admin: entry.adminName || entry.admin,
+                    action: entry.action,
+                    details: JSON.stringify(entry.details || {}),
+                })), `werunops-audit-${new Date().toISOString().slice(0, 10)}.csv`);
             });
 
             document.body.addEventListener('click', async (event) => {
@@ -761,7 +1084,8 @@
                     const select = document.querySelector(`select.role-edit[data-user='${username}']`);
                     if (!select) return;
                     await apiFetch(`${API_BASE}/users/${encodeURIComponent(username)}/role`, { method:'PATCH', body: JSON.stringify({ role: select.value }) });
-                    location.reload();
+                    await renderUsers();
+                    await renderAudit();
                     return;
                 }
 
@@ -780,7 +1104,8 @@
                     const payload = { name, department, timezone };
                     if (password) payload.password = password;
                     await apiFetch(`${API_BASE}/users/${encodeURIComponent(username)}`, { method:'PATCH', body: JSON.stringify(payload) });
-                    location.reload();
+                    await renderUsers();
+                    await renderAudit();
                     return;
                 }
 
@@ -795,7 +1120,9 @@
                         if (!reassignTo) return;
                     }
                     await apiFetch(`${API_BASE}/users/${encodeURIComponent(username)}`, { method:'PATCH', body: JSON.stringify({ isActive: !isActive, reassignTo }) });
-                    location.reload();
+                    await renderUsers();
+                    await refreshOverviewData();
+                    await renderAudit();
                     return;
                 }
 
@@ -806,7 +1133,9 @@
                     if (!reassignTo) return;
                     const includeCompleted = confirm('Include completed tasks in the reassignment?');
                     await apiFetch(`${API_BASE}/users/${encodeURIComponent(username)}/reassign`, { method:'POST', body: JSON.stringify({ reassignTo, includeCompleted }) });
-                    location.reload();
+                    await renderUsers();
+                    await refreshOverviewData();
+                    await renderAudit();
                     return;
                 }
 
@@ -836,12 +1165,13 @@
 
         async function boot() {
             try {
+                restoreUiState();
                 initTabs();
-                initFilters();
                 bindActions();
+                await renderUsers();
+                initFilters();
                 await applyFilters();
                 await refreshSavedFilterOptions();
-                await renderUsers();
                 await renderAutomation();
                 await renderAudit();
                 setInterval(renderMonitoring, 30000);
