@@ -90,12 +90,92 @@ function getRuntimePresenceState() {
     return normalizePresenceRecord({ online: true, status: 'online', browser: navigator.userAgent, device: 'Web' });
 }
 
+const DEFAULT_AUTH_USERS = [
+    { username: 'Eshwar', passwordHash: 'f91b043302878951ce9258214033bd206ea0a92bb88931ba8bb6edb01b57d020', name: 'Pritheeswarar', role: 'Admin', initials: 'P', isActive: true },
+    { username: 'Sudhar', passwordHash: '56e89b1d6436fc86deea34dbb0306af59c40d29f20bc20b6efcb001cee9ae71b', name: 'Sudharshan', role: 'Manager', initials: 'S', isActive: true },
+    { username: 'Mubarak', passwordHash: '23fece5f1a2a4452cba0113271736a16d241201bef2fd15b72819582e13fb267', name: 'Mubarak', role: 'User', initials: 'M', isActive: true },
+    { username: 'Radhakrishnan', passwordHash: 'f91b043302878951ce9258214033bd206ea0a92bb88931ba8bb6edb01b57d020', name: 'Radhakrishnan', role: 'User', initials: 'R', isActive: true },
+];
+
+function resolveUserDirectoryEntry(users, value) {
+    const rawValue = String(value || '').trim().toLowerCase();
+    if (!rawValue) return null;
+
+    const entries = Array.isArray(users) ? users : [];
+    return entries.find((user) => {
+        const username = String(user?.username || '').trim().toLowerCase();
+        const name = String(user?.name || '').trim().toLowerCase();
+        return username === rawValue || name === rawValue;
+    }) || null;
+}
+
+function normalizeStaffIdentityFromUsers(users, value) {
+    const match = resolveUserDirectoryEntry(users, value);
+    return match ? String(match.username || '').trim() : String(value || '').trim();
+}
+
+function getStaffDisplayNameFromUsers(users, value) {
+    const match = resolveUserDirectoryEntry(users, value);
+    return match ? String(match.name || match.username || '').trim() : (String(value || '').trim() || 'Unknown');
+}
+
+function buildStaffDirectoryEntries(users, tasks = []) {
+    const directory = new Map();
+
+    (Array.isArray(users) ? users : []).forEach((user) => {
+        const username = String(user?.username || '').trim();
+        if (!username) return;
+        directory.set(username.toLowerCase(), {
+            username,
+            name: String(user?.name || username).trim() || username,
+        });
+    });
+
+    (Array.isArray(tasks) ? tasks : []).forEach((task) => {
+        const username = normalizeStaffIdentityFromUsers(users, task?.staff);
+        if (!username) return;
+        if (directory.has(username.toLowerCase())) return;
+        const label = getStaffDisplayNameFromUsers(users, task?.staff);
+        directory.set(username.toLowerCase(), { username, name: label || username });
+    });
+
+    return Array.from(directory.values()).sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function mergeAuthUsers(users, existingUsers = []) {
+    const existingByUsername = new Map(
+        (Array.isArray(existingUsers) ? existingUsers : [])
+            .map((user) => [String(user?.username || '').trim().toLowerCase(), user])
+            .filter(([username]) => Boolean(username))
+    );
+
+    return (Array.isArray(users) ? users : []).map((user) => {
+        const username = String(user?.username || '').trim();
+        const existing = existingByUsername.get(username.toLowerCase());
+        return {
+            username,
+            passwordHash: existing?.passwordHash || user?.passwordHash || null,
+            name: String(user?.name || username).trim() || username,
+            role: String(user?.role || existing?.role || 'User'),
+            initials: String(user?.initials || existing?.initials || username.charAt(0) || 'U').trim().charAt(0).toUpperCase(),
+            department: String(user?.department || existing?.department || ''),
+            timezone: String(user?.timezone || existing?.timezone || 'UTC'),
+            isActive: user?.isActive !== false,
+        };
+    });
+}
+
+function applyUserDirectoryState(state, users) {
+    if (!state) return;
+    if (!state.config) state.config = {};
+
+    const normalizedUsers = mergeAuthUsers(users, state.authUsers || DEFAULT_AUTH_USERS);
+    state.authUsers = normalizedUsers;
+    state.config.staff = buildStaffDirectoryEntries(normalizedUsers, state.tasks || []).map((entry) => entry.username);
+}
+
 const DEFAULT_STATE = {
-    authUsers: [
-        { username: 'Eshwar', passwordHash: 'f91b043302878951ce9258214033bd206ea0a92bb88931ba8bb6edb01b57d020', name: 'Pritheeswarar', role: 'Admin', initials: 'P' },
-        { username: 'Mubarak', passwordHash: '23fece5f1a2a4452cba0113271736a16d241201bef2fd15b72819582e13fb267', name: 'Mubarak', role: 'Manager', initials: 'M' },
-        { username: 'Sudhar', passwordHash: '56e89b1d6436fc86deea34dbb0306af59c40d29f20bc20b6efcb001cee9ae71b', name: 'Sudharshan', role: 'User', initials: 'S' }
-    ],
+    authUsers: DEFAULT_AUTH_USERS,
     taskLocks: {},
     livePresence: {},
     loginHistory: [],
@@ -124,7 +204,7 @@ const DEFAULT_STATE = {
             client: "A to Z Roofing",
             project: "House 5",
             task: "Prepare quote",
-            staff: "Eswar",
+            staff: "Eshwar",
             status: "New",
             priority: "Medium",
             startDate: "",
@@ -134,7 +214,7 @@ const DEFAULT_STATE = {
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
             activityLog: [
-                { action: 'Task created', user: 'Eswar', timestamp: new Date().toISOString() }
+                { action: 'Task created', user: 'Pritheeswarar', timestamp: new Date().toISOString() }
             ]
         }
     ],
@@ -145,7 +225,7 @@ const DEFAULT_STATE = {
             { id: 3, name: "Allvent", contact: "Bob", email: "bob@allvent.com", phone: "555-0102" },
             { id: 4, name: "Malligai Sweets", contact: "Charlie", email: "charlie@malligai.com", phone: "555-0103" }
         ],
-        staff: ["Mubarak", "Eswar", "Pritheeswarar", "Sudharshan"],
+        staff: buildStaffDirectoryEntries(DEFAULT_AUTH_USERS).map((entry) => entry.username),
         statuses: ["New", "In Progress", "Waiting Client", "Waiting Supplier", "Follow Up", "Completed"],
         priorities: ["High", "Medium", "Low"],
         nextTaskId: 3,
@@ -250,7 +330,7 @@ class DataStore {
             err.code = response.status;
             err.detail = detail;
 
-            if (response.status === 401 || response.status === 403) {
+            if (response.status === 401) {
                 localStorage.removeItem('currentUser');
                 if (typeof window !== 'undefined') {
                     window.dispatchEvent(new CustomEvent('werunops-auth-invalid', { detail: { status: response.status } }));
@@ -264,16 +344,24 @@ class DataStore {
 
     async fetchFromBackend(allowUnauthorized = false) {
         try {
-            const [tasksResponse, clientsResponse] = await Promise.all([
+            const [tasksResponse, clientsResponse, usersResponse] = await Promise.all([
                 this.backendFetch('/tasks'),
-                this.backendFetch('/clients')
+                this.backendFetch('/clients'),
+                this.backendFetch('/admin/users').catch((error) => {
+                    if (error?.code === 403) {
+                        return null;
+                    }
+                    throw error;
+                })
             ]);
 
             const tasksPayload = await tasksResponse.json();
             const clientsPayload = await clientsResponse.json();
+            const usersPayload = usersResponse ? await usersResponse.json() : null;
 
             const tasks = tasksPayload?.data || [];
             const clients = clientsPayload?.data || [];
+            const users = Array.isArray(usersPayload?.data) ? usersPayload.data : null;
 
             if (!this.state) {
                 this.state = JSON.parse(JSON.stringify(DEFAULT_STATE));
@@ -283,6 +371,7 @@ class DataStore {
             this.state.config.clients = clients;
             this.state.config.nextTaskId = Math.max(...tasks.map(item => Number(item.id) || 0), 0) + 1;
             this.state.config.nextClientId = Math.max(...clients.map(item => Number(item.id) || 0), 0) + 1;
+            applyUserDirectoryState(this.state, users || this.state.authUsers || DEFAULT_AUTH_USERS);
             if (!this.state.taskLocks) this.state.taskLocks = {};
             this.hasLoadedBackendState = true;
 
@@ -1022,7 +1111,7 @@ class DataStore {
         if (!this.state) return;
 
         if (!this.state.authUsers || this.state.authUsers.length === 0) {
-            this.state.authUsers = DEFAULT_STATE.authUsers;
+            this.state.authUsers = DEFAULT_AUTH_USERS;
         } else {
             this.state.authUsers = this.state.authUsers.map(user => {
                 const cloned = { ...user };
@@ -1033,6 +1122,7 @@ class DataStore {
                 return cloned;
             });
         }
+        applyUserDirectoryState(this.state, this.state.authUsers);
         if (!this.state.livePresence) this.state.livePresence = {};
         this.state.livePresence = Object.fromEntries(
             Object.entries(this.state.livePresence).map(([username, record]) => [username, normalizePresenceRecord(record)])
@@ -1120,8 +1210,8 @@ class DataStore {
                 if (oldTask.status !== taskData.status) {
                     log.push({ action: `Status changed to "${taskData.status}"`, user: getCurrentUser(), timestamp: now });
                 }
-                if (oldTask.staff !== taskData.staff) {
-                    log.push({ action: `Assigned to ${taskData.staff}`, user: getCurrentUser(), timestamp: now });
+                if (normalizeStaffIdentityFromUsers(this.state?.authUsers, oldTask.staff) !== normalizeStaffIdentityFromUsers(this.state?.authUsers, taskData.staff)) {
+                    log.push({ action: `Assigned to ${getStaffDisplayNameFromUsers(this.state?.authUsers, taskData.staff)}`, user: getCurrentUser(), timestamp: now });
                 }
                 if (log.length === oldTask.activityLog?.length) {
                     log.push({ action: 'Task updated', user: getCurrentUser(), timestamp: now });
@@ -1214,8 +1304,8 @@ class DataStore {
                     if (oldTask.status !== taskData.status) {
                         log.push({ action: `Status changed to "${taskData.status}"`, user: getCurrentUser(), timestamp: now });
                     }
-                    if (oldTask.staff !== taskData.staff) {
-                        log.push({ action: `Assigned to ${taskData.staff}`, user: getCurrentUser(), timestamp: now });
+                    if (normalizeStaffIdentityFromUsers(this.state?.authUsers, oldTask.staff) !== normalizeStaffIdentityFromUsers(this.state?.authUsers, taskData.staff)) {
+                        log.push({ action: `Assigned to ${getStaffDisplayNameFromUsers(this.state?.authUsers, taskData.staff)}`, user: getCurrentUser(), timestamp: now });
                     }
                     if (log.length === oldTask.activityLog?.length) {
                         log.push({ action: 'Task updated', user: getCurrentUser(), timestamp: now });

@@ -709,8 +709,30 @@ def user_has_global_visibility(user: UserProfile) -> bool:
     return role_capabilities(user.role).get("viewOverview", False)
 
 
+def resolve_known_username(value: Any) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+
+    if raw in store.users:
+        return raw
+
+    lowered = raw.lower()
+    for username, raw_user in store.users.items():
+        if lowered == str(username or "").strip().lower():
+            return username
+        if lowered == str(raw_user.get("name") or "").strip().lower():
+            return username
+
+    return raw
+
+
 def usernames_match(left: Any, right: Any) -> bool:
-    return str(left or "").strip().lower() == str(right or "").strip().lower()
+    return resolve_known_username(left).lower() == resolve_known_username(right).lower()
+
+
+def normalize_task_staff_value(value: Any) -> str:
+    return resolve_known_username(value)
 
 
 def visible_tasks_for_user(user: UserProfile) -> list[TaskOut]:
@@ -785,8 +807,8 @@ def serialize_admin_user(username: str, raw_user: dict[str, Any] | None) -> dict
     role = normalized_role(raw_user.get("role"))
     sessions = [session for session in store.sessions.values() if session.username == username]
     last_login = max((session.loginTime for session in sessions), default=None)
-    open_task_count = sum(1 for task in store.tasks.values() if task.staff == username and task.status != "Completed")
-    completed_task_count = sum(1 for task in store.tasks.values() if task.staff == username and task.status == "Completed")
+    open_task_count = sum(1 for task in store.tasks.values() if usernames_match(task.staff, username) and task.status != "Completed")
+    completed_task_count = sum(1 for task in store.tasks.values() if usernames_match(task.staff, username) and task.status == "Completed")
     name = str(raw_user.get("name") or username).strip() or username
     initials = str(raw_user.get("initials") or name[:1] or username[:1]).strip()[:1].upper() or username[:1].upper()
 
@@ -906,7 +928,7 @@ def build_operations_snapshot(sessions: list[SessionOut], tasks: list[TaskOut]) 
 
     efficiency_by_user: dict[str, dict[str, Any]] = {}
     for username, bucket in by_user.items():
-        user_completed_tasks = sum(1 for task in tasks if task.staff == username and task.status == "Completed")
+        user_completed_tasks = sum(1 for task in tasks if usernames_match(task.staff, username) and task.status == "Completed")
         efficiency_by_user[username] = {
             **bucket,
             "completedTasks": user_completed_tasks,
@@ -935,13 +957,13 @@ def reassign_tasks(source_username: str, target_username: str, actor_name: str, 
     changed_ids: list[int] = []
     changed_at = datetime.now(UTC)
     for task_id, task in list(store.tasks.items()):
-        if task.staff != source_username:
+        if not usernames_match(task.staff, source_username):
             continue
         if not include_completed and task.status == "Completed":
             continue
         updated = task.model_copy(
             update={
-                "staff": target_username,
+                "staff": normalize_task_staff_value(target_username),
                 "updatedAt": changed_at,
                 "version": task.version + 1,
             }
@@ -1120,7 +1142,7 @@ def admin_operations(
 
     if username:
         sessions = [item for item in sessions if item.username == username]
-        tasks = [item for item in tasks if item.staff == username]
+        tasks = [item for item in tasks if usernames_match(item.staff, username)]
 
     if from_date:
         start = datetime.fromisoformat(from_date)
@@ -1289,7 +1311,7 @@ async def admin_update_user_profile(username: str, request: Request, admin: User
         raise HTTPException(status_code=400, detail="You cannot deactivate your own account")
 
     reassigned_task_ids: list[int] = []
-    open_tasks = [task.id for task in store.tasks.values() if task.staff == username and task.status != "Completed"]
+    open_tasks = [task.id for task in store.tasks.values() if usernames_match(task.staff, username) and task.status != "Completed"]
     if deactivating and open_tasks:
         if not reassign_to:
             raise HTTPException(status_code=400, detail="Reassign target required before deactivating a user with open tasks")
@@ -1444,7 +1466,7 @@ async def admin_bulk_update_tasks(request: Request, admin: UserProfile = Depends
         if status:
             updates["status"] = status
         if staff:
-            updates["staff"] = staff
+            updates["staff"] = normalize_task_staff_value(staff)
         if project:
             updates["project"] = project
         if category:
@@ -1657,7 +1679,7 @@ def admin_report(report_name: str, request: Request, _: UserProfile = Depends(cu
             bucket["durationHours"] = round(bucket["durationSeconds"] / 3600, 2)
             bucket["billableHours"] = round(bucket["billableSeconds"] / 3600, 2)
             bucket["administrativeHours"] = round(bucket["administrativeSeconds"] / 3600, 2)
-            bucket["openTasks"] = sum(1 for task in tasks if task.staff == username and task.status != "Completed")
+            bucket["openTasks"] = sum(1 for task in tasks if usernames_match(task.staff, username) and task.status != "Completed")
         return build_response({"report": report_name, "from": from_day.isoformat(), "to": today.isoformat(), "byUser": by_user}, request)
 
     if report_name == "project-billing":
@@ -1780,9 +1802,11 @@ def create_task(payload: TaskCreate, request: Request, user: UserProfile = Depen
     task_id = store.next_task_id
     store.next_task_id += 1
     now = datetime.now(UTC)
+    task_payload = payload.model_dump()
+    task_payload["staff"] = normalize_task_staff_value(task_payload.get("staff"))
     task = TaskOut(
         id=task_id,
-        **payload.model_dump(),
+        **task_payload,
         createdAt=now,
         updatedAt=now,
         createdBy=user.name,
@@ -1797,7 +1821,7 @@ def create_task(payload: TaskCreate, request: Request, user: UserProfile = Depen
 @app.post("/api/v1/tasks/restore", response_model=APIResponse)
 def restore_task(payload: TaskRestoreRequest, request: Request, user: UserProfile = Depends(current_user)):
     require_privileged_user(user, "Only system administrators and operations managers can restore tasks")
-    task = payload.task
+    task = payload.task.model_copy(update={"staff": normalize_task_staff_value(payload.task.staff)})
     store.mark_task_restored(task.id)
     store.tasks[task.id] = task
     if task.id >= store.next_task_id:
@@ -1816,7 +1840,9 @@ def update_task(task_id: int, payload: TaskUpdate, request: Request, user: UserP
     if task.version != payload.version:
         raise HTTPException(status_code=409, detail={"code": "TASK_CONFLICT", "latest": jsonable_encoder(task.model_dump())})
 
-    updated = task.model_copy(update={**payload.model_dump(exclude={"version"}), "version": task.version + 1, "updatedAt": datetime.now(UTC)})
+    update_payload = payload.model_dump(exclude={"version"})
+    update_payload["staff"] = normalize_task_staff_value(update_payload.get("staff"))
+    updated = task.model_copy(update={**update_payload, "version": task.version + 1, "updatedAt": datetime.now(UTC)})
     updated.activityLog.append(ActivityEntry(action="Task updated", user=user.name, timestamp=datetime.now(UTC)))
     store.tasks[task_id] = updated
     store.save_state()

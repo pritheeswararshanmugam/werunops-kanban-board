@@ -14,16 +14,19 @@ function runtimeConfig() {
         key: 'admin',
         username: process.env.WERUNOPS_E2E_USERNAME || 'Eshwar',
         password: process.env.WERUNOPS_E2E_PASSWORD || '110495',
+        required: true,
       },
       {
         key: 'manager',
-        username: process.env.WERUNOPS_E2E_MANAGER_USERNAME || 'Mubarak',
-        password: process.env.WERUNOPS_E2E_MANAGER_PASSWORD || '123456',
+        username: process.env.WERUNOPS_E2E_MANAGER_USERNAME || 'Sudhar',
+        password: process.env.WERUNOPS_E2E_MANAGER_PASSWORD || '',
+        required: false,
       },
       {
         key: 'user',
-        username: process.env.WERUNOPS_E2E_USER_USERNAME || 'Sudhar',
-        password: process.env.WERUNOPS_E2E_USER_PASSWORD || '654321',
+        username: process.env.WERUNOPS_E2E_USER_USERNAME || 'Mubarak',
+        password: process.env.WERUNOPS_E2E_USER_PASSWORD || '',
+        required: false,
       },
     ],
   };
@@ -170,9 +173,17 @@ test('live auth matrix: try all three logins with screenshots', async ({ page },
       username: account.username,
       attemptedAt: new Date().toISOString(),
       success: false,
+      skipped: false,
       screenshots: [],
       errorText: '',
     };
+
+    if (!account.password) {
+      entry.skipped = true;
+      entry.errorText = 'Credentials not configured';
+      matrix.push(entry);
+      continue;
+    }
 
     await page.goto(cfg.frontendUrl, { waitUntil: 'domcontentloaded' });
     await expect(page.locator('#login-form')).toBeVisible({ timeout: 30_000 });

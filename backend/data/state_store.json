@@ -6,38 +6,38 @@
       "name": "Pritheeswarar",
       "role": "Admin",
       "initials": "P",
-      "department": "",
-      "timezone": "UTC",
+      "department": "Leadership",
+      "timezone": "Asia/Kolkata",
       "isActive": true
     },
     "Mubarak": {
       "username": "Mubarak",
       "passwordHash": "23fece5f1a2a4452cba0113271736a16d241201bef2fd15b72819582e13fb267",
       "name": "Mubarak",
-      "role": "Manager",
+      "role": "User",
       "initials": "M",
-      "department": "",
-      "timezone": "UTC",
+      "department": "Operations",
+      "timezone": "Asia/Kolkata",
+      "isActive": true
+    },
+    "Radhakrishnan": {
+      "username": "Radhakrishnan",
+      "passwordHash": "f91b043302878951ce9258214033bd206ea0a92bb88931ba8bb6edb01b57d020",
+      "name": "Radhakrishnan",
+      "role": "User",
+      "initials": "R",
+      "department": "Operations",
+      "timezone": "Asia/Kolkata",
       "isActive": true
     },
     "Sudhar": {
       "username": "Sudhar",
       "passwordHash": "56e89b1d6436fc86deea34dbb0306af59c40d29f20bc20b6efcb001cee9ae71b",
       "name": "Sudharshan",
-      "role": "User",
+      "role": "Manager",
       "initials": "S",
-      "department": "",
-      "timezone": "UTC",
-      "isActive": true
-    },
-    "OpsSpec1776079092692": {
-      "username": "OpsSpec1776079092692",
-      "passwordHash": "aaaaced8224b65b30ce2b745d3a130b3370371d92c5f5f01ea75522b1f42ce3c",
-      "name": "Playwright Operations Specialist",
-      "role": "User",
-      "initials": "P",
-      "department": "Operations",
-      "timezone": "UTC",
+      "department": "Delivery",
+      "timezone": "Asia/Kolkata",
       "isActive": true
     }
   },
@@ -122,41 +122,18 @@
   "presence": [
     {
       "username": "Eshwar",
-      "online": false,
-      "status": "offline",
-      "lastSeen": "2026-04-13T11:18:27.674583Z",
-      "browser": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.7632.6 Safari/537.36 Edg/145.0.7632.6",
-      "device": "Web"
-    },
-    {
-      "username": "OpsSpec1776079092692",
       "online": true,
       "status": "online",
-      "lastSeen": "2026-04-13T11:18:28.784698Z",
+      "lastSeen": "2026-04-13T23:44:23.728610Z",
       "browser": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.7632.6 Safari/537.36 Edg/145.0.7632.6",
       "device": "Web"
     }
   ],
   "sessions": [
     {
-      "id": "sess_d10bfd1271ce",
+      "id": "sess_a2b0bbdd4d66",
       "username": "Eshwar",
-      "loginTime": "2026-04-13T11:18:13.447701Z",
-      "logoutTime": "2026-04-13T11:18:27.706602Z",
-      "durationSeconds": 14,
-      "activeSeconds": 14,
-      "idleSeconds": 0,
-      "browser": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.7632.6 Safari/537.36 Edg/145.0.7632.6",
-      "device": "Web",
-      "projectTag": "",
-      "operationalCategory": "",
-      "billableSeconds": 0,
-      "administrativeSeconds": 0
-    },
-    {
-      "id": "sess_ca1ef201093e",
-      "username": "OpsSpec1776079092692",
-      "loginTime": "2026-04-13T11:18:28.701572Z",
+      "loginTime": "2026-04-13T23:44:23.655069Z",
       "logoutTime": null,
       "durationSeconds": 0,
       "activeSeconds": 0,
@@ -170,20 +147,7 @@
     }
   ],
   "task_locks": [],
-  "admin_audit_logs": [
-    {
-      "id": "audit_acdd8b5eb5",
-      "timestamp": "2026-04-13T11:18:12.701006+00:00",
-      "admin": "Eshwar",
-      "adminName": "Pritheeswarar",
-      "action": "user_created",
-      "details": {
-        "username": "OpsSpec1776079092692",
-        "role": "User",
-        "department": "Operations"
-      }
-    }
-  ],
+  "admin_audit_logs": [],
   "saved_filter_sets": [],
   "automation_rules": [
     {
@@ -202,6 +166,6 @@
     }
   ],
   "task_comments": {},
-  "next_task_id": 3,
-  "next_client_id": 3
+  "next_task_id": 4,
+  "next_client_id": 4
 }

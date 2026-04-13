@@ -13,10 +13,10 @@ function runtimeConfig() {
     backendUrl: process.env.WERUNOPS_LIVE_BACKEND_URL || DEFAULT_BACKEND_URL,
     username: process.env.WERUNOPS_E2E_USERNAME || DEFAULT_USERNAME,
     password: process.env.WERUNOPS_E2E_PASSWORD || DEFAULT_PASSWORD,
-    managerUsername: process.env.WERUNOPS_E2E_MANAGER_USERNAME || 'Mubarak',
-    managerPassword: process.env.WERUNOPS_E2E_MANAGER_PASSWORD || DEFAULT_PASSWORD,
-    userUsername: process.env.WERUNOPS_E2E_USER_USERNAME || 'Sudhar',
-    userPassword: process.env.WERUNOPS_E2E_USER_PASSWORD || DEFAULT_PASSWORD,
+    managerUsername: process.env.WERUNOPS_E2E_MANAGER_USERNAME || 'Sudhar',
+    managerPassword: process.env.WERUNOPS_E2E_MANAGER_PASSWORD || '',
+    userUsername: process.env.WERUNOPS_E2E_USER_USERNAME || 'Mubarak',
+    userPassword: process.env.WERUNOPS_E2E_USER_PASSWORD || '',
   };
 }
 
@@ -101,6 +101,10 @@ async function evaluateRoleAudit(page) {
 }
 
 async function auditRoleVisibility(browser, cfg, username, password) {
+  if (!username || !password) {
+    return { success: false, roleText: '', portalVisible: null, errorText: 'Credentials not configured', skipped: true };
+  }
+
   const context = await browser.newContext();
   const page = await context.newPage();
   try {

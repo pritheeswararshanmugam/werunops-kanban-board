@@ -69,9 +69,9 @@ Deterministic UI flow (clean state each run):
 - Test startup restores `backend/data/state_store.json` from `backend/data/state_store.seed.json`.
 - Backend test server runs in file-state mode so UI tests use the same seeded source of truth.
 - Playwright UI projects are split for stability and targeted reruns:
-	- `ui-bulk`
-	- `ui-timing`
-	- `ui-extended`
+  - `ui-bulk`
+  - `ui-timing`
+  - `ui-extended`
 
 Run the consolidated stabilized UI set:
 

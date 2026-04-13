@@ -1,3 +1,5 @@
+<!-- markdownlint-disable -->
+
 # Back-Office Operations Dashboard - Complete Requirements Document
 
 **Project Name:** Back-Office Operations Management System  

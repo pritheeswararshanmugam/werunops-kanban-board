@@ -114,6 +114,61 @@ function canManageSharedRecords(role = currentUser?.role) {
     return !isOperationsSpecialist(role);
 }
 
+function getDirectoryUsers() {
+    const rawUsers = Array.isArray(store?.state?.authUsers) ? store.state.authUsers : [];
+    const directory = new Map();
+
+    rawUsers.forEach((rawUser) => {
+        const username = String(rawUser?.username || '').trim();
+        if (!username) return;
+
+        const name = String(rawUser?.name || username).trim() || username;
+        directory.set(username.toLowerCase(), {
+            username,
+            name,
+            initials: String(rawUser?.initials || name.charAt(0) || username.charAt(0) || 'U').trim().charAt(0).toUpperCase(),
+            role: String(rawUser?.role || 'User'),
+            isActive: rawUser?.isActive !== false,
+        });
+    });
+
+    return Array.from(directory.values()).sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function findDirectoryUser(value) {
+    const rawValue = String(value || '').trim().toLowerCase();
+    if (!rawValue) return null;
+
+    return getDirectoryUsers().find((user) => user.username.toLowerCase() === rawValue || user.name.toLowerCase() === rawValue) || null;
+}
+
+function normalizeTaskStaffValue(value) {
+    const match = findDirectoryUser(value);
+    return match ? match.username : String(value || '').trim();
+}
+
+function getTaskStaffLabel(value) {
+    const match = findDirectoryUser(value);
+    return match ? match.name : (String(value || '').trim() || 'Unknown');
+}
+
+function getTaskStaffInitial(value) {
+    const label = getTaskStaffLabel(value);
+    return (label.charAt(0) || 'U').toUpperCase();
+}
+
+function getAssignableStaffOptions() {
+    const activeUsers = getDirectoryUsers().filter((user) => user.isActive !== false);
+    if (activeUsers.length > 0) {
+        return activeUsers.map((user) => ({ value: user.username, label: user.name }));
+    }
+
+    const fallbackStaff = Array.isArray(store?.state?.config?.staff) ? store.state.config.staff : [];
+    return Array.from(new Set(fallbackStaff.map((entry) => String(entry || '').trim()).filter(Boolean)))
+        .sort((left, right) => left.localeCompare(right))
+        .map((entry) => ({ value: normalizeTaskStaffValue(entry), label: getTaskStaffLabel(entry) }));
+}
+
 function normalizePresenceStatus(value) {
     const raw = String(value || '').trim().toLowerCase();
     return PRESENCE_STATUS_ALIASES[raw] || 'online';
@@ -1037,15 +1092,31 @@ function updatePriorityChart(tasks, priorityList) {
 function updateStaffChart(tasks, staffList) {
     const ctx = document.getElementById('chart-staff').getContext('2d');
 
-    // Filter staffList to only show valid users based on our hardcoded list
-    const validUsersList = ['Pritheeswarar', 'Mubarak', 'Sudharshan'];
-    const filteredStaff = staffList.filter(s => validUsersList.includes(s));
+    const workloadByStaff = new Map();
+    getAssignableStaffOptions().forEach((staff) => {
+        workloadByStaff.set(staff.value, { key: staff.value, name: staff.label, count: 0 });
+    });
 
-    // Sort staff by workload
-    const workloads = filteredStaff.map(staff => ({
-        name: staff,
-        count: tasks.filter(t => t.staff === staff && t.status !== 'Completed').length
-    })).sort((a, b) => b.count - a.count);
+    (Array.isArray(staffList) ? staffList : []).forEach((staff) => {
+        const key = normalizeTaskStaffValue(staff);
+        if (!key || workloadByStaff.has(key)) return;
+        workloadByStaff.set(key, { key, name: getTaskStaffLabel(staff), count: 0 });
+    });
+
+    tasks.forEach((task) => {
+        const key = normalizeTaskStaffValue(task.staff);
+        if (!key) return;
+        if (!workloadByStaff.has(key)) {
+            workloadByStaff.set(key, { key, name: getTaskStaffLabel(task.staff), count: 0 });
+        }
+        if (task.status !== 'Completed') {
+            workloadByStaff.get(key).count += 1;
+        }
+    });
+
+    const workloads = Array.from(workloadByStaff.values())
+        .filter((entry) => entry.name)
+        .sort((left, right) => (right.count - left.count) || left.name.localeCompare(right.name));
 
     const labels = workloads.map(w => w.name);
     const data = workloads.map(w => w.count);
@@ -1331,9 +1402,9 @@ function createKanbanCard(task) {
     const safeTaskName = safe(task.task);
     const safeProject = safe(task.project || '');
     const safeNotes = safe(task.notes || '');
-    const safeStaff = safe(task.staff || 'Unknown');
+    const safeStaff = safe(getTaskStaffLabel(task.staff));
     const safeWaitingFor = safe(task.waitingFor || '');
-    const safeStaffInitial = safe((task.staff || 'U').charAt(0));
+    const safeStaffInitial = safe(getTaskStaffInitial(task.staff));
     const readOnlyTaskView = !canManageSharedRecords();
     const lock = getTaskLockInfo(task.id);
     const lockBadge = lock
@@ -1437,8 +1508,8 @@ function renderAllTasksList(state) {
         const safeClient = safe(task.client);
         const safeProject = safe(task.project || '-');
         const safeTaskName = safe(task.task);
-        const safeStaff = safe(task.staff || 'Unknown');
-        const safeStaffInitial = safe((task.staff || 'U').charAt(0));
+        const safeStaff = safe(getTaskStaffLabel(task.staff));
+        const safeStaffInitial = safe(getTaskStaffInitial(task.staff));
         const safeStatus = safe(task.status);
         const safePriority = safe(task.priority);
 
@@ -1748,7 +1819,7 @@ function createTodayCard(task) {
     const safeClient = safe(task.client);
     const safeProject = safe(task.project || '');
     const safeNotes = safe(task.notes || '');
-    const safeStaff = safe(task.staff || 'Unknown');
+    const safeStaff = safe(getTaskStaffLabel(task.staff));
     const readOnlyTaskView = !canManageSharedRecords();
     const primaryAction = readOnlyTaskView
         ? `
@@ -1832,36 +1903,43 @@ window.markAsComplete = async function (taskId) {
 
 function populateSelects(config) {
     const selectors = [
-        { id: 'task-client', options: Array.isArray(config?.clients) ? config.clients.map(c => c.name).sort() : [] },
-        { id: 'task-staff', options: Array.isArray(config?.staff) ? config.staff : [] },
-        { id: 'task-status', options: Array.isArray(config?.statuses) ? config.statuses : [] },
+        { id: 'task-client', options: Array.isArray(config?.clients) ? config.clients.map(c => ({ value: c.name, label: c.name })).sort((left, right) => left.label.localeCompare(right.label)) : [] },
+        { id: 'task-staff', options: getAssignableStaffOptions() },
+        { id: 'task-status', options: Array.isArray(config?.statuses) ? config.statuses.map(status => ({ value: status, label: status })) : [] },
     ];
 
     selectors.forEach(sel => {
         const el = document.getElementById(sel.id);
         if (!el) return;
         const previousValue = el.value;
-        const nextOptions = sel.options.map(opt => String(opt ?? ''));
-        const currentOptions = Array.from(el.options).map(option => option.value);
-        const optionsUnchanged = currentOptions.length === nextOptions.length
-            && currentOptions.every((value, index) => value === nextOptions[index]);
+        const nextOptions = sel.options.map((option) => ({
+            value: String(option?.value ?? ''),
+            label: String(option?.label ?? option?.value ?? ''),
+        }));
+        const currentOptions = Array.from(el.options).map(option => `${option.value}\u0000${option.textContent}`);
+        const nextSignatures = nextOptions.map(option => `${option.value}\u0000${option.label}`);
+        const optionsUnchanged = currentOptions.length === nextSignatures.length
+            && currentOptions.every((value, index) => value === nextSignatures[index]);
 
         // Skip unnecessary DOM rewrites so background polling does not reset in-progress form edits.
         if (!optionsUnchanged) {
             el.innerHTML = '';
         }
 
-        nextOptions.forEach(opt => {
-            const optionEl = document.createElement('option');
-            optionEl.value = opt;
-            optionEl.textContent = opt;
+        nextOptions.forEach(({ value, label }) => {
             if (!optionsUnchanged) {
+                const optionEl = document.createElement('option');
+                optionEl.value = value;
+                optionEl.textContent = label;
                 el.appendChild(optionEl);
             }
         });
 
-        if (previousValue && nextOptions.includes(previousValue)) {
-            el.value = previousValue;
+        const desiredValue = sel.id === 'task-staff'
+            ? normalizeTaskStaffValue(previousValue)
+            : previousValue;
+        if (desiredValue && nextOptions.some(option => option.value === desiredValue)) {
+            el.value = desiredValue;
         }
     });
 }
@@ -2299,7 +2377,7 @@ window.openTaskModal = async function (taskId = null, defaults = {}) {
             document.getElementById('task-client').value = task.client;
             document.getElementById('task-project').value = task.project || '';
             document.getElementById('task-name').value = task.task;
-            document.getElementById('task-staff').value = task.staff;
+            document.getElementById('task-staff').value = normalizeTaskStaffValue(task.staff);
             document.getElementById('task-status').value = task.status;
             document.getElementById('task-priority').value = task.priority;
 
@@ -2374,7 +2452,7 @@ window.openTaskModal = async function (taskId = null, defaults = {}) {
 
             document.getElementById('task-client').value = defaults.client;
             document.getElementById('task-project').value = defaults.project;
-            document.getElementById('task-staff').value = defaults.staff;
+            document.getElementById('task-staff').value = normalizeTaskStaffValue(defaults.staff);
             document.getElementById('task-name').value = defaults.taskName;
         }
     }

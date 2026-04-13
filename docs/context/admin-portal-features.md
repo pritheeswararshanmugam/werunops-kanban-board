@@ -1,4 +1,7 @@
+<!-- markdownlint-disable -->
+
 # WeRunOps Admin Operations Portal
+
 ## Feature Enhancement Recommendations
 
 **Document Type:** Requirements & Feature Specification  
@@ -13,6 +16,7 @@
 ### What You Have Now (From Screenshot)
 
 **✅ Basic Features Implemented:**
+
 - Filter by User (dropdown)
 - Date range filtering (Session From/To)
 - Task status filtering
@@ -30,6 +34,7 @@
 - Task Queue (table view)
 
 **❌ Current Limitations:**
+
 - Visually basic (looks like spreadsheet)
 - No charts or graphs
 - No real-time updates
@@ -48,15 +53,16 @@
 #### 1. Enhanced Session Analytics
 
 **Session Timeline Visualization**
-```
+
 Feature: Interactive timeline showing login/logout patterns
+
 - Horizontal bar chart per user
 - Color-coded by activity type (active/idle/break)
 - Drill-down to specific sessions
 - Visual gaps show break periods
-```
 
 **Idle Time Detection**
+
 ```
 Feature: Track active vs idle time within sessions
 - Mouse/keyboard activity monitoring
