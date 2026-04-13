@@ -29,6 +29,59 @@ const APP_RUNTIME_CONFIG = (typeof window !== 'undefined' && window.WERUNOPS_CON
     : {};
 const ALLOW_USER_ENDPOINT_CONFIG = APP_RUNTIME_CONFIG.allowUserEndpointConfig === true;
 const SHOW_SESSION_OPS_IN_DASHBOARD = APP_RUNTIME_CONFIG.showSessionOpsInDashboard !== false;
+const ROLE_KEY_ALIASES = {
+    admin: 'admin',
+    administrator: 'admin',
+    'super admin': 'admin',
+    super_admin: 'admin',
+    'system administrator': 'admin',
+    system_administrator: 'admin',
+    manager: 'manager',
+    'operations manager': 'manager',
+    operations_manager: 'manager',
+    operator: 'user',
+    user: 'user',
+    'operations specialist': 'user',
+    operations_specialist: 'user'
+};
+const ROLE_DISPLAY_LABELS = {
+    admin: 'System Administrator',
+    manager: 'Operations Manager',
+    user: 'Operations Specialist'
+};
+const PRESENCE_STATUS_ALIASES = {
+    online: 'online',
+    away: 'away',
+    'away / break': 'away',
+    'away/break': 'away',
+    break: 'away',
+    meeting: 'meeting',
+    'in a meeting': 'meeting',
+    offline: 'offline'
+};
+const PRESENCE_STATUS_META = {
+    online: {
+        label: 'Online',
+        dotClass: 'bg-green-500',
+        badgeClass: 'bg-emerald-50 text-emerald-700 border-emerald-200'
+    },
+    away: {
+        label: 'Away / Break',
+        dotClass: 'bg-amber-400',
+        badgeClass: 'bg-amber-50 text-amber-700 border-amber-200'
+    },
+    meeting: {
+        label: 'In a Meeting',
+        dotClass: 'bg-sky-500',
+        badgeClass: 'bg-sky-50 text-sky-700 border-sky-200'
+    },
+    offline: {
+        label: 'Offline',
+        dotClass: 'bg-gray-300',
+        badgeClass: 'bg-white text-gray-500 border-gray-200'
+    }
+};
+let lastAwayReturnPromptAt = 0;
 
 function escapeHTML(value) {
     return String(value ?? '')
@@ -38,6 +91,148 @@ function escapeHTML(value) {
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
 }
+
+function normalizeRoleKey(value) {
+    const raw = String(value || '').trim().toLowerCase();
+    return ROLE_KEY_ALIASES[raw] || 'user';
+}
+
+function getRoleDisplayLabel(value) {
+    return ROLE_DISPLAY_LABELS[normalizeRoleKey(value)] || ROLE_DISPLAY_LABELS.user;
+}
+
+function canOpenOperationsPortal(role = currentUser?.role) {
+    const normalizedRole = normalizeRoleKey(role);
+    return normalizedRole === 'admin' || normalizedRole === 'manager';
+}
+
+function isOperationsSpecialist(role = currentUser?.role) {
+    return normalizeRoleKey(role) === 'user';
+}
+
+function canManageSharedRecords(role = currentUser?.role) {
+    return !isOperationsSpecialist(role);
+}
+
+function normalizePresenceStatus(value) {
+    const raw = String(value || '').trim().toLowerCase();
+    return PRESENCE_STATUS_ALIASES[raw] || 'online';
+}
+
+function getPresenceStatusMeta(value) {
+    return PRESENCE_STATUS_META[normalizePresenceStatus(value)] || PRESENCE_STATUS_META.online;
+}
+
+function getCurrentPresenceStatus() {
+    return normalizePresenceStatus(currentUser?.presenceStatus || 'online');
+}
+
+function applyRoleBasedUiState() {
+    const restrictSharedManagement = isOperationsSpecialist();
+    document.querySelectorAll('.btn-add-task').forEach((btn) => {
+        btn.classList.toggle('hidden', restrictSharedManagement);
+    });
+    const addClientBtn = document.getElementById('btn-add-client');
+    if (addClientBtn) {
+        addClientBtn.classList.toggle('hidden', restrictSharedManagement);
+    }
+    const bulkActionsBtn = document.getElementById('btn-bulk-actions');
+    if (bulkActionsBtn) {
+        bulkActionsBtn.classList.toggle('hidden', restrictSharedManagement);
+    }
+}
+
+async function syncCurrentPresenceState(status = getCurrentPresenceStatus()) {
+    if (!currentUser) return;
+
+    const normalizedStatus = normalizePresenceStatus(status);
+    const payload = {
+        online: normalizedStatus !== 'offline',
+        status: normalizedStatus,
+        browser: navigator.userAgent,
+        device: 'Web'
+    };
+
+    if (store.isBackendReady() && currentUser?.accessToken) {
+        await backendApiFetch('/presence/me', {
+            method: 'PUT',
+            body: JSON.stringify(payload)
+        }, currentUser.accessToken);
+        return;
+    }
+
+    if (!store.state) return;
+    if (!store.state.livePresence) store.state.livePresence = {};
+
+    store.state.livePresence[currentUser.username] = {
+        ...payload,
+        lastSeen: new Date().toISOString()
+    };
+
+    if (typeof store.notify === 'function') {
+        store.notify();
+    }
+
+    if (store.isFirebaseReady()) {
+        try {
+            await store.saveToFirebase();
+        } catch (error) {
+            console.warn('Presence sync to Firebase failed:', error);
+        }
+    } else {
+        store.saveToLocal();
+    }
+}
+
+function setCurrentPresenceStatus(status, options = {}) {
+    if (!currentUser) return;
+
+    const normalizedStatus = normalizePresenceStatus(status);
+    currentUser.presenceStatus = normalizedStatus;
+    persistSession(currentUser);
+    updateHeaderProfile();
+
+    if (options.sync !== false) {
+        syncCurrentPresenceState(normalizedStatus).catch((error) => {
+            console.warn('Presence sync failed:', error);
+        });
+    }
+
+    if (!options.silent) {
+        showNotification('Status Updated', `Your status is now ${getPresenceStatusMeta(normalizedStatus).label}.`, 'info');
+    }
+}
+
+function isTaskInterfaceTarget(target) {
+    return Boolean(target && typeof target.closest === 'function' && target.closest('#view-tasks, #modal-task, #task-form, #tasks-table-body, .sortable-col'));
+}
+
+function maybePromptAwayReturn(target) {
+    if (!currentUser || getCurrentPresenceStatus() !== 'away' || !isTaskInterfaceTarget(target)) {
+        return;
+    }
+
+    const now = Date.now();
+    if ((now - lastAwayReturnPromptAt) < 15000) {
+        return;
+    }
+    lastAwayReturnPromptAt = now;
+
+    if (window.confirm('Activity detected while your status is Away / Break. Switch back to Online?')) {
+        setCurrentPresenceStatus('online', { silent: true });
+        showNotification('Status Updated', 'Switched back to Online so activity is tracked accurately.', 'success');
+    }
+}
+
+window.getWeRunOpsPresenceState = function () {
+    const status = getCurrentPresenceStatus();
+    return {
+        online: status !== 'offline',
+        status,
+        browser: navigator.userAgent,
+        device: 'Web'
+    };
+};
 
 function safe(value) {
     return escapeHTML(value);
@@ -1139,20 +1334,24 @@ function createKanbanCard(task) {
     const safeStaff = safe(task.staff || 'Unknown');
     const safeWaitingFor = safe(task.waitingFor || '');
     const safeStaffInitial = safe((task.staff || 'U').charAt(0));
+    const readOnlyTaskView = !canManageSharedRecords();
     const lock = getTaskLockInfo(task.id);
     const lockBadge = lock
         ? `<div class="absolute top-2 left-2 text-[10px] px-2 py-1 rounded-full bg-red-50 text-red-600 border border-red-200">Editing: ${safe(lock.lockedByName || lock.lockedBy)}</div>`
         : '';
     const lockClass = lock ? 'opacity-75 border-red-200' : '';
-
-    return `
-        <div class="bg-white p-3 rounded-lg shadow-sm hover:shadow-md cursor-grab active:cursor-grabbing border items-center border-l-4 border-y-gray-200 border-r-gray-200 ${priorityColor} ${lockClass} transition group relative" data-id="${safeTaskId}" onclick="openTaskModal(${safeTaskId})">
-            ${lockBadge}
-            
-            <!-- Quick actions on hover -->
+    const quickActionHtml = readOnlyTaskView
+        ? ''
+        : `
             <div class="absolute ${lock ? 'top-10' : 'top-2'} right-2 opacity-0 group-hover:opacity-100 transition flex gap-1 bg-white rounded-md shadow-sm border border-gray-100 p-0.5 z-10">
                 <button class="p-1 text-gray-400 hover:text-primary rounded" onclick="event.stopPropagation(); openTaskModal(${safeTaskId})"><i data-lucide="edit-2" class="w-3.5 h-3.5"></i></button>
             </div>
+        `;
+
+    return `
+        <div class="bg-white p-3 rounded-lg shadow-sm hover:shadow-md cursor-grab active:cursor-grabbing border items-center border-l-4 border-y-gray-200 border-r-gray-200 ${priorityColor} ${lockClass} transition group relative" data-id="${safeTaskId}" onclick="openTaskModal(${safeTaskId}, ${readOnlyTaskView ? '{viewOnly: true}' : '{}'})">
+            ${lockBadge}
+            ${quickActionHtml}
 
             <div class="flex justify-between items-start mb-1.5 pr-6">
                 <span class="text-xs font-semibold text-gray-500">#${safeTaskId} &bull; ${safeClient}</span>
@@ -1188,6 +1387,7 @@ let currentSearch = '';
 function renderAllTasksList(state) {
     const tbody = document.getElementById('tasks-table-body');
     if (!tbody) return;
+    const readOnlyTaskView = !canManageSharedRecords();
 
     let tasks = [...state.tasks];
 
@@ -1282,12 +1482,14 @@ function renderAllTasksList(state) {
                 </td>
                 <td class="px-4 py-3 whitespace-nowrap text-right text-sm font-medium">
                     <div class="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button class="text-gray-400 hover:text-primary transition p-1" onclick="openTaskModal(${safeTaskId})" title="Edit">
-                            <i data-lucide="edit" class="w-4 h-4"></i>
-                        </button>
-                        <button class="text-gray-400 hover:text-red-500 transition p-1" onclick="deleteSingleTask(${safeTaskId})" title="Delete">
-                            <i data-lucide="trash-2" class="w-4 h-4"></i>
-                        </button>
+                        ${readOnlyTaskView ? '' : `
+                            <button class="text-gray-400 hover:text-primary transition p-1" onclick="openTaskModal(${safeTaskId})" title="Edit">
+                                <i data-lucide="edit" class="w-4 h-4"></i>
+                            </button>
+                            <button class="text-gray-400 hover:text-red-500 transition p-1" onclick="deleteSingleTask(${safeTaskId})" title="Delete">
+                                <i data-lucide="trash-2" class="w-4 h-4"></i>
+                            </button>
+                        `}
                     </div>
                 </td>
             </tr>
@@ -1400,6 +1602,7 @@ function updateBulkActionsState() {
 function renderClientsList(state) {
     const tbody = document.getElementById('clients-table-body');
     if (!tbody) return;
+    const readOnlyClientView = !canManageSharedRecords();
 
     let html = '';
     const clients = state.config.clients;
@@ -1433,12 +1636,14 @@ function renderClientsList(state) {
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap text-right">
                     <div class="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button class="text-gray-400 hover:text-primary transition p-1" onclick="openClientModalByEncoded('${encodedName}')" title="Edit Client">
-                            <i data-lucide="edit-2" class="w-4 h-4"></i>
-                        </button>
-                        <button class="text-gray-400 hover:text-red-500 transition p-1 ${deleteDisabledClass}" onclick="deleteClientActionByEncoded('${encodedName}')" title="Delete Client" ${deleteDisabledAttr}>
-                            <i data-lucide="trash-2" class="w-4 h-4"></i>
-                        </button>
+                        ${readOnlyClientView ? '' : `
+                            <button class="text-gray-400 hover:text-primary transition p-1" onclick="openClientModalByEncoded('${encodedName}')" title="Edit Client">
+                                <i data-lucide="edit-2" class="w-4 h-4"></i>
+                            </button>
+                            <button class="text-gray-400 hover:text-red-500 transition p-1 ${deleteDisabledClass}" onclick="deleteClientActionByEncoded('${encodedName}')" title="Delete Client" ${deleteDisabledAttr}>
+                                <i data-lucide="trash-2" class="w-4 h-4"></i>
+                            </button>
+                        `}
                     </div>
                 </td>
             </tr>
@@ -1462,6 +1667,10 @@ window.deleteClientActionByEncoded = function (encodedClientName) {
 }
 
 window.deleteClientAction = async function (clientName) {
+    if (!canManageSharedRecords()) {
+        showNotification('Read-only Access', 'Operations Specialists can view clients but cannot edit or delete them.', 'warning');
+        return;
+    }
     if (confirm(`Are you sure you want to delete the client "${clientName}"? This action cannot be undone.`)) {
         try {
             await store.deleteClient(clientName);
@@ -1540,6 +1749,21 @@ function createTodayCard(task) {
     const safeProject = safe(task.project || '');
     const safeNotes = safe(task.notes || '');
     const safeStaff = safe(task.staff || 'Unknown');
+    const readOnlyTaskView = !canManageSharedRecords();
+    const primaryAction = readOnlyTaskView
+        ? `
+            <button onclick="openTaskModal(${safeTaskId}, {viewOnly: true})" class="flex-1 sm:flex-none px-3 py-1.5 bg-white text-gray-700 hover:bg-gray-50 border border-gray-300 rounded-md text-sm font-medium transition flex items-center justify-center gap-1">
+                <i data-lucide="eye" class="w-4 h-4"></i> View
+            </button>
+        `
+        : `
+            <button onclick="markAsComplete(${safeTaskId})" class="flex-1 sm:flex-none px-3 py-1.5 bg-green-50 text-green-700 hover:bg-green-100 border border-green-200 rounded-md text-sm font-medium transition flex items-center justify-center gap-1">
+                <i data-lucide="check" class="w-4 h-4"></i> Complete
+            </button>
+            <button onclick="openTaskModal(${safeTaskId})" class="flex-1 sm:flex-none px-3 py-1.5 bg-white text-gray-700 hover:bg-gray-50 border border-gray-300 rounded-md text-sm font-medium transition flex items-center justify-center gap-1">
+                <i data-lucide="eye" class="w-4 h-4"></i> View
+            </button>
+        `;
 
     return `
         <div class="bg-white p-4 rounded-xl shadow-sm hover:shadow-md transition-shadow border items-center border-l-4 border-y-gray-200 border-r-gray-200 border-priority-${task.priority}">
@@ -1552,7 +1776,7 @@ function createTodayCard(task) {
                         <span class="status-badge ${getStatusColorClass(task.status)}">${safeStatus}</span>
                     </div>
                     
-                    <h4 class="text-lg font-bold text-gray-800 leading-tight mb-1 cursor-pointer hover:text-primary hover:underline" onclick="openTaskModal(${safeTaskId})">${safeTaskName}</h4>
+                    <h4 class="text-lg font-bold text-gray-800 leading-tight mb-1 cursor-pointer hover:text-primary hover:underline" onclick="openTaskModal(${safeTaskId}, ${readOnlyTaskView ? '{viewOnly: true}' : '{}'})">${safeTaskName}</h4>
                     <p class="text-sm text-gray-600 font-medium"><i data-lucide="home" class="w-4 h-4 inline mr-1 text-gray-400"></i>${safeClient} ${task.project ? `&rsaquo; ${safeProject}` : ''}</p>
                     ${task.notes ? `<p class="text-sm text-gray-500 mt-2 line-clamp-1 italic bg-gray-50 p-2 rounded">"${safeNotes}"</p>` : ''}
                 </div>
@@ -1568,12 +1792,7 @@ function createTodayCard(task) {
                     </div>
                     
                     <div class="flex gap-2 w-full sm:w-auto mt-2 sm:mt-0">
-                        <button onclick="markAsComplete(${safeTaskId})" class="flex-1 sm:flex-none px-3 py-1.5 bg-green-50 text-green-700 hover:bg-green-100 border border-green-200 rounded-md text-sm font-medium transition flex items-center justify-center gap-1">
-                            <i data-lucide="check" class="w-4 h-4"></i> Complete
-                        </button>
-                        <button onclick="openTaskModal(${safeTaskId})" class="flex-1 sm:flex-none px-3 py-1.5 bg-white text-gray-700 hover:bg-gray-50 border border-gray-300 rounded-md text-sm font-medium transition flex items-center justify-center gap-1">
-                            <i data-lucide="eye" class="w-4 h-4"></i> View
-                        </button>
+                        ${primaryAction}
                     </div>
                 </div>
                 
@@ -1584,6 +1803,10 @@ function createTodayCard(task) {
 
 // Global action handler
 window.markAsComplete = async function (taskId) {
+    if (!canManageSharedRecords()) {
+        showNotification('Read-only Access', 'Operations Specialists can view tasks but cannot change their status.', 'warning');
+        return;
+    }
     if (confirm('Mark this task as completed?')) {
         const task = store.state.tasks.find(item => parseInt(item.id) === parseInt(taskId));
         const previousStatus = task?.status;
@@ -1717,6 +1940,10 @@ function setupFormHandlers() {
         action.addEventListener('click', async (e) => {
             e.preventDefault();
             document.getElementById('bulk-actions-menu').classList.add('hidden');
+            if (!canManageSharedRecords()) {
+                showNotification('Read-only Access', 'Operations Specialists cannot run bulk task changes.', 'warning');
+                return;
+            }
             const type = e.target.getAttribute('data-action');
             const selectedIds = Array.from(selectedTaskIds.values());
 
@@ -1812,6 +2039,10 @@ function setupFormHandlers() {
 }
 
 window.deleteSingleTask = async function (taskId) {
+    if (!canManageSharedRecords()) {
+        showNotification('Read-only Access', 'Operations Specialists can view tasks but cannot delete them.', 'warning');
+        return;
+    }
     if (confirm(`Are you sure you want to delete Task #${taskId}?`)) {
         const snapshot = cloneTask(store.state.tasks.find(task => parseInt(task.id) === parseInt(taskId)));
         try {
@@ -1879,6 +2110,10 @@ function initModals() {
     // Form Submit
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
+        if (!canManageSharedRecords()) {
+            showNotification('Read-only Access', 'Operations Specialists cannot create or edit shared tasks.', 'warning');
+            return;
+        }
 
         // UI Loading State
         const submitBtn = document.getElementById('btn-save-task');
@@ -1933,6 +2168,10 @@ function initModals() {
 
     clientForm?.addEventListener('submit', async (e) => {
         e.preventDefault();
+        if (!canManageSharedRecords()) {
+            showNotification('Read-only Access', 'Operations Specialists cannot create or edit clients.', 'warning');
+            return;
+        }
 
         const submitBtn = document.getElementById('btn-save-client');
         const spinner = document.getElementById('save-client-spinner');
@@ -1984,6 +2223,14 @@ function initModals() {
 }
 
 window.openTaskModal = async function (taskId = null, defaults = {}) {
+    if (!taskId && !canManageSharedRecords()) {
+        showNotification('Read-only Access', 'Operations Specialists cannot create new tasks.', 'warning');
+        return;
+    }
+    if (taskId && !defaults.viewOnly && !canManageSharedRecords()) {
+        defaults = { ...defaults, viewOnly: true };
+    }
+
     const modalBackdrop = document.getElementById('modal-backdrop');
     const taskModal = document.getElementById('modal-task');
     const form = document.getElementById('task-form');
@@ -2182,6 +2429,11 @@ function closeTaskModal() {
 }
 
 window.openClientModal = function (clientName = null) {
+    if (!canManageSharedRecords()) {
+        showNotification('Read-only Access', 'Operations Specialists cannot create or edit clients.', 'warning');
+        return;
+    }
+
     const modalBackdrop = document.getElementById('modal-client');
     const form = document.getElementById('client-form');
     form.reset();
@@ -2292,6 +2544,7 @@ function buildSafeSession(user, options = {}) {
         name: user.name,
         role: user.role,
         initials: user.initials,
+        presenceStatus: normalizePresenceStatus(options.presenceStatus || user.presenceStatus || 'online'),
         sessionStart: options.sessionStart || now,
         provider: options.provider || 'legacy',
         accessToken: options.accessToken || null,
@@ -2352,6 +2605,7 @@ function readSession() {
         if (!raw) return null;
         const parsed = JSON.parse(raw);
         if (!parsed || !parsed.username || !parsed.name) return null;
+        parsed.presenceStatus = normalizePresenceStatus(parsed.presenceStatus || 'online');
         return parsed;
     } catch (error) {
         return null;
@@ -2433,8 +2687,9 @@ async function authenticateWithFirebaseOrLegacy(usernameInput, passwordInput) {
 
 function bindSessionActivityListeners() {
     if (sessionActivityBound) return;
-    const markActive = () => {
+    const markActive = (event = null) => {
         lastActivityAt = Date.now();
+        maybePromptAwayReturn(event?.target || document.activeElement);
     };
 
     ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll'].forEach(eventName => {
@@ -2451,11 +2706,18 @@ async function flushSessionHeartbeat(force = false) {
     const elapsedSeconds = Math.max(1, Math.floor((now - lastHeartbeatAt) / 1000));
     lastHeartbeatAt = now;
 
-    const isIdle = (now - lastActivityAt) > 15 * 60 * 1000;
-    if (isIdle) {
-        sessionIdleSecondsBucket += elapsedSeconds;
-    } else {
+    const presenceStatus = getCurrentPresenceStatus();
+    if (presenceStatus === 'away') {
+        // Official breaks are excluded from efficiency calculations.
+    } else if (presenceStatus === 'meeting') {
         sessionActiveSecondsBucket += elapsedSeconds;
+    } else {
+        const isIdle = (now - lastActivityAt) > 15 * 60 * 1000;
+        if (isIdle) {
+            sessionIdleSecondsBucket += elapsedSeconds;
+        } else {
+            sessionActiveSecondsBucket += elapsedSeconds;
+        }
     }
 
     const shouldSend = force || (sessionActiveSecondsBucket + sessionIdleSecondsBucket >= 60);
@@ -2543,6 +2805,7 @@ async function setupAuth() {
                 store.startTaskLockListener();
                 store.startBackendSyncPolling?.();
                 startSessionActivityTracking();
+                setCurrentPresenceStatus(currentUser.presenceStatus || 'online', { silent: true, sync: false });
                 updateHeaderProfile();
             }
         } else {
@@ -2552,6 +2815,7 @@ async function setupAuth() {
                 currentUser = { ...storedSession, ...user, passwordHash: undefined };
                 store.startPresenceHeartbeat(currentUser.username);
                 store.startPresenceListener(() => updateHeaderProfile());
+                setCurrentPresenceStatus(currentUser.presenceStatus || 'online', { silent: true, sync: false });
                 updateHeaderProfile();
             } else {
                 localStorage.removeItem(SESSION_KEY);
@@ -2592,6 +2856,7 @@ async function setupAuth() {
                 store.startPresenceHeartbeat(currentUser.username);
                 store.startPresenceListener(() => updateHeaderProfile());
                 startSessionActivityTracking();
+                setCurrentPresenceStatus(currentUser.presenceStatus || 'online', { silent: true, sync: false });
 
                 window.location.hash = '#/dashboard';
                 updateHeaderProfile();
@@ -2633,6 +2898,11 @@ async function setupAuth() {
             clearInterval(taskLockRefreshTimer);
             taskLockRefreshTimer = null;
         }
+        if (currentUser) {
+            currentUser.presenceStatus = 'offline';
+            persistSession(currentUser);
+        }
+        await syncCurrentPresenceState('offline').catch(() => {});
         await flushSessionHeartbeat(true);
         stopSessionActivityTracking();
         if (store.isBackendReady() && currentUser?.accessToken) {
@@ -2643,7 +2913,7 @@ async function setupAuth() {
                 await backendApiFetch('/auth/logout', { method: 'POST' }, currentUser.accessToken);
             } catch (error) { }
         } else if (store.state && store.state.livePresence && currentUser) {
-            store.state.livePresence[currentUser.username] = { online: false, lastSeen: new Date().toISOString() };
+            store.state.livePresence[currentUser.username] = { online: false, status: 'offline', lastSeen: new Date().toISOString() };
             if (store.isFirebaseReady()) {
                 try { await store.saveToFirebase(); } catch(err) {}
             } else {
@@ -2702,14 +2972,15 @@ function updateHeaderProfile() {
     const nameEl = document.getElementById('header-user-name');
     const roleEl = document.getElementById('header-user-role');
     const avatarEl = document.getElementById('header-avatar');
+    const workStatusEl = document.getElementById('header-work-status');
     if (nameEl) nameEl.textContent = currentUser.name;
-    if (roleEl) roleEl.textContent = currentUser.role;
+    if (roleEl) roleEl.textContent = getRoleDisplayLabel(currentUser.role);
     if (avatarEl) avatarEl.textContent = currentUser.initials;
+    if (workStatusEl) workStatusEl.value = getCurrentPresenceStatus();
 
     const adminPortalBtn = document.getElementById('btn-open-admin-portal');
     if (adminPortalBtn) {
-        const portalEligibleRoles = new Set(['admin', 'manager']);
-        const canOpenPortal = portalEligibleRoles.has(String(currentUser.role || '').toLowerCase());
+        const canOpenPortal = canOpenOperationsPortal();
         adminPortalBtn.classList.toggle('hidden', !canOpenPortal);
         if (!canOpenPortal) {
             adminPortalBtn.setAttribute('href', '#');
@@ -2737,7 +3008,7 @@ function updateHeaderProfile() {
         Object.keys(live || {}).forEach((username) => {
             if (!username) return;
             if (!userMap.has(username)) {
-                userMap.set(username, { username, name: username, role: 'User', initials: String(username).charAt(0).toUpperCase() });
+                userMap.set(username, { username, name: username, role: 'Operations Specialist', initials: String(username).charAt(0).toUpperCase() });
             }
         });
 
@@ -2756,27 +3027,33 @@ function updateHeaderProfile() {
         presenceList.innerHTML = validUsers.map(u => {
             const isMe = u.username === currentUser.username;
             const presence = live[u.username];
-            let isOnline = false;
+            let status = 'offline';
             
             if (presence && presence.online && presence.lastSeen) {
                 const diffObj = now - new Date(presence.lastSeen).getTime();
-                // online if pinged within last 60 seconds
-                if (diffObj < 60000) isOnline = true;
+                if (diffObj < 60000) {
+                    status = normalizePresenceStatus(presence.status || 'online');
+                }
             }
-            if (isMe) isOnline = true; // Always show self as online
+            if (isMe) {
+                status = getCurrentPresenceStatus();
+            }
 
-            const dotClass = isOnline ? 'bg-green-500' : 'bg-gray-300';
-            const textClass = isOnline ? 'text-gray-800 font-medium' : 'text-gray-500';
+            const statusMeta = getPresenceStatusMeta(status);
+            const isAvailable = status !== 'offline';
+            const textClass = isAvailable ? 'text-gray-800 font-medium' : 'text-gray-500';
             const meLabel = isMe ? ' <span class="text-[10px] text-gray-400 font-normal ml-1">(me)</span>' : '';
             return `
                 <div class="flex items-center gap-2 py-1 px-2">
-                    <span class="w-2 h-2 rounded-full ${dotClass}"></span>
+                    <span class="w-2 h-2 rounded-full ${statusMeta.dotClass}"></span>
                     <span class="text-xs ${textClass}">${safe(u.name)}${meLabel}</span>
-                    <span class="text-[10px] text-gray-400 ml-auto border border-gray-200 px-1.5 py-0.5 rounded-full bg-white">${isOnline ? 'Online' : 'Offline'}</span>
+                    <span class="text-[10px] ml-auto border px-1.5 py-0.5 rounded-full ${statusMeta.badgeClass}">${statusMeta.label}</span>
                 </div>
             `;
         }).join('');
     }
+
+    applyRoleBasedUiState();
 }
 
 function getAdminPortalUrl() {
@@ -2791,9 +3068,8 @@ function getAdminPortalUrl() {
 }
 
 function openAdminPortal() {
-    const portalEligibleRoles = new Set(['admin', 'manager']);
-    if (!currentUser || !portalEligibleRoles.has(String(currentUser.role || '').toLowerCase())) {
-        showNotification('Access Denied', 'Admin or manager role is required to open backend portal.', 'warning');
+    if (!currentUser || !canOpenOperationsPortal()) {
+        showNotification('Access Denied', 'System Administrator or Operations Manager access is required to open the backend portal.', 'warning');
         return false;
     }
     const url = getAdminPortalUrl();
@@ -2820,6 +3096,11 @@ function setupProfileModal() {
 
     adminPortalBtn?.addEventListener('click', (e) => {
         document.getElementById('header-user-panel')?.classList.add('hidden');
+        if (!canOpenOperationsPortal()) {
+            e.preventDefault();
+            showNotification('Access Denied', 'System Administrator or Operations Manager access is required to open the backend portal.', 'warning');
+            return;
+        }
         const portalUrl = getAdminPortalUrl();
         if (!portalUrl) {
             e.preventDefault();
@@ -2845,7 +3126,7 @@ function setupProfileModal() {
         document.getElementById('header-user-panel').classList.add('hidden');
         if (currentUser) {
             document.getElementById('profile-name').value = currentUser.name;
-            document.getElementById('profile-role').value = currentUser.role;
+            document.getElementById('profile-role').value = getRoleDisplayLabel(currentUser.role);
             document.getElementById('profile-modal-avatar').textContent = currentUser.initials;
         }
 
@@ -2864,7 +3145,6 @@ function setupProfileModal() {
     form?.addEventListener('submit', (e) => {
         e.preventDefault();
         const name = document.getElementById('profile-name').value;
-        const role = document.getElementById('profile-role').value;
         const spinner = document.getElementById('profile-save-spinner');
 
         spinner.classList.remove('hidden');
@@ -2873,8 +3153,8 @@ function setupProfileModal() {
         setTimeout(() => {
             if (currentUser) {
                 currentUser.name = name;
-                currentUser.role = role;
                 currentUser.initials = name.charAt(0).toUpperCase();
+                persistSession(currentUser);
             }
             updateHeaderProfile();
 
@@ -2915,11 +3195,12 @@ function setupSettingsModal() {
         
         // Populate History
         const listEl = document.getElementById('login-history-list');
-        let historyData = store.state.loginHistory || [];
+        let historyData = (store.state.loginHistory || []).filter((entry) => entry?.username === currentUser?.username);
 
         if (store.isBackendReady() && currentUser?.accessToken) {
             try {
-                const sessionsResponse = await backendApiFetch('/sessions', {}, currentUser.accessToken);
+                const usernameFilter = encodeURIComponent(currentUser.username);
+                const sessionsResponse = await backendApiFetch(`/sessions?username=${usernameFilter}`, {}, currentUser.accessToken);
                 if (sessionsResponse?.ok) {
                     const payload = await sessionsResponse.json();
                     const sessions = payload?.data || [];
@@ -3272,6 +3553,28 @@ function setupSettingsModal() {
 function setupHeaderFeatures() {
     const searchInput = document.getElementById('header-search-input');
     const resultsContainer = document.getElementById('header-search-results');
+    const workStatusSelect = document.getElementById('header-work-status');
+
+    workStatusSelect?.addEventListener('change', (event) => {
+        const nextStatus = normalizePresenceStatus(event.target.value);
+        const previousStatus = getCurrentPresenceStatus();
+        if (nextStatus === previousStatus) {
+            return;
+        }
+        setCurrentPresenceStatus(nextStatus, { silent: true });
+        const nextLabel = getPresenceStatusMeta(nextStatus).label;
+        if (nextStatus === 'away') {
+            showNotification('Break Logged', `${nextLabel} is active. Idle tracking is paused until you return.`, 'info');
+            return;
+        }
+        if (nextStatus === 'meeting') {
+            showNotification('Meeting Mode On', 'Activity will stay marked active while you are in a meeting.', 'info');
+            return;
+        }
+        if (previousStatus === 'away' || previousStatus === 'meeting') {
+            showNotification('Back Online', 'Work activity tracking has resumed.', 'success');
+        }
+    });
 
     searchInput?.addEventListener('input', (e) => {
         const query = e.target.value.toLowerCase();

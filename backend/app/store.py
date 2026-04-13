@@ -111,11 +111,24 @@ class InMemoryStore:
     SUPABASE_ADVISORY_LOCK_KEY = 71854051
     ROLE_ALIASES = {
         "admin": "Admin",
+        "administrator": "Admin",
         "super admin": "Admin",
         "super_admin": "Admin",
+        "system administrator": "Admin",
+        "system_administrator": "Admin",
+        "level 3": "Admin",
+        "level3": "Admin",
         "manager": "Manager",
+        "operations manager": "Manager",
+        "operations_manager": "Manager",
+        "level 2": "Manager",
+        "level2": "Manager",
         "operator": "User",
+        "operations specialist": "User",
+        "operations_specialist": "User",
         "user": "User",
+        "level 1": "User",
+        "level1": "User",
     }
 
     @staticmethod
@@ -216,6 +229,19 @@ class InMemoryStore:
             except ValueError:
                 pass
         return datetime.min.replace(tzinfo=UTC)
+
+    def _resolve_username_key(self, username: str) -> str | None:
+        candidate = str(username or "").strip()
+        if not candidate:
+            return None
+        if candidate in self.users:
+            return candidate
+
+        lowered = candidate.lower()
+        for existing in self.users.keys():
+            if str(existing or "").strip().lower() == lowered:
+                return existing
+        return None
 
     @classmethod
     def _merge_tasks_payload(cls, local_tasks: list[dict[str, Any]], remote_tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -833,10 +859,17 @@ class InMemoryStore:
                         create table if not exists public.{presence_table} (
                           username text primary key,
                           online boolean not null,
+                          status text not null default 'online',
                           last_seen timestamptz not null,
                           browser text,
                           device text
                         )
+                        """
+                    )
+                    cursor.execute(
+                        f"""
+                        alter table public.{presence_table}
+                        add column if not exists status text not null default 'online'
                         """
                     )
                     cursor.execute(
@@ -1144,12 +1177,13 @@ class InMemoryStore:
                 continue
             cursor.execute(
                 f"""
-                insert into public.{presence_table} (username, online, last_seen, browser, device)
-                values (%s, %s, %s, %s, %s)
+                insert into public.{presence_table} (username, online, status, last_seen, browser, device)
+                values (%s, %s, %s, %s, %s, %s)
                 """,
                 (
                     username,
                     self._coerce_bool(presence.get("online")),
+                    str(presence.get("status") or "online"),
                     self._parse_iso_datetime(presence.get("lastSeen")),
                     str(presence.get("browser") or "") or None,
                     str(presence.get("device") or "") or None,
@@ -1480,18 +1514,19 @@ class InMemoryStore:
                 ]
 
                 cursor.execute(
-                    f"select username, online, last_seen, browser, device from public.{presence_table} order by username"
+                    f"select username, online, status, last_seen, browser, device from public.{presence_table} order by username"
                 )
                 presence_rows = cursor.fetchall()
                 presence: list[dict[str, Any]] = [
                     {
                         "username": str(username or ""),
                         "online": self._coerce_bool(online),
+                        "status": str(status or "online"),
                         "lastSeen": last_seen,
                         "browser": browser,
                         "device": device,
                     }
-                    for username, online, last_seen, browser, device in presence_rows
+                    for username, online, status, last_seen, browser, device in presence_rows
                     if str(username or "").strip()
                 ]
 
@@ -1842,15 +1877,16 @@ class InMemoryStore:
             raise UnauthorizedError("Invalid or expired token") from error
 
     def authenticate(self, username: str, password: str) -> tuple[str, UserProfile]:
-        user = self.users.get(username)
-        if not user:
+        username_key = self._resolve_username_key(username)
+        user = self.users.get(username_key or "")
+        if not user or not username_key:
             raise UnauthorizedError("Invalid username or password")
         if not self._coerce_bool(user.get("isActive", True)):
             raise UnauthorizedError("User is inactive")
         if user["passwordHash"] != self._sha256(password):
             raise UnauthorizedError("Invalid username or password")
 
-        token = self._issue_token(username)
+        token = self._issue_token(username_key)
         profile = self._user_profile_from_record(user)
         return token, profile
 

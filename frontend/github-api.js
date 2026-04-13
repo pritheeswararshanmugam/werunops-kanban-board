@@ -63,6 +63,33 @@ function clearBackendApiBase() {
     localStorage.removeItem('werunops_backend_api_base');
 }
 
+function normalizePresenceStatusValue(status, online = true) {
+    const raw = String(status || '').trim().toLowerCase();
+    if (raw === 'away' || raw === 'break' || raw === 'away / break' || raw === 'away/break') return 'away';
+    if (raw === 'meeting' || raw === 'in a meeting') return 'meeting';
+    if (raw === 'offline') return 'offline';
+    if (!online) return 'offline';
+    return 'online';
+}
+
+function normalizePresenceRecord(record = {}) {
+    const online = record.online !== false;
+    return {
+        online,
+        status: normalizePresenceStatusValue(record.status, online),
+        lastSeen: record.lastSeen || new Date().toISOString(),
+        browser: record.browser || navigator.userAgent,
+        device: record.device || 'Web'
+    };
+}
+
+function getRuntimePresenceState() {
+    if (typeof window !== 'undefined' && typeof window.getWeRunOpsPresenceState === 'function') {
+        return normalizePresenceRecord(window.getWeRunOpsPresenceState());
+    }
+    return normalizePresenceRecord({ online: true, status: 'online', browser: navigator.userAgent, device: 'Web' });
+}
+
 const DEFAULT_STATE = {
     authUsers: [
         { username: 'Eshwar', passwordHash: 'f91b043302878951ce9258214033bd206ea0a92bb88931ba8bb6edb01b57d020', name: 'Pritheeswarar', role: 'Admin', initials: 'P' },
@@ -561,12 +588,13 @@ class DataStore {
                 const data = payload?.data || [];
                 const mapped = {};
                 data.forEach(item => {
-                    mapped[item.username] = {
+                    mapped[item.username] = normalizePresenceRecord({
                         online: !!item.online,
+                        status: item.status,
                         lastSeen: item.lastSeen,
                         browser: item.browser,
                         device: item.device
-                    };
+                    });
                 });
 
                 if (this.state) {
@@ -638,9 +666,10 @@ class DataStore {
                     return;
                 }
                 try {
+                    const presenceState = getRuntimePresenceState();
                     await this.backendFetch('/presence/me', {
                         method: 'PUT',
-                        body: JSON.stringify({ online: true, browser: navigator.userAgent, device: 'Web' })
+                        body: JSON.stringify(presenceState)
                     });
                 } catch (error) { }
             };
@@ -654,15 +683,14 @@ class DataStore {
         if (this.isFirebaseReady()) {
             const pingPresence = async () => {
                 try {
+                    const presenceState = getRuntimePresenceState();
                     const url = `${CONFIG.firebaseUrl}/${CONFIG.dataPath}/livePresence/${username}.json`;
                     await fetch(url, {
                         method: 'PUT',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            online: true,
-                            lastSeen: new Date().toISOString(),
-                            browser: navigator.userAgent,
-                            device: 'Web'
+                            ...presenceState,
+                            lastSeen: new Date().toISOString()
                         })
                     });
                 } catch (e) { /* heartbeat is non-critical */ }
@@ -695,12 +723,13 @@ class DataStore {
                     const data = payload?.data || [];
                     const mapped = {};
                     data.forEach(item => {
-                        mapped[item.username] = {
+                        mapped[item.username] = normalizePresenceRecord({
                             online: !!item.online,
+                            status: item.status,
                             lastSeen: item.lastSeen,
                             browser: item.browser,
                             device: item.device
-                        };
+                        });
                     });
                     if (this.state) {
                         this.state.livePresence = mapped;
@@ -724,9 +753,12 @@ class DataStore {
                     if (res.ok) {
                         const data = await res.json();
                         if (data && this.state) {
-                            this.state.livePresence = data;
+                            const normalized = Object.fromEntries(
+                                Object.entries(data).map(([username, record]) => [username, normalizePresenceRecord(record)])
+                            );
+                            this.state.livePresence = normalized;
                             this.notify();
-                            if (onPresenceUpdate) onPresenceUpdate(data);
+                            if (onPresenceUpdate) onPresenceUpdate(normalized);
                         }
                     }
                 } catch (e) { /* ignore */ }
@@ -1002,6 +1034,9 @@ class DataStore {
             });
         }
         if (!this.state.livePresence) this.state.livePresence = {};
+        this.state.livePresence = Object.fromEntries(
+            Object.entries(this.state.livePresence).map(([username, record]) => [username, normalizePresenceRecord(record)])
+        );
         if (!this.state.loginHistory) this.state.loginHistory = [];
         if (!this.state.taskLocks) this.state.taskLocks = {};
 

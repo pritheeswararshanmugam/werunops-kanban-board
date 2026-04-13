@@ -25,6 +25,7 @@ from app.models import (
     ClientUpdate,
     LoginRequest,
     LoginResponse,
+    PresenceStatus,
     PresenceMeRequest,
     PresenceOut,
     SessionHeartbeatRequest,
@@ -43,18 +44,42 @@ from app.store import ConflictError, UnauthorizedError, store
 app = FastAPI(title="WeRunOps Backend API", version="1.0.0")
 
 ROLE_ACCESS_LABELS = {
-    "Admin": "Super Admin",
-    "Manager": "Manager",
-    "User": "Operator",
+    "Admin": "System Administrator",
+    "Manager": "Operations Manager",
+    "User": "Operations Specialist",
 }
 
 ROLE_NAME_ALIASES = {
     "admin": "Admin",
+    "administrator": "Admin",
     "super admin": "Admin",
     "super_admin": "Admin",
+    "system administrator": "Admin",
+    "system_administrator": "Admin",
+    "level 3": "Admin",
+    "level3": "Admin",
     "manager": "Manager",
+    "operations manager": "Manager",
+    "operations_manager": "Manager",
+    "level 2": "Manager",
+    "level2": "Manager",
     "operator": "User",
+    "operations specialist": "User",
+    "operations_specialist": "User",
     "user": "User",
+    "level 1": "User",
+    "level1": "User",
+}
+
+PRESENCE_STATUS_ALIASES = {
+    "online": "online",
+    "away": "away",
+    "away / break": "away",
+    "away/break": "away",
+    "break": "away",
+    "in a meeting": "meeting",
+    "meeting": "meeting",
+    "offline": "offline",
 }
 
 ROLE_CAPABILITIES = {
@@ -671,6 +696,68 @@ def role_access_label(role: Any) -> str:
 def role_capabilities(role: Any) -> dict[str, bool]:
     normalized = normalized_role(role)
     return dict(ROLE_CAPABILITIES.get(normalized, ROLE_CAPABILITIES["User"]))
+
+
+def normalized_presence_status(value: Any) -> PresenceStatus:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return "online"
+    return cast(PresenceStatus, PRESENCE_STATUS_ALIASES.get(raw, "online"))
+
+
+def user_has_global_visibility(user: UserProfile) -> bool:
+    return role_capabilities(user.role).get("viewOverview", False)
+
+
+def usernames_match(left: Any, right: Any) -> bool:
+    return str(left or "").strip().lower() == str(right or "").strip().lower()
+
+
+def visible_tasks_for_user(user: UserProfile) -> list[TaskOut]:
+    tasks = list(store.tasks.values())
+    if user_has_global_visibility(user):
+        return tasks
+    return [task for task in tasks if usernames_match(task.staff, user.username)]
+
+
+def visible_clients_for_user(user: UserProfile, tasks: list[TaskOut] | None = None) -> list[ClientOut]:
+    clients = list(store.clients.values())
+    if user_has_global_visibility(user):
+        return clients
+    task_records = visible_tasks_for_user(user) if tasks is None else tasks
+    allowed_client_names = {task.client for task in task_records if task.client}
+    return [client for client in clients if client.name in allowed_client_names]
+
+
+def visible_presence_for_user(user: UserProfile) -> list[PresenceOut]:
+    presence = list(store.presence.values())
+    if user_has_global_visibility(user):
+        return presence
+    return [item for item in presence if usernames_match(item.username, user.username)]
+
+
+def scoped_sessions_for_user(user: UserProfile, username: str | None = None) -> list[SessionOut]:
+    sessions = list(store.sessions.values())
+    requested_username = str(username or "").strip()
+    if user_has_global_visibility(user):
+        if requested_username:
+            return [item for item in sessions if usernames_match(item.username, requested_username)]
+        return sessions
+    if requested_username and not usernames_match(requested_username, user.username):
+        raise HTTPException(status_code=403, detail="Operations Specialist access is limited to your own session history")
+    return [item for item in sessions if usernames_match(item.username, user.username)]
+
+
+def ensure_user_can_access_task(task: TaskOut, user: UserProfile) -> None:
+    if user_has_global_visibility(user) or usernames_match(task.staff, user.username):
+        return
+    raise HTTPException(status_code=403, detail="Operations Specialist access is limited to your own tasks")
+
+
+def require_privileged_user(user: UserProfile, detail: str) -> None:
+    if user_has_global_visibility(user):
+        return
+    raise HTTPException(status_code=403, detail=detail)
 
 
 def require_admin_capability(user: UserProfile, capability: str) -> None:
@@ -1666,28 +1753,30 @@ def list_tasks(
     status: str | None = Query(default=None),
     staff: str | None = Query(default=None),
     client: str | None = Query(default=None),
-    _: UserProfile = Depends(current_user),
+    user: UserProfile = Depends(current_user),
 ):
-    records = list(store.tasks.values())
+    records = visible_tasks_for_user(user)
     if status:
         records = [task for task in records if task.status == status]
     if staff:
-        records = [task for task in records if task.staff == staff]
+        records = [task for task in records if usernames_match(task.staff, staff)]
     if client:
         records = [task for task in records if task.client == client]
     return build_response([task.model_dump() for task in records], request)
 
 
 @app.get("/api/v1/tasks/{task_id}", response_model=APIResponse)
-def get_task(task_id: int, request: Request, _: UserProfile = Depends(current_user)):
+def get_task(task_id: int, request: Request, user: UserProfile = Depends(current_user)):
     task = store.tasks.get(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    ensure_user_can_access_task(task, user)
     return build_response(task.model_dump(), request)
 
 
 @app.post("/api/v1/tasks", response_model=APIResponse)
 def create_task(payload: TaskCreate, request: Request, user: UserProfile = Depends(current_user)):
+    require_privileged_user(user, "Only system administrators and operations managers can create tasks")
     task_id = store.next_task_id
     store.next_task_id += 1
     now = datetime.now(UTC)
@@ -1706,7 +1795,8 @@ def create_task(payload: TaskCreate, request: Request, user: UserProfile = Depen
 
 
 @app.post("/api/v1/tasks/restore", response_model=APIResponse)
-def restore_task(payload: TaskRestoreRequest, request: Request, _: UserProfile = Depends(current_user)):
+def restore_task(payload: TaskRestoreRequest, request: Request, user: UserProfile = Depends(current_user)):
+    require_privileged_user(user, "Only system administrators and operations managers can restore tasks")
     task = payload.task
     store.mark_task_restored(task.id)
     store.tasks[task.id] = task
@@ -1718,6 +1808,7 @@ def restore_task(payload: TaskRestoreRequest, request: Request, _: UserProfile =
 
 @app.put("/api/v1/tasks/{task_id}", response_model=APIResponse)
 def update_task(task_id: int, payload: TaskUpdate, request: Request, user: UserProfile = Depends(current_user)):
+    require_privileged_user(user, "Only system administrators and operations managers can edit task details")
     task = store.tasks.get(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -1737,6 +1828,7 @@ def patch_task_status(task_id: int, payload: TaskStatusPatch, request: Request, 
     task = store.tasks.get(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    ensure_user_can_access_task(task, user)
     ensure_task_not_locked_by_other(task_id, user)
     if task.version != payload.version:
         raise HTTPException(status_code=409, detail={"code": "TASK_CONFLICT", "latest": jsonable_encoder(task.model_dump())})
@@ -1751,6 +1843,7 @@ def patch_task_status(task_id: int, payload: TaskStatusPatch, request: Request, 
 
 @app.delete("/api/v1/tasks/{task_id}", response_model=APIResponse)
 def delete_task(task_id: int, request: Request, user: UserProfile = Depends(current_user)):
+    require_privileged_user(user, "Only system administrators and operations managers can delete tasks")
     if task_id not in store.tasks:
         raise HTTPException(status_code=404, detail="Task not found")
     ensure_task_not_locked_by_other(task_id, user)
@@ -1763,6 +1856,7 @@ def delete_task(task_id: int, request: Request, user: UserProfile = Depends(curr
 
 @app.post("/api/v1/tasks/bulk-delete", response_model=APIResponse)
 def bulk_delete_tasks(payload: BulkDeleteRequest, request: Request, user: UserProfile = Depends(current_user)):
+    require_privileged_user(user, "Only system administrators and operations managers can bulk delete tasks")
     deleted = 0
     for task_id in payload.taskIds:
         if task_id in store.tasks:
@@ -1777,12 +1871,13 @@ def bulk_delete_tasks(payload: BulkDeleteRequest, request: Request, user: UserPr
 
 
 @app.get("/api/v1/clients", response_model=APIResponse)
-def list_clients(request: Request, _: UserProfile = Depends(current_user)):
-    return build_response([client.model_dump() for client in store.clients.values()], request)
+def list_clients(request: Request, user: UserProfile = Depends(current_user)):
+    return build_response([client.model_dump() for client in visible_clients_for_user(user)], request)
 
 
 @app.post("/api/v1/clients", response_model=APIResponse)
-def create_client(payload: ClientCreate, request: Request, _: UserProfile = Depends(current_user)):
+def create_client(payload: ClientCreate, request: Request, user: UserProfile = Depends(current_user)):
+    require_privileged_user(user, "Only system administrators and operations managers can create clients")
     client_id = store.next_client_id
     store.next_client_id += 1
     client = ClientOut.model_validate({"id": client_id, "version": 1, **payload.model_dump()})
@@ -1792,7 +1887,8 @@ def create_client(payload: ClientCreate, request: Request, _: UserProfile = Depe
 
 
 @app.put("/api/v1/clients/{client_id}", response_model=APIResponse)
-def update_client(client_id: int, payload: ClientUpdate, request: Request, _: UserProfile = Depends(current_user)):
+def update_client(client_id: int, payload: ClientUpdate, request: Request, user: UserProfile = Depends(current_user)):
+    require_privileged_user(user, "Only system administrators and operations managers can edit clients")
     client = store.clients.get(client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
@@ -1806,7 +1902,8 @@ def update_client(client_id: int, payload: ClientUpdate, request: Request, _: Us
 
 
 @app.delete("/api/v1/clients/{client_id}", response_model=APIResponse)
-def delete_client(client_id: int, request: Request, _: UserProfile = Depends(current_user)):
+def delete_client(client_id: int, request: Request, user: UserProfile = Depends(current_user)):
+    require_privileged_user(user, "Only system administrators and operations managers can delete clients")
     client = store.clients.get(client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
@@ -1823,9 +1920,13 @@ def delete_client(client_id: int, request: Request, _: UserProfile = Depends(cur
 
 @app.put("/api/v1/presence/me", response_model=APIResponse)
 def set_presence(payload: PresenceMeRequest, request: Request, user: UserProfile = Depends(current_user)):
+    status = normalized_presence_status(payload.status)
+    if status == "online" and not coerce_bool(payload.online):
+        status = "offline"
     record = PresenceOut(
         username=user.username,
-        online=payload.online,
+        online=status != "offline",
+        status=status,
         lastSeen=datetime.now(UTC),
         browser=payload.browser,
         device=payload.device,
@@ -1836,8 +1937,8 @@ def set_presence(payload: PresenceMeRequest, request: Request, user: UserProfile
 
 
 @app.get("/api/v1/presence", response_model=APIResponse)
-def list_presence(request: Request, _: UserProfile = Depends(current_user)):
-    return build_response([value.model_dump() for value in store.presence.values()], request)
+def list_presence(request: Request, user: UserProfile = Depends(current_user)):
+    return build_response([value.model_dump() for value in visible_presence_for_user(user)], request)
 
 
 @app.post("/api/v1/sessions/start", response_model=APIResponse)
@@ -1889,11 +1990,9 @@ def end_session(session_id: str, request: Request, user: UserProfile = Depends(c
 def list_sessions(
     request: Request,
     username: str | None = Query(default=None),
-    _: UserProfile = Depends(current_user),
+    user: UserProfile = Depends(current_user),
 ):
-    sessions = list(store.sessions.values())
-    if username:
-        sessions = [item for item in sessions if item.username == username]
+    sessions = scoped_sessions_for_user(user, username)
     return build_response([session.model_dump() for session in sessions], request)
 
 
@@ -1929,11 +2028,9 @@ def session_summary(
     username: str | None = Query(default=None),
     from_date: str | None = Query(default=None),
     to_date: str | None = Query(default=None),
-    _: UserProfile = Depends(current_user),
+    user: UserProfile = Depends(current_user),
 ):
-    sessions = list(store.sessions.values())
-    if username:
-        sessions = [item for item in sessions if item.username == username]
+    sessions = scoped_sessions_for_user(user, username)
 
     if from_date:
         start = datetime.fromisoformat(from_date)
@@ -1994,8 +2091,8 @@ def session_summary(
 
 
 @app.get("/api/v1/dashboard/metrics", response_model=APIResponse)
-def dashboard_metrics(request: Request, _: UserProfile = Depends(current_user)):
-    tasks = list(store.tasks.values())
+def dashboard_metrics(request: Request, user: UserProfile = Depends(current_user)):
+    tasks = visible_tasks_for_user(user)
     open_count = sum(1 for item in tasks if item.status != "Completed")
     in_progress_count = sum(1 for item in tasks if item.status == "In Progress")
     completed_count = sum(1 for item in tasks if item.status == "Completed")
@@ -2003,12 +2100,12 @@ def dashboard_metrics(request: Request, _: UserProfile = Depends(current_user)):
     now_date = datetime.now(UTC).date().isoformat()
     overdue_count = sum(1 for item in tasks if item.status != "Completed" and item.dueDate and item.dueDate < now_date)
 
-    presence = list(store.presence.values())
+    presence = visible_presence_for_user(user)
     online_users = sum(1 for item in presence if item.online)
 
     today = datetime.now(UTC).date()
     hours_by_user: dict[str, int] = {}
-    for session in store.sessions.values():
+    for session in scoped_sessions_for_user(user):
         if session.loginTime.date() == today:
             hours_by_user[session.username] = hours_by_user.get(session.username, 0) + session.durationSeconds
 
@@ -2026,9 +2123,9 @@ def dashboard_metrics(request: Request, _: UserProfile = Depends(current_user)):
 
 
 @app.get("/api/v1/exports/sessions.csv")
-def export_sessions_csv(_: UserProfile = Depends(current_user)):
+def export_sessions_csv(user: UserProfile = Depends(current_user)):
     lines = ["sessionId,username,loginTime,logoutTime,durationSeconds,activeSeconds,idleSeconds,browser,device"]
-    for session in store.sessions.values():
+    for session in scoped_sessions_for_user(user):
         lines.append(
             ",".join(
                 [
@@ -2048,11 +2145,13 @@ def export_sessions_csv(_: UserProfile = Depends(current_user)):
 
 
 @app.get("/api/v1/state/export", response_model=APIResponse)
-def export_state(request: Request, _: UserProfile = Depends(current_user)):
+def export_state(request: Request, user: UserProfile = Depends(current_user)):
+    visible_tasks = visible_tasks_for_user(user)
+    visible_clients = visible_clients_for_user(user, visible_tasks)
     payload = {
-        "tasks": [item.model_dump(mode="json") for item in store.tasks.values()],
-        "clients": [item.model_dump(mode="json") for item in store.clients.values()],
-        "presence": [item.model_dump(mode="json") for item in store.presence.values()],
-        "sessions": [item.model_dump(mode="json") for item in store.sessions.values()],
+        "tasks": [item.model_dump(mode="json") for item in visible_tasks],
+        "clients": [item.model_dump(mode="json") for item in visible_clients],
+        "presence": [item.model_dump(mode="json") for item in visible_presence_for_user(user)],
+        "sessions": [item.model_dump(mode="json") for item in scoped_sessions_for_user(user)],
     }
     return build_response(payload, request)

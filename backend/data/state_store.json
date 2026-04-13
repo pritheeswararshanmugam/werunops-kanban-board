@@ -30,13 +30,13 @@
       "timezone": "UTC",
       "isActive": true
     },
-    "PortalVerify1776074314913": {
-      "username": "PortalVerify1776074314913",
-      "passwordHash": "9d6ca2185eba968706ba9ef07abde8e2dd8d7555f2d2590968a402318ac8cf9c",
-      "name": "Portal Verify User",
-      "role": "Manager",
+    "OpsSpec1776079092692": {
+      "username": "OpsSpec1776079092692",
+      "passwordHash": "aaaaced8224b65b30ce2b745d3a130b3370371d92c5f5f01ea75522b1f42ce3c",
+      "name": "Playwright Operations Specialist",
+      "role": "User",
       "initials": "P",
-      "department": "QA",
+      "department": "Operations",
       "timezone": "UTC",
       "isActive": true
     }
@@ -122,17 +122,41 @@
   "presence": [
     {
       "username": "Eshwar",
+      "online": false,
+      "status": "offline",
+      "lastSeen": "2026-04-13T11:18:27.674583Z",
+      "browser": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.7632.6 Safari/537.36 Edg/145.0.7632.6",
+      "device": "Web"
+    },
+    {
+      "username": "OpsSpec1776079092692",
       "online": true,
-      "lastSeen": "2026-04-13T09:58:27.223154Z",
+      "status": "online",
+      "lastSeen": "2026-04-13T11:18:28.784698Z",
       "browser": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.7632.6 Safari/537.36 Edg/145.0.7632.6",
       "device": "Web"
     }
   ],
   "sessions": [
     {
-      "id": "sess_0d6e541dad9e",
+      "id": "sess_d10bfd1271ce",
       "username": "Eshwar",
-      "loginTime": "2026-04-13T09:58:27.167142Z",
+      "loginTime": "2026-04-13T11:18:13.447701Z",
+      "logoutTime": "2026-04-13T11:18:27.706602Z",
+      "durationSeconds": 14,
+      "activeSeconds": 14,
+      "idleSeconds": 0,
+      "browser": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.7632.6 Safari/537.36 Edg/145.0.7632.6",
+      "device": "Web",
+      "projectTag": "",
+      "operationalCategory": "",
+      "billableSeconds": 0,
+      "administrativeSeconds": 0
+    },
+    {
+      "id": "sess_ca1ef201093e",
+      "username": "OpsSpec1776079092692",
+      "loginTime": "2026-04-13T11:18:28.701572Z",
       "logoutTime": null,
       "durationSeconds": 0,
       "activeSeconds": 0,
@@ -148,26 +172,15 @@
   "task_locks": [],
   "admin_audit_logs": [
     {
-      "id": "audit_3b26239b28",
-      "timestamp": "2026-04-13T09:58:35.692279+00:00",
-      "admin": "Eshwar",
-      "adminName": "Pritheeswarar",
-      "action": "task_comment_added",
-      "details": {
-        "taskId": 1,
-        "commentId": "c_8531b32a"
-      }
-    },
-    {
-      "id": "audit_e03f647645",
-      "timestamp": "2026-04-13T09:58:35.207981+00:00",
+      "id": "audit_acdd8b5eb5",
+      "timestamp": "2026-04-13T11:18:12.701006+00:00",
       "admin": "Eshwar",
       "adminName": "Pritheeswarar",
       "action": "user_created",
       "details": {
-        "username": "PortalVerify1776074314913",
-        "role": "Manager",
-        "department": "QA"
+        "username": "OpsSpec1776079092692",
+        "role": "User",
+        "department": "Operations"
       }
     }
   ],
@@ -188,18 +201,7 @@
       "action": "notify_admin"
     }
   ],
-  "task_comments": {
-    "1": [
-      {
-        "id": "c_8531b32a",
-        "taskId": 1,
-        "comment": "Portal verification comment",
-        "user": "Pritheeswarar",
-        "username": "Eshwar",
-        "timestamp": "2026-04-13T09:58:35.690769+00:00"
-      }
-    ]
-  },
+  "task_comments": {},
   "next_task_id": 3,
   "next_client_id": 3
 }

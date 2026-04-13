@@ -52,6 +52,7 @@ create table if not exists public.werunops_task_activity (
 create table if not exists public.werunops_presence (
   username text primary key,
   online boolean not null,
+  status text not null default 'online',
   last_seen timestamptz not null,
   browser text,
   device text

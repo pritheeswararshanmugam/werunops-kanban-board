@@ -48,6 +48,9 @@ class ChangePasswordRequest(BaseModel):
     newPassword: str = Field(min_length=6)
 
 
+PresenceStatus = Literal["online", "away", "meeting", "offline"]
+
+
 TaskStatus = Literal[
     "New",
     "In Progress",
@@ -148,6 +151,7 @@ class ClientOut(ClientBase):
 
 class PresenceMeRequest(BaseModel):
     online: bool
+    status: PresenceStatus = "online"
     browser: str | None = None
     device: str | None = None
 
@@ -155,6 +159,7 @@ class PresenceMeRequest(BaseModel):
 class PresenceOut(BaseModel):
     username: str
     online: bool
+    status: PresenceStatus = "online"
     lastSeen: datetime
     browser: str | None = None
     device: str | None = None
