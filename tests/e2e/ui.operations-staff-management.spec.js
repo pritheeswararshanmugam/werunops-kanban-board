@@ -12,6 +12,36 @@ async function apiLogin(request, username = 'Eshwar', password = '110495') {
   return payload?.data?.accessToken;
 }
 
+async function api(request, method, path, { token, data, expectedStatus = 200 } = {}) {
+  const response = await request.fetch(`${API_BASE}${path}`, {
+    method,
+    headers: token
+      ? {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        }
+      : {
+          'Content-Type': 'application/json',
+        },
+    data,
+  });
+
+  const allowedStatuses = Array.isArray(expectedStatus) ? expectedStatus : [expectedStatus];
+  expect(allowedStatuses).toContain(response.status());
+
+  let payload = null;
+  const text = await response.text();
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = text;
+    }
+  }
+
+  return { response, payload };
+}
+
 async function createOperationsSpecialist(request, adminToken, username, password) {
   const response = await request.post(`${API_BASE}/admin/users`, {
     headers: {
@@ -50,6 +80,10 @@ async function closeModal(page, selector) {
   await expect(page.locator(selector)).toBeHidden({ timeout: 15_000 });
 }
 
+async function searchTasks(page, value) {
+  await page.fill('#tasks-search', value);
+}
+
 test.beforeEach(async ({ page }) => {
   await resetBrowserState(page);
 });
@@ -60,7 +94,42 @@ test('operations and staff management flows honor the new auth, presence, and RB
   const adminToken = await apiLogin(request);
   const specialistUsername = `OpsSpec${Date.now()}`;
   const specialistPassword = 'OpsSpec!123';
+  const runId = Date.now();
+  const clientName = `PW Specialist Client ${runId}`;
+  const adminTaskName = `PW Admin Assigned Task ${runId}`;
+  const specialistTaskName = `PW Specialist Task ${runId}`;
+  const followUpTaskName = `PW Specialist Follow Up ${runId}`;
+  const followUpDueDate = new Date(Date.now() + 3 * 86400000).toISOString().split('T')[0];
+  const specialistDueDate = new Date(Date.now() + 5 * 86400000).toISOString().split('T')[0];
+
   await createOperationsSpecialist(request, adminToken, specialistUsername, specialistPassword);
+
+  const createdClient = await api(request, 'POST', '/clients', {
+    token: adminToken,
+    data: {
+      name: clientName,
+      contact: 'Playwright Specialist Flow',
+      email: `ops_spec_${runId}@example.com`,
+      phone: '555-0101',
+    },
+  });
+
+  const adminAssignedTask = await api(request, 'POST', '/tasks', {
+    token: adminToken,
+    data: {
+      client: clientName,
+      project: 'Specialist Access Validation',
+      task: adminTaskName,
+      staff: specialistUsername,
+      status: 'In Progress',
+      priority: 'High',
+      startDate: '',
+      dueDate: '',
+      waitingFor: '',
+      notes: 'Created by admin for specialist RBAC validation',
+      parentId: null,
+    },
+  });
 
   await signInAs(page, 'ESHWAR', '110495');
   await expect(page.locator('#header-user-role')).toHaveText('System Administrator');
@@ -128,6 +197,8 @@ test('operations and staff management flows honor the new auth, presence, and RB
 
   await signInAs(page, specialistUsername.toLowerCase(), specialistPassword);
   await expect(page.locator('#header-user-role')).toHaveText('Operations Specialist');
+  await expect(page.locator('#chart-staff-title')).toHaveText('My Workload Overview');
+  await expect(page.locator('#chart-client-title')).toHaveText('My Client Activity');
 
   await openUserMenu(page);
   await expect(page.locator('#btn-open-admin-portal')).toBeHidden();
@@ -137,9 +208,61 @@ test('operations and staff management flows honor the new auth, presence, and RB
   await closeModal(page, '#modal-profile');
 
   await page.locator('.nav-tab[data-target="view-tasks"]').click();
-  await expect(page.locator('#view-tasks .btn-add-task').first()).toBeHidden();
+  await expect(page.locator('#view-tasks .btn-add-task').first()).toBeVisible();
   await page.locator('.nav-tab[data-target="view-clients"]').click();
   await expect(page.locator('#btn-add-client')).toBeHidden();
+
+  await page.locator('.nav-tab[data-target="view-tasks"]').click();
+  await searchTasks(page, adminTaskName);
+
+  const adminTaskRow = page.locator('#tasks-table-body tr').filter({ hasText: adminTaskName }).first();
+  await expect(adminTaskRow).toBeVisible();
+  await expect(adminTaskRow.locator('button[title="Update Status"]')).toHaveCount(1);
+  await expect(adminTaskRow.locator('button[title="Delete"]')).toHaveCount(0);
+  await adminTaskRow.locator('td:nth-child(5) div').click();
+  await expect(page.locator('#modal-task')).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('#modal-task-title')).toHaveText('Update Task Status');
+  await expect(page.locator('#task-name')).toBeDisabled();
+  await expect(page.locator('#task-status')).toBeEnabled();
+  await expect(page.locator('#btn-add-followup')).toBeVisible();
+  await expect(page.locator('#task-status option')).toHaveCount(2);
+
+  await page.click('#btn-add-followup');
+  await expect(page.locator('#modal-task')).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('#modal-task-title')).toHaveText('Add New Task');
+  await page.fill('#task-name', followUpTaskName);
+  await page.fill('#task-due-date', followUpDueDate);
+  await page.fill('#task-notes', 'Created as a specialist follow-up');
+  await page.click('#btn-save-task');
+  await expect(page.locator('#modal-task')).toBeHidden({ timeout: 20_000 });
+
+  await searchTasks(page, followUpTaskName);
+  const followUpRow = page.locator('#tasks-table-body tr').filter({ hasText: followUpTaskName }).first();
+  await expect(followUpRow).toBeVisible();
+  await expect(followUpRow.locator('button[title="Edit"]')).toHaveCount(1);
+  await expect(followUpRow.locator('button[title="Delete"]')).toHaveCount(1);
+
+  await searchTasks(page, '');
+  await page.locator('#view-tasks .btn-add-task').first().click();
+  await expect(page.locator('#modal-task')).toBeVisible({ timeout: 15_000 });
+  await page.selectOption('#task-client', clientName);
+  await page.fill('#task-name', specialistTaskName);
+  await page.fill('#task-due-date', specialistDueDate);
+  await page.fill('#task-notes', 'Created directly by the specialist');
+  await page.click('#btn-save-task');
+  await expect(page.locator('#modal-task')).toBeHidden({ timeout: 20_000 });
+
+  await searchTasks(page, specialistTaskName);
+  const specialistTaskRow = page.locator('#tasks-table-body tr').filter({ hasText: specialistTaskName }).first();
+  await expect(specialistTaskRow).toBeVisible();
+  await expect(specialistTaskRow.locator('button[title="Edit"]')).toHaveCount(1);
+  await expect(specialistTaskRow.locator('button[title="Delete"]')).toHaveCount(1);
+  await specialistTaskRow.locator('td:nth-child(5) div').click();
+  await expect(page.locator('#modal-task-title')).toHaveText('Edit Task');
+  await expect(page.locator('#task-name')).toBeEnabled();
+  await page.fill('#task-notes', 'Updated by the specialist after creation');
+  await page.click('#btn-save-task');
+  await expect(page.locator('#modal-task')).toBeHidden({ timeout: 20_000 });
 
   const specialistToken = await page.evaluate(() => {
     try {
@@ -151,6 +274,49 @@ test('operations and staff management flows honor the new auth, presence, and RB
   });
   expect(specialistToken).toBeTruthy();
 
+  const forbiddenTaskEdit = await api(request, 'PUT', `/tasks/${adminAssignedTask.payload.data.id}`, {
+    token: specialistToken,
+    expectedStatus: 403,
+    data: {
+      client: clientName,
+      project: 'Specialist Access Validation',
+      task: `${adminTaskName} edited`,
+      staff: specialistUsername,
+      status: 'In Progress',
+      priority: 'High',
+      startDate: '',
+      dueDate: '',
+      waitingFor: '',
+      notes: 'This edit should be rejected',
+      parentId: null,
+      version: adminAssignedTask.payload.data.version,
+    },
+  });
+  expect(String(forbiddenTaskEdit.payload.detail)).toContain('only edit tasks they created');
+
+  const forbiddenStatusChange = await api(request, 'PATCH', `/tasks/${adminAssignedTask.payload.data.id}/status`, {
+    token: specialistToken,
+    expectedStatus: 403,
+    data: {
+      status: 'Waiting Client',
+      version: adminAssignedTask.payload.data.version,
+    },
+  });
+  expect(String(forbiddenStatusChange.payload.detail)).toContain('only mark assigned tasks as completed');
+
+  const forbiddenDelete = await api(request, 'DELETE', `/tasks/${adminAssignedTask.payload.data.id}`, {
+    token: specialistToken,
+    expectedStatus: 403,
+  });
+  expect(String(forbiddenDelete.payload.detail)).toContain('only delete tasks they created');
+
+  await searchTasks(page, adminTaskName);
+  await page.locator('#tasks-table-body tr').filter({ hasText: adminTaskName }).first().locator('td:nth-child(5) div').click();
+  await page.selectOption('#task-status', 'Completed');
+  await page.click('#btn-save-task');
+  await expect(page.locator('#modal-task')).toBeHidden({ timeout: 20_000 });
+  await expect(page.locator('#tasks-table-body tr').filter({ hasText: adminTaskName }).first()).toContainText('Completed');
+
   const forbiddenRoleChange = await request.patch(`${API_BASE}/admin/users/Eshwar/role`, {
     headers: {
       Authorization: `Bearer ${specialistToken}`,
@@ -159,4 +325,25 @@ test('operations and staff management flows honor the new auth, presence, and RB
     failOnStatusCode: false,
   });
   expect(forbiddenRoleChange.status()).toBe(403);
+
+  await api(request, 'DELETE', `/tasks/${adminAssignedTask.payload.data.id}`, {
+    token: adminToken,
+    expectedStatus: [200, 404],
+  });
+
+  const visibleTasksAfterSpecFlow = await api(request, 'GET', `/tasks?client=${encodeURIComponent(clientName)}`, {
+    token: adminToken,
+  });
+
+  for (const task of visibleTasksAfterSpecFlow.payload.data || []) {
+    await api(request, 'DELETE', `/tasks/${task.id}`, {
+      token: adminToken,
+      expectedStatus: [200, 404],
+    });
+  }
+
+  await api(request, 'DELETE', `/clients/${createdClient.payload.data.id}`, {
+    token: adminToken,
+    expectedStatus: [200, 404],
+  });
 });

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import difflib
 import uuid
 import os
 import json
@@ -709,6 +710,10 @@ def user_has_global_visibility(user: UserProfile) -> bool:
     return role_capabilities(user.role).get("viewOverview", False)
 
 
+def normalized_identity_key(value: Any) -> str:
+    return "".join(character for character in str(value or "").strip().lower() if character.isalnum())
+
+
 def resolve_known_username(value: Any) -> str:
     raw = str(value or "").strip()
     if not raw:
@@ -718,11 +723,28 @@ def resolve_known_username(value: Any) -> str:
         return raw
 
     lowered = raw.lower()
+    lookup_key = normalized_identity_key(raw)
+    alias_map: dict[str, str] = {}
+
     for username, raw_user in store.users.items():
         if lowered == str(username or "").strip().lower():
             return username
         if lowered == str(raw_user.get("name") or "").strip().lower():
             return username
+
+        username_key = normalized_identity_key(username)
+        name_key = normalized_identity_key(raw_user.get("name"))
+        if lookup_key and lookup_key in {username_key, name_key}:
+            return username
+        if username_key:
+            alias_map.setdefault(username_key, username)
+        if name_key:
+            alias_map.setdefault(name_key, username)
+
+    if lookup_key and alias_map:
+        close_matches = difflib.get_close_matches(lookup_key, list(alias_map.keys()), n=1, cutoff=0.88)
+        if close_matches:
+            return alias_map[close_matches[0]]
 
     return raw
 
@@ -740,6 +762,57 @@ def visible_tasks_for_user(user: UserProfile) -> list[TaskOut]:
     if user_has_global_visibility(user):
         return tasks
     return [task for task in tasks if usernames_match(task.staff, user.username)]
+
+
+def is_operations_specialist(user: UserProfile) -> bool:
+    return normalized_role(user.role) == "User"
+
+
+def user_matches_identity(user: UserProfile, value: Any) -> bool:
+    raw = str(value or "").strip()
+    if not raw:
+        return False
+    if usernames_match(raw, user.username):
+        return True
+    return raw.lower() == str(user.name or "").strip().lower()
+
+
+def task_created_by_user(task: TaskOut, user: UserProfile) -> bool:
+    return user_matches_identity(user, task.createdBy)
+
+
+def user_can_create_tasks(user: UserProfile) -> bool:
+    return user_has_global_visibility(user) or is_operations_specialist(user)
+
+
+def user_can_edit_task_details(task: TaskOut, user: UserProfile) -> bool:
+    if user_has_global_visibility(user):
+        return True
+    return task_created_by_user(task, user)
+
+
+def user_can_delete_task(task: TaskOut, user: UserProfile) -> bool:
+    if user_has_global_visibility(user):
+        return True
+    return task_created_by_user(task, user)
+
+
+def user_can_update_task_status(task: TaskOut, user: UserProfile, next_status: str | None = None) -> bool:
+    if user_has_global_visibility(user):
+        return True
+    if not usernames_match(task.staff, user.username):
+        return False
+    if task_created_by_user(task, user):
+        return True
+    if next_status is None:
+        return True
+    return next_status == task.status or next_status == "Completed"
+
+
+def normalize_specialist_task_staff(staff_value: Any, user: UserProfile) -> str:
+    if is_operations_specialist(user):
+        return user.username
+    return normalize_task_staff_value(staff_value)
 
 
 def visible_clients_for_user(user: UserProfile, tasks: list[TaskOut] | None = None) -> list[ClientOut]:
@@ -1798,12 +1871,20 @@ def get_task(task_id: int, request: Request, user: UserProfile = Depends(current
 
 @app.post("/api/v1/tasks", response_model=APIResponse)
 def create_task(payload: TaskCreate, request: Request, user: UserProfile = Depends(current_user)):
-    require_privileged_user(user, "Only system administrators and operations managers can create tasks")
+    if not user_can_create_tasks(user):
+        raise HTTPException(status_code=403, detail="You do not have access to create tasks")
+
+    if payload.parentId is not None:
+        parent_task = store.tasks.get(payload.parentId)
+        if not parent_task:
+            raise HTTPException(status_code=404, detail="Parent task not found")
+        ensure_user_can_access_task(parent_task, user)
+
     task_id = store.next_task_id
     store.next_task_id += 1
     now = datetime.now(UTC)
     task_payload = payload.model_dump()
-    task_payload["staff"] = normalize_task_staff_value(task_payload.get("staff"))
+    task_payload["staff"] = normalize_specialist_task_staff(task_payload.get("staff"), user)
     task = TaskOut(
         id=task_id,
         **task_payload,
@@ -1832,16 +1913,23 @@ def restore_task(payload: TaskRestoreRequest, request: Request, user: UserProfil
 
 @app.put("/api/v1/tasks/{task_id}", response_model=APIResponse)
 def update_task(task_id: int, payload: TaskUpdate, request: Request, user: UserProfile = Depends(current_user)):
-    require_privileged_user(user, "Only system administrators and operations managers can edit task details")
     task = store.tasks.get(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    ensure_user_can_access_task(task, user)
+    if not user_can_edit_task_details(task, user):
+        raise HTTPException(status_code=403, detail="Operations Specialists can only edit tasks they created")
     ensure_task_not_locked_by_other(task_id, user)
     if task.version != payload.version:
         raise HTTPException(status_code=409, detail={"code": "TASK_CONFLICT", "latest": jsonable_encoder(task.model_dump())})
 
     update_payload = payload.model_dump(exclude={"version"})
-    update_payload["staff"] = normalize_task_staff_value(update_payload.get("staff"))
+    if update_payload.get("parentId") is not None:
+        parent_task = store.tasks.get(cast(int, update_payload.get("parentId")))
+        if not parent_task:
+            raise HTTPException(status_code=404, detail="Parent task not found")
+        ensure_user_can_access_task(parent_task, user)
+    update_payload["staff"] = normalize_specialist_task_staff(update_payload.get("staff"), user)
     updated = task.model_copy(update={**update_payload, "version": task.version + 1, "updatedAt": datetime.now(UTC)})
     updated.activityLog.append(ActivityEntry(action="Task updated", user=user.name, timestamp=datetime.now(UTC)))
     store.tasks[task_id] = updated
@@ -1855,6 +1943,8 @@ def patch_task_status(task_id: int, payload: TaskStatusPatch, request: Request, 
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     ensure_user_can_access_task(task, user)
+    if not user_can_update_task_status(task, user, payload.status):
+        raise HTTPException(status_code=403, detail="Operations Specialists can only mark assigned tasks as completed unless they created the task")
     ensure_task_not_locked_by_other(task_id, user)
     if task.version != payload.version:
         raise HTTPException(status_code=409, detail={"code": "TASK_CONFLICT", "latest": jsonable_encoder(task.model_dump())})
@@ -1869,9 +1959,12 @@ def patch_task_status(task_id: int, payload: TaskStatusPatch, request: Request, 
 
 @app.delete("/api/v1/tasks/{task_id}", response_model=APIResponse)
 def delete_task(task_id: int, request: Request, user: UserProfile = Depends(current_user)):
-    require_privileged_user(user, "Only system administrators and operations managers can delete tasks")
-    if task_id not in store.tasks:
+    task = store.tasks.get(task_id)
+    if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
+    ensure_user_can_access_task(task, user)
+    if not user_can_delete_task(task, user):
+        raise HTTPException(status_code=403, detail="Operations Specialists can only delete tasks they created")
     ensure_task_not_locked_by_other(task_id, user)
     store.mark_task_deleted(task_id)
     store.tasks.pop(task_id)
@@ -1882,15 +1975,19 @@ def delete_task(task_id: int, request: Request, user: UserProfile = Depends(curr
 
 @app.post("/api/v1/tasks/bulk-delete", response_model=APIResponse)
 def bulk_delete_tasks(payload: BulkDeleteRequest, request: Request, user: UserProfile = Depends(current_user)):
-    require_privileged_user(user, "Only system administrators and operations managers can bulk delete tasks")
     deleted = 0
     for task_id in payload.taskIds:
-        if task_id in store.tasks:
-            ensure_task_not_locked_by_other(task_id, user)
-            store.mark_task_deleted(task_id)
-            store.tasks.pop(task_id)
-            store.task_locks.pop(task_id, None)
-            deleted += 1
+        task = store.tasks.get(task_id)
+        if not task:
+            continue
+        ensure_user_can_access_task(task, user)
+        if not user_can_delete_task(task, user):
+            raise HTTPException(status_code=403, detail="Operations Specialists can only delete tasks they created")
+        ensure_task_not_locked_by_other(task_id, user)
+        store.mark_task_deleted(task_id)
+        store.tasks.pop(task_id)
+        store.task_locks.pop(task_id, None)
+        deleted += 1
     if deleted:
         store.save_state()
     return build_response({"deleted": deleted}, request)

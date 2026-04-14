@@ -115,6 +115,37 @@ function canManageSharedRecords(role = currentUser?.role) {
     return !isOperationsSpecialist(role);
 }
 
+function canCreateTasks(role = currentUser?.role) {
+    return canManageSharedRecords(role) || isOperationsSpecialist(role);
+}
+
+function normalizeIdentityToken(value) {
+    return String(value || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function calculateEditDistance(left, right) {
+    const start = String(left || '');
+    const end = String(right || '');
+    const rows = Array.from({ length: end.length + 1 }, (_, index) => index);
+
+    for (let startIndex = 1; startIndex <= start.length; startIndex += 1) {
+        let previousDiagonal = rows[0];
+        rows[0] = startIndex;
+
+        for (let endIndex = 1; endIndex <= end.length; endIndex += 1) {
+            const temp = rows[endIndex];
+            if (start[startIndex - 1] === end[endIndex - 1]) {
+                rows[endIndex] = previousDiagonal;
+            } else {
+                rows[endIndex] = Math.min(previousDiagonal, rows[endIndex - 1], rows[endIndex]) + 1;
+            }
+            previousDiagonal = temp;
+        }
+    }
+
+    return rows[end.length];
+}
+
 function getDirectoryUsers() {
     const rawUsers = Array.isArray(store?.state?.authUsers) ? store.state.authUsers : [];
     const directory = new Map();
@@ -133,14 +164,58 @@ function getDirectoryUsers() {
         });
     });
 
+    const currentUsername = String(currentUser?.username || '').trim();
+    if (currentUsername && !directory.has(currentUsername.toLowerCase())) {
+        const currentName = String(currentUser?.name || currentUsername).trim() || currentUsername;
+        directory.set(currentUsername.toLowerCase(), {
+            username: currentUsername,
+            name: currentName,
+            initials: String(currentUser?.initials || currentName.charAt(0) || currentUsername.charAt(0) || 'U').trim().charAt(0).toUpperCase(),
+            role: String(currentUser?.role || 'Operations Specialist'),
+            isActive: true,
+        });
+    }
+
     return Array.from(directory.values()).sort((left, right) => left.name.localeCompare(right.name));
 }
 
 function findDirectoryUser(value) {
-    const rawValue = String(value || '').trim().toLowerCase();
+    const rawValue = String(value || '').trim();
     if (!rawValue) return null;
 
-    return getDirectoryUsers().find((user) => user.username.toLowerCase() === rawValue || user.name.toLowerCase() === rawValue) || null;
+    const directoryUsers = getDirectoryUsers();
+    const lowered = rawValue.toLowerCase();
+    const exact = directoryUsers.find((user) => user.username.toLowerCase() === lowered || user.name.toLowerCase() === lowered);
+    if (exact) return exact;
+
+    const normalizedValue = normalizeIdentityToken(rawValue);
+    if (!normalizedValue) return null;
+
+    const normalizedExact = directoryUsers.find((user) => {
+        const username = normalizeIdentityToken(user.username);
+        const name = normalizeIdentityToken(user.name);
+        return username === normalizedValue || name === normalizedValue;
+    });
+    if (normalizedExact) return normalizedExact;
+
+    let bestMatch = null;
+    let bestScore = 0;
+    directoryUsers.forEach((user) => {
+        [user.username, user.name].forEach((candidate) => {
+            const candidateToken = normalizeIdentityToken(candidate);
+            if (!candidateToken) return;
+
+            const distance = calculateEditDistance(normalizedValue, candidateToken);
+            const maxLength = Math.max(normalizedValue.length, candidateToken.length, 1);
+            const score = 1 - (distance / maxLength);
+            if ((distance <= 1 || score >= 0.88) && score > bestScore) {
+                bestScore = score;
+                bestMatch = user;
+            }
+        });
+    });
+
+    return bestMatch;
 }
 
 function normalizeTaskStaffValue(value) {
@@ -176,6 +251,104 @@ function getAssignableStaffOptions() {
         .map((entry) => ({ value: normalizeTaskStaffValue(entry), label: getTaskStaffLabel(entry) }));
 }
 
+function isCurrentUserIdentity(value) {
+    if (!currentUser) return false;
+    const match = findDirectoryUser(value);
+    if (match) return match.username === currentUser.username;
+
+    const token = normalizeIdentityToken(value);
+    return Boolean(token) && token === normalizeIdentityToken(currentUser.username || currentUser.name);
+}
+
+function isTaskAssignedToCurrentUser(task) {
+    return isCurrentUserIdentity(task?.staff);
+}
+
+function isTaskCreatedByCurrentUser(task) {
+    return isCurrentUserIdentity(task?.createdBy);
+}
+
+function canCreateFollowUpTasks(task = null) {
+    if (canManageSharedRecords()) return true;
+    return isOperationsSpecialist() && (!task || isTaskAssignedToCurrentUser(task));
+}
+
+function canEditTaskDetails(task) {
+    if (canManageSharedRecords()) return true;
+    return isOperationsSpecialist() && isTaskCreatedByCurrentUser(task);
+}
+
+function canDeleteTask(task) {
+    if (canManageSharedRecords()) return true;
+    return isOperationsSpecialist() && isTaskCreatedByCurrentUser(task);
+}
+
+function canUpdateTaskStatus(task) {
+    if (canManageSharedRecords()) return true;
+    return isOperationsSpecialist() && isTaskAssignedToCurrentUser(task);
+}
+
+function usesStatusOnlyTaskMode(task) {
+    return isOperationsSpecialist() && isTaskAssignedToCurrentUser(task) && !isTaskCreatedByCurrentUser(task);
+}
+
+function canDragTask(task) {
+    if (canManageSharedRecords()) return true;
+    return isOperationsSpecialist() && isTaskCreatedByCurrentUser(task);
+}
+
+function getAllowedTaskStatuses(task = null) {
+    const statuses = Array.isArray(store?.state?.config?.statuses) ? [...store.state.config.statuses] : [];
+    if (!task || !isOperationsSpecialist() || isTaskCreatedByCurrentUser(task)) {
+        return statuses;
+    }
+    return Array.from(new Set([String(task.status || '').trim(), 'Completed'].filter(Boolean)));
+}
+
+function getTaskModalOpenOptions(task) {
+    if (canEditTaskDetails(task)) return '{}';
+    if (usesStatusOnlyTaskMode(task)) return '{ statusOnly: true }';
+    return '{ viewOnly: true }';
+}
+
+function setTaskFieldDisabled(fieldId, disabled) {
+    const element = document.getElementById(fieldId);
+    if (!element) return;
+
+    element.disabled = disabled;
+    element.classList.toggle('bg-gray-50', disabled);
+    element.classList.toggle('text-gray-500', disabled);
+    element.classList.toggle('cursor-not-allowed', disabled);
+    element.classList.toggle('border-transparent', disabled);
+    element.classList.toggle('border-gray-300', !disabled);
+}
+
+function setTaskStatusOptions(task = null) {
+    const statusSelect = document.getElementById('task-status');
+    if (!statusSelect) return;
+
+    const allowedStatuses = getAllowedTaskStatuses(task);
+    const fallbackValue = task?.status || statusSelect.value;
+    statusSelect.innerHTML = '';
+    allowedStatuses.forEach((status) => {
+        const option = document.createElement('option');
+        option.value = status;
+        option.textContent = status;
+        statusSelect.appendChild(option);
+    });
+
+    if (fallbackValue && allowedStatuses.includes(fallbackValue)) {
+        statusSelect.value = fallbackValue;
+    }
+}
+
+function setChartCardTitle(titleId, title) {
+    const element = document.getElementById(titleId);
+    if (element) {
+        element.textContent = title;
+    }
+}
+
 function normalizePresenceStatus(value) {
     const raw = String(value || '').trim().toLowerCase();
     return PRESENCE_STATUS_ALIASES[raw] || 'online';
@@ -190,17 +363,17 @@ function getCurrentPresenceStatus() {
 }
 
 function applyRoleBasedUiState() {
-    const restrictSharedManagement = isOperationsSpecialist();
+    const canCreateNewTasks = canCreateTasks();
     document.querySelectorAll('.btn-add-task').forEach((btn) => {
-        btn.classList.toggle('hidden', restrictSharedManagement);
+        btn.classList.toggle('hidden', !canCreateNewTasks);
     });
     const addClientBtn = document.getElementById('btn-add-client');
     if (addClientBtn) {
-        addClientBtn.classList.toggle('hidden', restrictSharedManagement);
+        addClientBtn.classList.toggle('hidden', !canManageSharedRecords());
     }
     const bulkActionsBtn = document.getElementById('btn-bulk-actions');
     if (bulkActionsBtn) {
-        bulkActionsBtn.classList.toggle('hidden', restrictSharedManagement);
+        bulkActionsBtn.classList.toggle('hidden', !canManageSharedRecords());
     }
 }
 
@@ -1099,13 +1272,100 @@ function updatePriorityChart(tasks, priorityList) {
 function updateStaffChart(tasks, staffList) {
     const ctx = document.getElementById('chart-staff').getContext('2d');
 
+    if (isOperationsSpecialist()) {
+        setChartCardTitle('chart-staff-title', 'My Workload Overview');
+
+        const activeTasks = tasks.filter((task) => task.status !== 'Completed');
+        const workloadBuckets = [
+            {
+                label: 'Overdue',
+                count: activeTasks.filter((task) => isOverdue(task.dueDate)).length,
+                color: '#dc2626'
+            },
+            {
+                label: 'Due Today',
+                count: activeTasks.filter((task) => !isOverdue(task.dueDate) && isToday(task.dueDate)).length,
+                color: '#d97706'
+            },
+            {
+                label: 'Due This Week',
+                count: activeTasks.filter((task) => {
+                    if (!task.dueDate || isOverdue(task.dueDate) || isToday(task.dueDate)) return false;
+                    const dueDate = new Date(task.dueDate);
+                    const today = new Date();
+                    dueDate.setHours(0, 0, 0, 0);
+                    today.setHours(0, 0, 0, 0);
+                    const diffDays = (dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24);
+                    return diffDays > 0 && diffDays <= 7;
+                }).length,
+                color: '#2563eb'
+            },
+            {
+                label: 'Later',
+                count: activeTasks.filter((task) => {
+                    if (!task.dueDate) return true;
+                    if (isOverdue(task.dueDate) || isToday(task.dueDate)) return false;
+                    const dueDate = new Date(task.dueDate);
+                    const today = new Date();
+                    dueDate.setHours(0, 0, 0, 0);
+                    today.setHours(0, 0, 0, 0);
+                    const diffDays = (dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24);
+                    return diffDays > 7;
+                }).length,
+                color: '#6b7280'
+            }
+        ].filter((bucket) => bucket.count > 0);
+
+        const labels = workloadBuckets.length ? workloadBuckets.map((bucket) => bucket.label) : ['No active tasks'];
+        const data = workloadBuckets.length ? workloadBuckets.map((bucket) => bucket.count) : [0];
+        const backgroundColor = workloadBuckets.length ? workloadBuckets.map((bucket) => bucket.color) : ['#e5e7eb'];
+
+        if (!charts.staff) {
+            charts.staff = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [{
+                        label: 'My Active Tasks',
+                        data,
+                        backgroundColor,
+                        borderRadius: 4
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { beginAtZero: true, grid: { borderDash: [2, 4] }, ticks: { stepSize: 1 } },
+                        y: { grid: { display: false } }
+                    }
+                }
+            });
+            return;
+        }
+
+        const chart = charts.staff;
+        const dataChanged = !areArraysEqual(chart.data.labels, labels) || !areArraysEqual(chart.data.datasets[0].data, data);
+        if (!dataChanged) return;
+        chart.data.labels = labels;
+        chart.data.datasets[0].label = 'My Active Tasks';
+        chart.data.datasets[0].data = data;
+        chart.data.datasets[0].backgroundColor = backgroundColor;
+        chart.update('none');
+        return;
+    }
+
+    setChartCardTitle('chart-staff-title', 'Workload by Staff');
+
     const workloadByStaff = new Map();
     const ensureStaffBucket = (staffValue) => {
         const normalizedKey = normalizeTaskStaffValue(staffValue);
         const label = getTaskStaffLabel(staffValue);
         if (!label) return null;
 
-        const labelKey = label.toLowerCase();
+        const labelKey = normalizeIdentityToken(label) || label.toLowerCase();
         if (!workloadByStaff.has(labelKey)) {
             workloadByStaff.set(labelKey, { key: normalizedKey || labelKey, name: label, count: 0 });
         }
@@ -1129,11 +1389,12 @@ function updateStaffChart(tasks, staffList) {
     });
 
     const workloads = Array.from(workloadByStaff.values())
-        .filter((entry) => entry.name)
+        .filter((entry) => entry.name && entry.count > 0)
         .sort((left, right) => (right.count - left.count) || left.name.localeCompare(right.name));
 
-    const labels = workloads.map(w => w.name);
-    const data = workloads.map(w => w.count);
+    const labels = workloads.length ? workloads.map(w => w.name) : ['No active tasks'];
+    const data = workloads.length ? workloads.map(w => w.count) : [0];
+    const backgroundColor = workloads.length ? '#3b82f6' : '#e5e7eb';
 
     if (!charts.staff) {
         charts.staff = new Chart(ctx, {
@@ -1143,7 +1404,7 @@ function updateStaffChart(tasks, staffList) {
                 datasets: [{
                     label: 'Active Tasks',
                     data,
-                    backgroundColor: '#3b82f6',
+                    backgroundColor,
                     borderRadius: 4
                 }]
             },
@@ -1165,12 +1426,15 @@ function updateStaffChart(tasks, staffList) {
     const dataChanged = !areArraysEqual(chart.data.labels, labels) || !areArraysEqual(chart.data.datasets[0].data, data);
     if (!dataChanged) return;
     chart.data.labels = labels;
+    chart.data.datasets[0].label = 'Active Tasks';
     chart.data.datasets[0].data = data;
+    chart.data.datasets[0].backgroundColor = backgroundColor;
     chart.update('none');
 }
 
 function updateClientChart(tasks) {
     const ctx = document.getElementById('chart-client').getContext('2d');
+    setChartCardTitle('chart-client-title', isOperationsSpecialist() ? 'My Client Activity' : 'Client Activity');
 
     // Get unique clients and count active tasks
     const clientMap = {};
@@ -1208,6 +1472,7 @@ function updateClientChart(tasks) {
     const finalColors = counts.length > 0
         ? ['#2563eb', '#7c3aed', '#059669', '#d97706', '#dc2626', '#6b7280']
         : ['#e5e7eb'];
+    const legendPosition = finalLabels.length <= 3 ? 'bottom' : 'right';
 
     if (!charts.client) {
         charts.client = new Chart(ctx, {
@@ -1224,7 +1489,7 @@ function updateClientChart(tasks) {
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: {
-                    legend: { position: 'right', labels: { boxWidth: 12, font: { family: 'Inter' } } }
+                    legend: { position: legendPosition, labels: { boxWidth: 12, font: { family: 'Inter' } } }
                 }
             }
         });
@@ -1237,6 +1502,7 @@ function updateClientChart(tasks) {
     chart.data.labels = finalLabels;
     chart.data.datasets[0].data = finalData;
     chart.data.datasets[0].backgroundColor = finalColors;
+    chart.options.plugins.legend.position = legendPosition;
     chart.update('none');
 }
 
@@ -1368,6 +1634,7 @@ function renderKanban(state) {
     cols.forEach(col => {
         const instance = new Sortable(col, {
             group: 'kanban', // set both lists to same group
+            draggable: '.kanban-task-card.task-card-draggable',
             animation: 150,
             ghostClass: 'sortable-ghost',
             delay: window.innerWidth < 768 ? 200 : 0, // delay on mobile to allow scrolling
@@ -1419,22 +1686,25 @@ function createKanbanCard(task) {
     const safeStaff = safe(getTaskStaffLabel(task.staff));
     const safeWaitingFor = safe(task.waitingFor || '');
     const safeStaffInitial = safe(getTaskStaffInitial(task.staff));
-    const readOnlyTaskView = !canManageSharedRecords();
+    const taskMode = canEditTaskDetails(task)
+        ? 'edit'
+        : (canUpdateTaskStatus(task) ? 'status' : 'view');
+    const dragClass = canDragTask(task) ? 'task-card-draggable cursor-grab active:cursor-grabbing' : 'task-card-static cursor-pointer';
     const lock = getTaskLockInfo(task.id);
     const lockBadge = lock
         ? `<div class="absolute top-2 left-2 text-[10px] px-2 py-1 rounded-full bg-red-50 text-red-600 border border-red-200">Editing: ${safe(lock.lockedByName || lock.lockedBy)}</div>`
         : '';
     const lockClass = lock ? 'opacity-75 border-red-200' : '';
-    const quickActionHtml = readOnlyTaskView
+    const quickActionHtml = taskMode === 'view'
         ? ''
         : `
             <div class="absolute ${lock ? 'top-10' : 'top-2'} right-2 opacity-0 group-hover:opacity-100 transition flex gap-1 bg-white rounded-md shadow-sm border border-gray-100 p-0.5 z-10">
-                <button class="p-1 text-gray-400 hover:text-primary rounded" onclick="event.stopPropagation(); openTaskModal(${safeTaskId})"><i data-lucide="edit-2" class="w-3.5 h-3.5"></i></button>
+                <button class="p-1 text-gray-400 hover:text-primary rounded" onclick="event.stopPropagation(); openTaskModal(${safeTaskId})" title="${taskMode === 'edit' ? 'Edit Task' : 'Update Status'}"><i data-lucide="${taskMode === 'edit' ? 'edit-2' : 'check-circle'}" class="w-3.5 h-3.5"></i></button>
             </div>
         `;
 
     return `
-        <div class="bg-white p-3 rounded-lg shadow-sm hover:shadow-md cursor-grab active:cursor-grabbing border items-center border-l-4 border-y-gray-200 border-r-gray-200 ${priorityColor} ${lockClass} transition group relative" data-id="${safeTaskId}" onclick="openTaskModal(${safeTaskId}, ${readOnlyTaskView ? '{viewOnly: true}' : '{}'})">
+        <div class="kanban-task-card bg-white p-3 rounded-lg shadow-sm hover:shadow-md border items-center border-l-4 border-y-gray-200 border-r-gray-200 ${priorityColor} ${lockClass} ${dragClass} transition group relative" data-id="${safeTaskId}" onclick="openTaskModal(${safeTaskId})">
             ${lockBadge}
             ${quickActionHtml}
 
@@ -1472,7 +1742,6 @@ let currentSearch = '';
 function renderAllTasksList(state) {
     const tbody = document.getElementById('tasks-table-body');
     if (!tbody) return;
-    const readOnlyTaskView = !canManageSharedRecords();
 
     let tasks = [...state.tasks];
 
@@ -1526,6 +1795,9 @@ function renderAllTasksList(state) {
         const safeStaffInitial = safe(getTaskStaffInitial(task.staff));
         const safeStatus = safe(task.status);
         const safePriority = safe(task.priority);
+        const canEdit = canEditTaskDetails(task);
+        const canDelete = canDeleteTask(task);
+        const canUpdateStatus = canUpdateTaskStatus(task);
 
         html += `
             <tr class="hover:bg-gray-50 transition border-b border-gray-100 group">
@@ -1542,7 +1814,7 @@ function renderAllTasksList(state) {
                     ${safeProject}
                 </td>
                 <td class="px-4 py-3 min-w-[200px]">
-                    <div class="font-medium text-gray-800 w-full truncate max-w-xs cursor-pointer hover:text-primary hover:underline hover-active" onclick="openTaskModal(${safeTaskId}, {viewOnly: true})">${safeTaskName}</div>
+                    <div class="font-medium text-gray-800 w-full truncate max-w-xs cursor-pointer hover:text-primary hover:underline hover-active" onclick="openTaskModal(${safeTaskId})">${safeTaskName}</div>
                 </td>
                 <td class="px-4 py-3 whitespace-nowrap">
                     <div class="flex items-center gap-2 text-gray-700">
@@ -1567,14 +1839,24 @@ function renderAllTasksList(state) {
                 </td>
                 <td class="px-4 py-3 whitespace-nowrap text-right text-sm font-medium">
                     <div class="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        ${readOnlyTaskView ? '' : `
+                        ${canEdit ? `
                             <button class="text-gray-400 hover:text-primary transition p-1" onclick="openTaskModal(${safeTaskId})" title="Edit">
                                 <i data-lucide="edit" class="w-4 h-4"></i>
                             </button>
+                        ` : canUpdateStatus ? `
+                            <button class="text-gray-400 hover:text-green-600 transition p-1" onclick="openTaskModal(${safeTaskId})" title="Update Status">
+                                <i data-lucide="check-circle" class="w-4 h-4"></i>
+                            </button>
+                        ` : `
+                            <button class="text-gray-400 hover:text-primary transition p-1" onclick="openTaskModal(${safeTaskId})" title="View">
+                                <i data-lucide="eye" class="w-4 h-4"></i>
+                            </button>
+                        `}
+                        ${canDelete ? `
                             <button class="text-gray-400 hover:text-red-500 transition p-1" onclick="deleteSingleTask(${safeTaskId})" title="Delete">
                                 <i data-lucide="trash-2" class="w-4 h-4"></i>
                             </button>
-                        `}
+                        ` : ''}
                     </div>
                 </td>
             </tr>
@@ -1834,17 +2116,16 @@ function createTodayCard(task) {
     const safeProject = safe(task.project || '');
     const safeNotes = safe(task.notes || '');
     const safeStaff = safe(getTaskStaffLabel(task.staff));
-    const readOnlyTaskView = !canManageSharedRecords();
-    const primaryAction = readOnlyTaskView
+    const primaryAction = canUpdateTaskStatus(task)
         ? `
-            <button onclick="openTaskModal(${safeTaskId}, {viewOnly: true})" class="flex-1 sm:flex-none px-3 py-1.5 bg-white text-gray-700 hover:bg-gray-50 border border-gray-300 rounded-md text-sm font-medium transition flex items-center justify-center gap-1">
+            <button onclick="markAsComplete(${safeTaskId})" class="flex-1 sm:flex-none px-3 py-1.5 bg-green-50 text-green-700 hover:bg-green-100 border border-green-200 rounded-md text-sm font-medium transition flex items-center justify-center gap-1">
+                <i data-lucide="check" class="w-4 h-4"></i> Complete
+            </button>
+            <button onclick="openTaskModal(${safeTaskId})" class="flex-1 sm:flex-none px-3 py-1.5 bg-white text-gray-700 hover:bg-gray-50 border border-gray-300 rounded-md text-sm font-medium transition flex items-center justify-center gap-1">
                 <i data-lucide="eye" class="w-4 h-4"></i> View
             </button>
         `
         : `
-            <button onclick="markAsComplete(${safeTaskId})" class="flex-1 sm:flex-none px-3 py-1.5 bg-green-50 text-green-700 hover:bg-green-100 border border-green-200 rounded-md text-sm font-medium transition flex items-center justify-center gap-1">
-                <i data-lucide="check" class="w-4 h-4"></i> Complete
-            </button>
             <button onclick="openTaskModal(${safeTaskId})" class="flex-1 sm:flex-none px-3 py-1.5 bg-white text-gray-700 hover:bg-gray-50 border border-gray-300 rounded-md text-sm font-medium transition flex items-center justify-center gap-1">
                 <i data-lucide="eye" class="w-4 h-4"></i> View
             </button>
@@ -1861,7 +2142,7 @@ function createTodayCard(task) {
                         <span class="status-badge ${getStatusColorClass(task.status)}">${safeStatus}</span>
                     </div>
                     
-                    <h4 class="text-lg font-bold text-gray-800 leading-tight mb-1 cursor-pointer hover:text-primary hover:underline" onclick="openTaskModal(${safeTaskId}, ${readOnlyTaskView ? '{viewOnly: true}' : '{}'})">${safeTaskName}</h4>
+                    <h4 class="text-lg font-bold text-gray-800 leading-tight mb-1 cursor-pointer hover:text-primary hover:underline" onclick="openTaskModal(${safeTaskId})">${safeTaskName}</h4>
                     <p class="text-sm text-gray-600 font-medium"><i data-lucide="home" class="w-4 h-4 inline mr-1 text-gray-400"></i>${safeClient} ${task.project ? `&rsaquo; ${safeProject}` : ''}</p>
                     ${task.notes ? `<p class="text-sm text-gray-500 mt-2 line-clamp-1 italic bg-gray-50 p-2 rounded">"${safeNotes}"</p>` : ''}
                 </div>
@@ -1888,12 +2169,12 @@ function createTodayCard(task) {
 
 // Global action handler
 window.markAsComplete = async function (taskId) {
-    if (!canManageSharedRecords()) {
-        showNotification('Read-only Access', 'Operations Specialists can view tasks but cannot change their status.', 'warning');
+    const task = store.state.tasks.find(item => parseInt(item.id) === parseInt(taskId));
+    if (!task || !canUpdateTaskStatus(task)) {
+        showNotification('Access Restricted', 'You can only complete tasks assigned to you.', 'warning');
         return;
     }
     if (confirm('Mark this task as completed?')) {
-        const task = store.state.tasks.find(item => parseInt(item.id) === parseInt(taskId));
         const previousStatus = task?.status;
         try {
             await store.updateTaskStatus(taskId, 'Completed');
@@ -2131,12 +2412,13 @@ function setupFormHandlers() {
 }
 
 window.deleteSingleTask = async function (taskId) {
-    if (!canManageSharedRecords()) {
-        showNotification('Read-only Access', 'Operations Specialists can view tasks but cannot delete them.', 'warning');
+    const task = store.state.tasks.find(item => parseInt(item.id) === parseInt(taskId));
+    if (!task || !canDeleteTask(task)) {
+        showNotification('Access Restricted', 'You can only delete tasks that you created.', 'warning');
         return;
     }
     if (confirm(`Are you sure you want to delete Task #${taskId}?`)) {
-        const snapshot = cloneTask(store.state.tasks.find(task => parseInt(task.id) === parseInt(taskId)));
+        const snapshot = cloneTask(task);
         try {
             await store.deleteTasks([taskId]);
             if (snapshot) {
@@ -2202,8 +2484,29 @@ function initModals() {
     // Form Submit
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
-        if (!canManageSharedRecords()) {
-            showNotification('Read-only Access', 'Operations Specialists cannot create or edit shared tasks.', 'warning');
+        const taskId = parseInt(document.getElementById('task-id').value);
+        const existingTask = Number.isFinite(taskId)
+            ? cloneTask(store.state.tasks.find(item => parseInt(item.id) === taskId))
+            : null;
+        const modalMode = form.dataset.mode || (existingTask ? 'edit' : 'create');
+
+        if (!existingTask && !canCreateTasks()) {
+            showNotification('Access Restricted', 'You do not have permission to create tasks.', 'warning');
+            return;
+        }
+
+        if (existingTask && modalMode === 'view') {
+            showNotification('Read-only Access', 'This task is view-only for your role.', 'warning');
+            return;
+        }
+
+        if (existingTask && modalMode === 'status-only' && !canUpdateTaskStatus(existingTask)) {
+            showNotification('Access Restricted', 'You can only update status on tasks assigned to you.', 'warning');
+            return;
+        }
+
+        if (existingTask && modalMode === 'edit' && !canEditTaskDetails(existingTask)) {
+            showNotification('Access Restricted', 'You can only edit task details on tasks you created.', 'warning');
             return;
         }
 
@@ -2215,13 +2518,47 @@ function initModals() {
         document.getElementById('save-task-text').textContent = 'Saving...';
 
         const formData = new FormData(form);
-        const taskData = Object.fromEntries(formData.entries());
-        const existingTask = taskData.id
-            ? cloneTask(store.state.tasks.find(item => parseInt(item.id) === parseInt(taskData.id)))
-            : null;
+        const formValues = Object.fromEntries(formData.entries());
+        const taskData = existingTask
+            ? {
+                id: existingTask.id,
+                client: existingTask.client,
+                project: existingTask.project || '',
+                task: existingTask.task,
+                staff: normalizeTaskStaffValue(existingTask.staff),
+                status: existingTask.status,
+                priority: existingTask.priority,
+                startDate: existingTask.startDate || '',
+                dueDate: existingTask.dueDate || '',
+                waitingFor: existingTask.waitingFor || '',
+                notes: existingTask.notes || '',
+                parentId: existingTask.parentId || ''
+            }
+            : {};
+
+        Object.assign(taskData, formValues);
+
+        if (isOperationsSpecialist()) {
+            taskData.staff = currentUser?.username || taskData.staff;
+        }
+
+        if (existingTask && modalMode === 'status-only' && taskData.status !== existingTask.status && taskData.status !== 'Completed') {
+            showNotification('Access Restricted', 'Operations Specialists can only mark assigned tasks as completed.', 'warning');
+            submitBtn.disabled = false;
+            spinner.classList.add('hidden');
+            document.getElementById('save-task-text').textContent = 'Update Status';
+            return;
+        }
 
         try {
-            const savedTask = await store.saveTask(taskData);
+            let savedTask;
+
+            if (existingTask && modalMode === 'status-only') {
+                await store.updateTaskStatus(existingTask.id, taskData.status);
+                savedTask = store.state.tasks.find(item => parseInt(item.id) === parseInt(existingTask.id));
+            } else {
+                savedTask = await store.saveTask(taskData);
+            }
 
             if (savedTask && !existingTask) {
                 pushHistoryEntry({ type: 'create', task: cloneTask(savedTask) });
@@ -2244,7 +2581,7 @@ function initModals() {
         } finally {
             submitBtn.disabled = false;
             spinner.classList.add('hidden');
-            document.getElementById('save-task-text').textContent = 'Save Task';
+            document.getElementById('save-task-text').textContent = modalMode === 'status-only' ? 'Update Status' : 'Save Task';
         }
     });
 
@@ -2299,6 +2636,10 @@ function initModals() {
     document.getElementById('btn-add-followup')?.addEventListener('click', () => {
         const currentTaskId = parseInt(document.getElementById('task-id').value);
         const task = store.state.tasks.find(t => t.id === currentTaskId);
+        if (task && !canCreateFollowUpTasks(task)) {
+            showNotification('Access Restricted', 'You can only add follow-up tasks for tasks assigned to you.', 'warning');
+            return;
+        }
         if (task) {
             closeTaskModal();
             setTimeout(() => {
@@ -2315,20 +2656,42 @@ function initModals() {
 }
 
 window.openTaskModal = async function (taskId = null, defaults = {}) {
-    if (!taskId && !canManageSharedRecords()) {
-        showNotification('Read-only Access', 'Operations Specialists cannot create new tasks.', 'warning');
+    const normalizedTaskId = taskId ? parseInt(taskId) : null;
+    const task = normalizedTaskId
+        ? store.state.tasks.find(t => t.id === normalizedTaskId)
+        : null;
+
+    if (normalizedTaskId && !task) {
+        showNotification('Task Not Found', `Task #${normalizedTaskId} is no longer available.`, 'warning');
         return;
     }
-    if (taskId && !defaults.viewOnly && !canManageSharedRecords()) {
-        defaults = { ...defaults, viewOnly: true };
+
+    if (!normalizedTaskId && !canCreateTasks()) {
+        showNotification('Access Restricted', 'You do not have permission to create tasks.', 'warning');
+        return;
     }
+
+    if (defaults.parentId) {
+        const parentTask = store.state.tasks.find(t => t.id === parseInt(defaults.parentId));
+        if (parentTask && !canCreateFollowUpTasks(parentTask)) {
+            showNotification('Access Restricted', 'You can only add follow-up tasks for tasks assigned to you.', 'warning');
+            return;
+        }
+    }
+
+    const detailEditAllowed = task ? canEditTaskDetails(task) : canCreateTasks();
+    const statusUpdateAllowed = task ? canUpdateTaskStatus(task) : false;
+    const viewOnlyMode = Boolean(defaults.viewOnly || (task && !detailEditAllowed && !statusUpdateAllowed));
+    const statusOnlyMode = Boolean(task && !viewOnlyMode && (defaults.statusOnly || (!detailEditAllowed && usesStatusOnlyTaskMode(task))));
+    defaults = { ...defaults, viewOnly: viewOnlyMode, statusOnly: statusOnlyMode };
 
     const modalBackdrop = document.getElementById('modal-backdrop');
     const taskModal = document.getElementById('modal-task');
     const form = document.getElementById('task-form');
     form.reset();
+    form.dataset.mode = task ? (defaults.viewOnly ? 'view' : (defaults.statusOnly ? 'status-only' : 'edit')) : 'create';
 
-    if (currentLockedTaskId && (!taskId || parseInt(taskId) !== parseInt(currentLockedTaskId))) {
+    if (currentLockedTaskId && (!normalizedTaskId || normalizedTaskId !== parseInt(currentLockedTaskId))) {
         await store.releaseTaskLock(currentLockedTaskId);
         currentLockedTaskId = null;
     }
@@ -2338,15 +2701,10 @@ window.openTaskModal = async function (taskId = null, defaults = {}) {
     }
 
     const fields = ['task-client', 'task-project', 'task-name', 'task-staff', 'task-status', 'task-priority', 'task-start-date', 'task-due-date', 'task-waiting', 'task-notes'];
-    fields.forEach(f => {
-        const el = document.getElementById(f);
-        if (el) {
-            el.disabled = false;
-            el.classList.remove('bg-gray-50', 'text-gray-500', 'cursor-not-allowed', 'border-transparent');
-            el.classList.add('border-gray-300');
-        }
-    });
+    setTaskStatusOptions(task || null);
+    fields.forEach((fieldId) => setTaskFieldDisabled(fieldId, false));
     document.getElementById('btn-save-task').classList.remove('hidden');
+    document.getElementById('save-task-text').textContent = 'Save Task';
 
     document.getElementById('task-activity-container').classList.add('hidden');
     document.getElementById('task-children-container').classList.add('hidden');
@@ -2355,29 +2713,31 @@ window.openTaskModal = async function (taskId = null, defaults = {}) {
     document.getElementById('btn-add-followup')?.classList.add('hidden');
     document.getElementById('task-parent-id').value = '';
 
-    if (taskId) {
+    if (normalizedTaskId) {
         if (!defaults.viewOnly && store.isBackendReady()) {
             try {
-                await store.acquireTaskLock(taskId, 75);
-                currentLockedTaskId = parseInt(taskId);
+                await store.acquireTaskLock(normalizedTaskId, 75);
+                currentLockedTaskId = normalizedTaskId;
                 taskLockRefreshTimer = setInterval(() => {
-                    store.acquireTaskLock(taskId, 75).catch(() => {});
+                    store.acquireTaskLock(normalizedTaskId, 75).catch(() => {});
                 }, 30000);
             } catch (error) {
                 defaults.viewOnly = true;
+                form.dataset.mode = 'view';
                 const lockMessage = error?.detail?.message || 'Another user is editing this task right now.';
                 showNotification('Task Locked', lockMessage, 'warning');
             }
         }
 
         // Edit mode
-        document.getElementById('modal-task-title').textContent = 'Edit Task';
-        document.getElementById('modal-task-id').textContent = `#${taskId}`;
+        document.getElementById('modal-task-title').textContent = defaults.statusOnly ? 'Update Task Status' : 'Edit Task';
+        document.getElementById('modal-task-id').textContent = `#${normalizedTaskId}`;
         document.getElementById('modal-task-id').classList.remove('hidden');
 
-        const task = store.state.tasks.find(t => t.id === parseInt(taskId));
         if (task) {
-            document.getElementById('btn-add-followup')?.classList.remove('hidden');
+            if (canCreateFollowUpTasks(task)) {
+                document.getElementById('btn-add-followup')?.classList.remove('hidden');
+            }
 
             // Link visualization check
             if (task.parentId) {
@@ -2392,6 +2752,7 @@ window.openTaskModal = async function (taskId = null, defaults = {}) {
             document.getElementById('task-project').value = task.project || '';
             document.getElementById('task-name').value = task.task;
             document.getElementById('task-staff').value = normalizeTaskStaffValue(task.staff);
+            setTaskStatusOptions(task);
             document.getElementById('task-status').value = task.status;
             document.getElementById('task-priority').value = task.priority;
 
@@ -2454,6 +2815,7 @@ window.openTaskModal = async function (taskId = null, defaults = {}) {
         document.getElementById('modal-task-title').textContent = 'Add New Task';
         document.getElementById('modal-task-id').classList.add('hidden');
         document.getElementById('task-id').value = '';
+        setTaskStatusOptions(null);
 
         // Defaults
         if (defaults.status) {
@@ -2469,20 +2831,26 @@ window.openTaskModal = async function (taskId = null, defaults = {}) {
             document.getElementById('task-staff').value = normalizeTaskStaffValue(defaults.staff);
             document.getElementById('task-name').value = defaults.taskName;
         }
+
+        if (isOperationsSpecialist() && currentUser?.username) {
+            document.getElementById('task-staff').value = currentUser.username;
+        }
     }
 
     if (defaults.viewOnly) {
         document.getElementById('modal-task-title').textContent = 'Task Details (Read-only)';
         document.getElementById('btn-save-task').classList.add('hidden');
 
-        fields.forEach(f => {
-            const el = document.getElementById(f);
-            if (el) {
-                el.disabled = true;
-                el.classList.add('bg-gray-50', 'text-gray-500', 'cursor-not-allowed', 'border-transparent');
-                el.classList.remove('border-gray-300');
-            }
-        });
+        fields.forEach((fieldId) => setTaskFieldDisabled(fieldId, true));
+    } else if (defaults.statusOnly) {
+        document.getElementById('modal-task-title').textContent = 'Update Task Status';
+        document.getElementById('save-task-text').textContent = 'Update Status';
+        fields.filter((fieldId) => fieldId !== 'task-status').forEach((fieldId) => setTaskFieldDisabled(fieldId, true));
+    }
+
+    if (isOperationsSpecialist() && !defaults.viewOnly) {
+        document.getElementById('task-staff').value = currentUser?.username || document.getElementById('task-staff').value;
+        setTaskFieldDisabled('task-staff', true);
     }
 
     // Show modal with animation

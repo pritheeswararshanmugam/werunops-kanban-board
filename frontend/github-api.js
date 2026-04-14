@@ -115,16 +115,75 @@ const DEFAULT_AUTH_USERS = [
     { username: 'Radhakrishnan', passwordHash: 'f91b043302878951ce9258214033bd206ea0a92bb88931ba8bb6edb01b57d020', name: 'Radhakrishnan', role: 'User', initials: 'R', isActive: true },
 ];
 
+function normalizeIdentityToken(value) {
+    return String(value || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function calculateEditDistance(left, right) {
+    const start = String(left || '');
+    const end = String(right || '');
+    const rows = Array.from({ length: end.length + 1 }, (_, index) => index);
+
+    for (let startIndex = 1; startIndex <= start.length; startIndex += 1) {
+        let previousDiagonal = rows[0];
+        rows[0] = startIndex;
+
+        for (let endIndex = 1; endIndex <= end.length; endIndex += 1) {
+            const temp = rows[endIndex];
+            if (start[startIndex - 1] === end[endIndex - 1]) {
+                rows[endIndex] = previousDiagonal;
+            } else {
+                rows[endIndex] = Math.min(previousDiagonal, rows[endIndex - 1], rows[endIndex]) + 1;
+            }
+            previousDiagonal = temp;
+        }
+    }
+
+    return rows[end.length];
+}
+
 function resolveUserDirectoryEntry(users, value) {
-    const rawValue = String(value || '').trim().toLowerCase();
+    const rawValue = String(value || '').trim();
     if (!rawValue) return null;
 
     const entries = Array.isArray(users) ? users : [];
-    return entries.find((user) => {
+    const lowered = rawValue.toLowerCase();
+    const exact = entries.find((user) => {
         const username = String(user?.username || '').trim().toLowerCase();
         const name = String(user?.name || '').trim().toLowerCase();
-        return username === rawValue || name === rawValue;
-    }) || null;
+        return username === lowered || name === lowered;
+    });
+    if (exact) return exact;
+
+    const normalizedValue = normalizeIdentityToken(rawValue);
+    if (!normalizedValue) return null;
+
+    const normalizedExact = entries.find((user) => {
+        const username = normalizeIdentityToken(user?.username);
+        const name = normalizeIdentityToken(user?.name);
+        return username === normalizedValue || name === normalizedValue;
+    });
+    if (normalizedExact) return normalizedExact;
+
+    let bestMatch = null;
+    let bestScore = 0;
+
+    entries.forEach((user) => {
+        [user?.username, user?.name].forEach((candidate) => {
+            const candidateToken = normalizeIdentityToken(candidate);
+            if (!candidateToken) return;
+
+            const distance = calculateEditDistance(normalizedValue, candidateToken);
+            const maxLength = Math.max(normalizedValue.length, candidateToken.length, 1);
+            const score = 1 - (distance / maxLength);
+            if ((distance <= 1 || score >= 0.88) && score > bestScore) {
+                bestScore = score;
+                bestMatch = user;
+            }
+        });
+    });
+
+    return bestMatch;
 }
 
 function normalizeStaffIdentityFromUsers(users, value) {
