@@ -3,6 +3,9 @@ const { test, expect } = require('@playwright/test');
 const DEFAULT_FRONTEND_URL = 'https://pritheeswararshanmugam.github.io/werunops-kanban-board/';
 
 function runtimeConfig() {
+  const managerPassword = process.env.WERUNOPS_E2E_MANAGER_PASSWORD || '';
+  const userPassword = process.env.WERUNOPS_E2E_USER_PASSWORD || '';
+
   return {
     frontendUrl: process.env.WERUNOPS_LIVE_FRONTEND_URL || DEFAULT_FRONTEND_URL,
     accounts: [
@@ -19,22 +22,28 @@ function runtimeConfig() {
       {
         key: 'sudharshan',
         username: process.env.WERUNOPS_E2E_MANAGER_USERNAME || 'Sudhar',
-        password: process.env.WERUNOPS_E2E_MANAGER_PASSWORD || '654321',
+        password: managerPassword,
         displayName: 'Sudharshan',
         roleLabel: 'Operations Manager',
         staffChartTitle: 'Workload by Staff',
         clientChartTitle: 'Client Activity',
         canManageClients: true,
+        missingCredentialMessage: managerPassword
+          ? ''
+          : 'Set WERUNOPS_E2E_MANAGER_PASSWORD to validate the live Sudharshan login.',
       },
       {
         key: 'radhakrishnan',
         username: process.env.WERUNOPS_E2E_USER_USERNAME || 'Radhakrishnan',
-        password: process.env.WERUNOPS_E2E_USER_PASSWORD || '110495',
+        password: userPassword,
         displayName: 'Radhakrishnan',
         roleLabel: 'Operations Specialist',
         staffChartTitle: 'My Workload Overview',
         clientChartTitle: 'My Client Activity',
         canManageClients: false,
+        missingCredentialMessage: userPassword
+          ? ''
+          : 'Set WERUNOPS_E2E_USER_PASSWORD to validate the live Radhakrishnan login.',
       },
     ],
   };
@@ -74,6 +83,7 @@ test.use({
 for (const account of cfg.accounts) {
   test(`live profile login: ${account.displayName}`, async ({ page }) => {
     test.setTimeout(240_000);
+    test.skip(Boolean(account.missingCredentialMessage), account.missingCredentialMessage);
 
     await signIn(page, cfg, account);
 
