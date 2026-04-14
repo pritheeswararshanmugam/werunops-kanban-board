@@ -124,16 +124,16 @@
       "username": "Eshwar",
       "online": true,
       "status": "online",
-      "lastSeen": "2026-04-13T23:44:23.728610Z",
+      "lastSeen": "2026-04-14T00:17:24.130286Z",
       "browser": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.7632.6 Safari/537.36 Edg/145.0.7632.6",
       "device": "Web"
     }
   ],
   "sessions": [
     {
-      "id": "sess_a2b0bbdd4d66",
+      "id": "sess_1ac6572f5ab5",
       "username": "Eshwar",
-      "loginTime": "2026-04-13T23:44:23.655069Z",
+      "loginTime": "2026-04-14T00:17:24.063476Z",
       "logoutTime": null,
       "durationSeconds": 0,
       "activeSeconds": 0,
