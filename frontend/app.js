@@ -7,6 +7,7 @@ let charts = {};
 let sortableInstances = [];
 let currentUser = null;
 const SESSION_KEY = 'currentUser';
+const LEGACY_SESSION_KEY = 'currentUser';
 let renderQueued = false;
 let pendingRenderState = null;
 let lastDashboardFingerprint = '';
@@ -160,7 +161,13 @@ function getTaskStaffInitial(value) {
 function getAssignableStaffOptions() {
     const activeUsers = getDirectoryUsers().filter((user) => user.isActive !== false);
     if (activeUsers.length > 0) {
-        return activeUsers.map((user) => ({ value: user.username, label: user.name }));
+        const optionsByLabel = new Map();
+        activeUsers.forEach((user) => {
+            const label = String(user.name || user.username).trim();
+            if (!label || optionsByLabel.has(label.toLowerCase())) return;
+            optionsByLabel.set(label.toLowerCase(), { value: user.username, label });
+        });
+        return Array.from(optionsByLabel.values()).sort((left, right) => left.label.localeCompare(right.label));
     }
 
     const fallbackStaff = Array.isArray(store?.state?.config?.staff) ? store.state.config.staff : [];
@@ -510,7 +517,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         store.stopBackendSyncPolling?.();
         stopSessionActivityTracking();
         currentUser = null;
-        localStorage.removeItem(SESSION_KEY);
+        clearSession();
         window.location.hash = '#/login';
         showNotification('Session Expired', 'Please sign in again.', 'warning');
     });
@@ -640,7 +647,7 @@ function initNavigation() {
     function handleRoute() {
         let hash = window.location.hash;
         if (!hash || hash === '#/') {
-            hash = localStorage.getItem(SESSION_KEY) ? '#/dashboard' : '#/login';
+            hash = readSession() ? '#/dashboard' : '#/login';
         }
 
         const hasSession = !!currentUser || !!readSession();
@@ -1093,24 +1100,31 @@ function updateStaffChart(tasks, staffList) {
     const ctx = document.getElementById('chart-staff').getContext('2d');
 
     const workloadByStaff = new Map();
+    const ensureStaffBucket = (staffValue) => {
+        const normalizedKey = normalizeTaskStaffValue(staffValue);
+        const label = getTaskStaffLabel(staffValue);
+        if (!label) return null;
+
+        const labelKey = label.toLowerCase();
+        if (!workloadByStaff.has(labelKey)) {
+            workloadByStaff.set(labelKey, { key: normalizedKey || labelKey, name: label, count: 0 });
+        }
+        return workloadByStaff.get(labelKey);
+    };
+
     getAssignableStaffOptions().forEach((staff) => {
-        workloadByStaff.set(staff.value, { key: staff.value, name: staff.label, count: 0 });
+        ensureStaffBucket(staff.value);
     });
 
     (Array.isArray(staffList) ? staffList : []).forEach((staff) => {
-        const key = normalizeTaskStaffValue(staff);
-        if (!key || workloadByStaff.has(key)) return;
-        workloadByStaff.set(key, { key, name: getTaskStaffLabel(staff), count: 0 });
+        ensureStaffBucket(staff);
     });
 
     tasks.forEach((task) => {
-        const key = normalizeTaskStaffValue(task.staff);
-        if (!key) return;
-        if (!workloadByStaff.has(key)) {
-            workloadByStaff.set(key, { key, name: getTaskStaffLabel(task.staff), count: 0 });
-        }
+        const entry = ensureStaffBucket(task.staff);
+        if (!entry) return;
         if (task.status !== 'Completed') {
-            workloadByStaff.get(key).count += 1;
+            entry.count += 1;
         }
     });
 
@@ -2674,13 +2688,16 @@ async function ensureBackendSession() {
 }
 
 function persistSession(session) {
-    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
 }
 
 function readSession() {
     try {
-        const raw = localStorage.getItem(SESSION_KEY);
-        if (!raw) return null;
+        const raw = sessionStorage.getItem(SESSION_KEY);
+        if (!raw) {
+            localStorage.removeItem(LEGACY_SESSION_KEY);
+            return null;
+        }
         const parsed = JSON.parse(raw);
         if (!parsed || !parsed.username || !parsed.name) return null;
         parsed.presenceStatus = normalizePresenceStatus(parsed.presenceStatus || 'online');
@@ -2688,6 +2705,11 @@ function readSession() {
     } catch (error) {
         return null;
     }
+}
+
+function clearSession() {
+    sessionStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem(LEGACY_SESSION_KEY);
 }
 
 async function authenticateLegacyUser(usernameInput, passwordInput) {
@@ -2869,7 +2891,7 @@ async function setupAuth() {
         if (store.isBackendReady()) {
             const validBackendSession = await validateBackendSessionToken(storedSession);
             if (!validBackendSession) {
-                localStorage.removeItem(SESSION_KEY);
+                clearSession();
                 currentUser = null;
                 window.location.hash = '#/login';
             } else {
@@ -2896,7 +2918,7 @@ async function setupAuth() {
                 setCurrentPresenceStatus(currentUser.presenceStatus || 'online', { silent: true, sync: false });
                 updateHeaderProfile();
             } else {
-                localStorage.removeItem(SESSION_KEY);
+                clearSession();
                 window.location.hash = '#/login';
             }
         }
@@ -3000,7 +3022,7 @@ async function setupAuth() {
         }
         
         currentUser = null;
-        localStorage.removeItem(SESSION_KEY);
+        clearSession();
         
         window.location.hash = '#/login';
         document.getElementById('login-password').value = '';

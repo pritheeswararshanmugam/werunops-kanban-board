@@ -63,6 +63,24 @@ function clearBackendApiBase() {
     localStorage.removeItem('werunops_backend_api_base');
 }
 
+function readCurrentSession() {
+    try {
+        const raw = sessionStorage.getItem('currentUser');
+        if (!raw) {
+            localStorage.removeItem('currentUser');
+            return null;
+        }
+        return JSON.parse(raw);
+    } catch (error) {
+        return null;
+    }
+}
+
+function clearCurrentSession() {
+    sessionStorage.removeItem('currentUser');
+    localStorage.removeItem('currentUser');
+}
+
 function normalizePresenceStatusValue(status, online = true) {
     const raw = String(status || '').trim().toLowerCase();
     if (raw === 'away' || raw === 'break' || raw === 'away / break' || raw === 'away/break') return 'away';
@@ -270,9 +288,8 @@ class DataStore {
 
     getBackendToken() {
         try {
-            const currentUserRaw = localStorage.getItem('currentUser');
-            if (!currentUserRaw) return null;
-            const currentUser = JSON.parse(currentUserRaw);
+            const currentUser = readCurrentSession();
+            if (!currentUser) return null;
             return currentUser?.accessToken || null;
         } catch (error) {
             return null;
@@ -296,7 +313,7 @@ class DataStore {
             if (response.ok) return true;
         } catch (error) { }
 
-        localStorage.removeItem('currentUser');
+        clearCurrentSession();
         return false;
     }
 
@@ -331,7 +348,7 @@ class DataStore {
             err.detail = detail;
 
             if (response.status === 401) {
-                localStorage.removeItem('currentUser');
+                clearCurrentSession();
                 if (typeof window !== 'undefined') {
                     window.dispatchEvent(new CustomEvent('werunops-auth-invalid', { detail: { status: response.status } }));
                 }
@@ -1499,7 +1516,7 @@ class DataStore {
 // Auth helper
 function getCurrentUser() {
     try {
-        const u = JSON.parse(localStorage.getItem('currentUser'));
+        const u = readCurrentSession();
         return u ? u.name : 'Unknown';
     } catch (e) {
         return 'Unknown';

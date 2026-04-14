@@ -143,7 +143,8 @@ test('operations and staff management flows honor the new auth, presence, and RB
 
   const specialistToken = await page.evaluate(() => {
     try {
-      return JSON.parse(localStorage.getItem('currentUser') || 'null')?.accessToken || null;
+      const raw = sessionStorage.getItem('currentUser') || localStorage.getItem('currentUser') || 'null';
+      return JSON.parse(raw)?.accessToken || null;
     } catch (error) {
       return null;
     }

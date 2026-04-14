@@ -26,7 +26,7 @@ async function signIn(page, cfg) {
 async function getSessionData(page) {
   return page.evaluate(() => {
     try {
-      const raw = localStorage.getItem('currentUser');
+      const raw = sessionStorage.getItem('currentUser') || localStorage.getItem('currentUser');
       if (!raw) return null;
       return JSON.parse(raw);
     } catch {

@@ -44,7 +44,7 @@ async function selectFirstAvailableOption(page, selector) {
 async function accessTokenFromSession(page) {
   return page.evaluate(() => {
     try {
-      const raw = localStorage.getItem('currentUser');
+      const raw = sessionStorage.getItem('currentUser') || localStorage.getItem('currentUser');
       if (!raw) return null;
       const parsed = JSON.parse(raw);
       return parsed?.accessToken || null;

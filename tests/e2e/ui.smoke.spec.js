@@ -27,6 +27,87 @@ test('user can sign in and land on dashboard', async ({ page }) => {
   await expect(page.locator('#view-dashboard h2')).toHaveText('Dashboard');
 });
 
+test('login session is stored only for the current browser session', async ({ page }) => {
+  await signIn(page);
+
+  const storageState = await page.evaluate(() => ({
+    sessionUser: sessionStorage.getItem('currentUser'),
+    localUser: localStorage.getItem('currentUser'),
+  }));
+
+  expect(storageState.sessionUser).toBeTruthy();
+  expect(storageState.localUser).toBeNull();
+
+  await page.reload();
+  await expect(page.locator('#main-header')).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('#header-user-name')).toContainText('Pritheeswarar');
+});
+
+test('stale persistent localStorage session is ignored on first load', async ({ page }) => {
+  await page.evaluate(() => {
+    sessionStorage.clear();
+    localStorage.setItem('currentUser', JSON.stringify({
+      username: 'Eshwar',
+      name: 'Pritheeswarar',
+      role: 'Admin',
+      initials: 'P',
+      accessToken: 'stale-token',
+    }));
+  });
+
+  await page.reload();
+
+  await expect(page.locator('#login-form')).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('#main-header')).toBeHidden();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('currentUser'))).toBeNull();
+});
+
+test('workload chart merges duplicate staff labels into a single row', async ({ page }) => {
+  await signIn(page);
+
+  const chartState = await page.evaluate(() => {
+    const clonedState = JSON.parse(JSON.stringify(store.state));
+    clonedState.authUsers = [
+      ...(clonedState.authUsers || []),
+      {
+        username: 'Sudharshan',
+        name: 'Sudharshan',
+        role: 'Manager',
+        initials: 'S',
+        isActive: true,
+      },
+    ];
+    clonedState.config.staff = [...(clonedState.config?.staff || []), 'Sudhar', 'Sudharshan'];
+    clonedState.tasks = [
+      ...(clonedState.tasks || []),
+      {
+        ...(clonedState.tasks?.[0] || {}),
+        id: 99001,
+        task: 'Synthetic Sudhar Username Task',
+        staff: 'Sudhar',
+        status: 'New',
+      },
+      {
+        ...(clonedState.tasks?.[0] || {}),
+        id: 99002,
+        task: 'Synthetic Sudhar Display Task',
+        staff: 'Sudharshan',
+        status: 'New',
+      },
+    ];
+
+    renderAllViews(clonedState);
+    const chart = Chart.getChart(document.getElementById('chart-staff'));
+    return {
+      labels: [...(chart?.data?.labels || [])],
+      values: [...(chart?.data?.datasets?.[0]?.data || [])],
+    };
+  });
+
+  const sudharshanLabels = chartState.labels.filter((label) => label === 'Sudharshan');
+  expect(sudharshanLabels).toHaveLength(1);
+});
+
 test('user can create task from all tasks view', async ({ page }) => {
   const taskName = `Playwright E2E ${Date.now()}`;
   const dueDate = new Date(Date.now() + 3 * 86400000).toISOString().split('T')[0];
