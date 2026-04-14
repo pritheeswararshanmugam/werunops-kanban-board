@@ -104,6 +104,66 @@ test('live admin portal opens in a new tab', async ({ page }) => {
   await popup.close();
 });
 
+test('live auth session is scoped to the current browser session', async ({ page }) => {
+  const cfg = runtimeConfig();
+
+  await signIn(page, cfg);
+
+  const storageState = await page.evaluate(() => ({
+    sessionUser: sessionStorage.getItem('currentUser'),
+    localUser: localStorage.getItem('currentUser'),
+  }));
+
+  expect(storageState.sessionUser).toBeTruthy();
+  expect(storageState.localUser).toBeNull();
+
+  await page.reload();
+  await expect(page.locator('#main-content')).toBeVisible({ timeout: 30_000 });
+});
+
+test('live stale persistent localStorage session is ignored on first load', async ({ page }) => {
+  const cfg = runtimeConfig();
+
+  await page.goto(cfg.frontendUrl, { waitUntil: 'domcontentloaded' });
+  await expect(page.locator('#login-form')).toBeVisible({ timeout: 30_000 });
+
+  await page.evaluate(() => {
+    sessionStorage.clear();
+    localStorage.setItem('currentUser', JSON.stringify({
+      username: 'Eshwar',
+      name: 'Pritheeswarar',
+      role: 'Admin',
+      initials: 'P',
+      accessToken: 'stale-token',
+    }));
+  });
+
+  await page.reload({ waitUntil: 'domcontentloaded' });
+
+  await expect(page.locator('#login-form')).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('#main-header')).toBeHidden();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('currentUser'))).toBeNull();
+});
+
+test('live workload chart should not render duplicate staff labels', async ({ page }) => {
+  const cfg = runtimeConfig();
+
+  await signIn(page, cfg);
+
+  await expect.poll(async () => page.evaluate(() => {
+    const chart = typeof Chart !== 'undefined' ? Chart.getChart(document.getElementById('chart-staff')) : null;
+    return Array.isArray(chart?.data?.labels) ? chart.data.labels.length : 0;
+  }), { timeout: 30_000 }).toBeGreaterThan(0);
+
+  const labels = await page.evaluate(() => {
+    const chart = typeof Chart !== 'undefined' ? Chart.getChart(document.getElementById('chart-staff')) : null;
+    return Array.isArray(chart?.data?.labels) ? [...chart.data.labels] : [];
+  });
+
+  const uniqueLabels = new Set(labels.map((label) => String(label)));
+  expect(uniqueLabels.size).toBe(labels.length);
+});
+
 test('live task assignee should not reset during background sync', async ({ page }) => {
   const cfg = runtimeConfig();
   const runId = Date.now();
