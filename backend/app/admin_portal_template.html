@@ -1018,7 +1018,7 @@
             el('btn-delete-filter').addEventListener('click', deleteSavedFilter);
             el('btn-export-json').addEventListener('click', exportFilteredJson);
             el('btn-export-csv').addEventListener('click', exportSessionsCsv);
-            el('btn-live-refresh').addEventListener('click', renderMonitoring);
+            el('btn-live-refresh').addEventListener('click', refreshOverviewData);
             el('btn-report-weekly').addEventListener('click', () => runReport('weekly-summary'));
             el('btn-report-monthly').addEventListener('click', () => runReport('monthly-attendance'));
             el('btn-report-login-history').addEventListener('click', () => runReport('login-history', state.user ? `?username=${encodeURIComponent(state.user)}` : ''));
@@ -1174,7 +1174,14 @@
                 await refreshSavedFilterOptions();
                 await renderAutomation();
                 await renderAudit();
-                setInterval(renderMonitoring, 30000);
+                setInterval(() => {
+                    refreshOverviewData().catch(() => {});
+                }, 15000);
+                document.addEventListener('visibilitychange', () => {
+                    if (document.visibilityState === 'visible') {
+                        refreshOverviewData().catch(() => {});
+                    }
+                });
             } catch (error) {
                 showError('Portal initialization failed. Refresh and retry from dashboard.');
             }

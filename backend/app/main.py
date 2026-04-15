@@ -83,6 +83,8 @@ PRESENCE_STATUS_ALIASES = {
     "offline": "offline",
 }
 
+PRESENCE_STALE_AFTER = timedelta(seconds=75)
+
 ROLE_CAPABILITIES = {
     "Admin": {
         "viewOverview": True,
@@ -800,13 +802,30 @@ def user_can_delete_task(task: TaskOut, user: UserProfile) -> bool:
 def user_can_update_task_status(task: TaskOut, user: UserProfile, next_status: str | None = None) -> bool:
     if user_has_global_visibility(user):
         return True
-    if not usernames_match(task.staff, user.username):
+    return usernames_match(task.staff, user.username)
+
+
+def presence_is_current(item: PresenceOut, now: datetime | None = None) -> bool:
+    if not item.online:
         return False
-    if task_created_by_user(task, user):
-        return True
-    if next_status is None:
-        return True
-    return next_status == task.status or next_status == "Completed"
+    current_time = now or datetime.now(UTC)
+    last_seen = item.lastSeen
+    if last_seen.tzinfo is None:
+        last_seen = last_seen.replace(tzinfo=UTC)
+    return (current_time - last_seen) <= PRESENCE_STALE_AFTER
+
+
+def scoped_presence_record(item: PresenceOut, user: UserProfile, now: datetime | None = None) -> PresenceOut:
+    is_current = presence_is_current(item, now)
+    expose_runtime_details = user_has_global_visibility(user)
+    return item.model_copy(
+        update={
+            "online": is_current,
+            "status": item.status if is_current else "offline",
+            "browser": item.browser if expose_runtime_details else None,
+            "device": item.device if expose_runtime_details else None,
+        }
+    )
 
 
 def normalize_specialist_task_staff(staff_value: Any, user: UserProfile) -> str:
@@ -825,10 +844,14 @@ def visible_clients_for_user(user: UserProfile, tasks: list[TaskOut] | None = No
 
 
 def visible_presence_for_user(user: UserProfile) -> list[PresenceOut]:
-    presence = list(store.presence.values())
+    now = datetime.now(UTC)
+    presence = [
+        scoped_presence_record(item, user, now)
+        for item in sorted(store.presence.values(), key=lambda value: value.username.lower())
+    ]
     if user_has_global_visibility(user):
         return presence
-    return [item for item in presence if usernames_match(item.username, user.username)]
+    return presence
 
 
 def scoped_sessions_for_user(user: UserProfile, username: str | None = None) -> list[SessionOut]:
@@ -1265,7 +1288,7 @@ def admin_operations(
 def admin_alerts(request: Request, _: UserProfile = Depends(current_admin_user)):
     now = datetime.now(UTC)
     alerts: list[dict[str, Any]] = []
-    online_users = sum(1 for item in store.presence.values() if item.online)
+    online_users = sum(1 for item in store.presence.values() if presence_is_current(item, now))
     today = now.date()
     today_duration_seconds = sum(item.durationSeconds for item in store.sessions.values() if item.loginTime.date() == today)
     completed_today = sum(
@@ -1944,7 +1967,7 @@ def patch_task_status(task_id: int, payload: TaskStatusPatch, request: Request, 
         raise HTTPException(status_code=404, detail="Task not found")
     ensure_user_can_access_task(task, user)
     if not user_can_update_task_status(task, user, payload.status):
-        raise HTTPException(status_code=403, detail="Operations Specialists can only mark assigned tasks as completed unless they created the task")
+        raise HTTPException(status_code=403, detail="Operations Specialists can only update status on tasks assigned to them")
     ensure_task_not_locked_by_other(task_id, user)
     if task.version != payload.version:
         raise HTTPException(status_code=409, detail={"code": "TASK_CONFLICT", "latest": jsonable_encoder(task.model_dump())})

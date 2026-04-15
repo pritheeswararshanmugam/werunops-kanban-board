@@ -200,8 +200,20 @@ test('operations and staff management flows honor the new auth, presence, and RB
   await expect(page.locator('#chart-staff-title')).toHaveText('My Workload Overview');
   await expect(page.locator('#chart-client-title')).toHaveText('My Client Activity');
 
+  await api(request, 'PUT', '/presence/me', {
+    token: adminToken,
+    data: {
+      online: true,
+      status: 'online',
+      browser: 'Playwright Admin Browser',
+      device: 'Admin Browser',
+    },
+  });
+
   await openUserMenu(page);
   await expect(page.locator('#btn-open-admin-portal')).toBeHidden();
+  const adminPresenceRow = page.locator('#header-presence-list > div').filter({ hasText: 'Pritheeswarar' }).first();
+  await expect.poll(async () => adminPresenceRow.textContent(), { timeout: 20_000 }).toContain('Online');
   await page.click('#btn-open-profile');
   await expect(page.locator('#profile-role')).toBeDisabled();
   await expect(page.locator('#profile-role')).toHaveValue('Operations Specialist');
@@ -225,7 +237,21 @@ test('operations and staff management flows honor the new auth, presence, and RB
   await expect(page.locator('#task-name')).toBeDisabled();
   await expect(page.locator('#task-status')).toBeEnabled();
   await expect(page.locator('#btn-add-followup')).toBeVisible();
-  await expect(page.locator('#task-status option')).toHaveCount(2);
+  const assignedTaskStatusOptions = await page.locator('#task-status option').allTextContents();
+  expect(assignedTaskStatusOptions).toEqual(expect.arrayContaining(['In Progress', 'Waiting Client', 'Completed']));
+  await page.selectOption('#task-status', 'Waiting Client');
+  await page.click('#btn-save-task');
+  await expect(page.locator('#modal-task')).toBeHidden({ timeout: 20_000 });
+  await expect(adminTaskRow).toContainText('Waiting Client');
+
+  const assignedTasksAfterStatusUpdate = await api(request, 'GET', `/tasks?client=${encodeURIComponent(clientName)}`, {
+    token: adminToken,
+  });
+  const assignedPrimaryTask = (assignedTasksAfterStatusUpdate.payload.data || []).find((task) => task.id === adminAssignedTask.payload.data.id);
+  expect(assignedPrimaryTask?.status).toBe('Waiting Client');
+
+  await adminTaskRow.locator('td:nth-child(5) div').click();
+  await expect(page.locator('#btn-add-followup')).toBeVisible();
 
   await page.click('#btn-add-followup');
   await expect(page.locator('#modal-task')).toBeVisible({ timeout: 15_000 });
@@ -294,16 +320,6 @@ test('operations and staff management flows honor the new auth, presence, and RB
   });
   expect(String(forbiddenTaskEdit.payload.detail)).toContain('only edit tasks they created');
 
-  const forbiddenStatusChange = await api(request, 'PATCH', `/tasks/${adminAssignedTask.payload.data.id}/status`, {
-    token: specialistToken,
-    expectedStatus: 403,
-    data: {
-      status: 'Waiting Client',
-      version: adminAssignedTask.payload.data.version,
-    },
-  });
-  expect(String(forbiddenStatusChange.payload.detail)).toContain('only mark assigned tasks as completed');
-
   const forbiddenDelete = await api(request, 'DELETE', `/tasks/${adminAssignedTask.payload.data.id}`, {
     token: specialistToken,
     expectedStatus: 403,
@@ -345,5 +361,15 @@ test('operations and staff management flows honor the new auth, presence, and RB
   await api(request, 'DELETE', `/clients/${createdClient.payload.data.id}`, {
     token: adminToken,
     expectedStatus: [200, 404],
+  });
+
+  await api(request, 'PUT', '/presence/me', {
+    token: adminToken,
+    data: {
+      online: false,
+      status: 'offline',
+      browser: 'Playwright Admin Browser',
+      device: 'Admin Browser',
+    },
   });
 });

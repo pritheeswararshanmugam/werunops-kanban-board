@@ -82,6 +82,7 @@ const PRESENCE_STATUS_META = {
         badgeClass: 'bg-white text-gray-500 border-gray-200'
     }
 };
+const PRESENCE_STALE_MS = 75 * 1000;
 let lastAwayReturnPromptAt = 0;
 
 function escapeHTML(value) {
@@ -294,15 +295,15 @@ function usesStatusOnlyTaskMode(task) {
 
 function canDragTask(task) {
     if (canManageSharedRecords()) return true;
-    return isOperationsSpecialist() && isTaskCreatedByCurrentUser(task);
+    return isOperationsSpecialist() && canUpdateTaskStatus(task);
 }
 
 function getAllowedTaskStatuses(task = null) {
     const statuses = Array.isArray(store?.state?.config?.statuses) ? [...store.state.config.statuses] : [];
-    if (!task || !isOperationsSpecialist() || isTaskCreatedByCurrentUser(task)) {
+    if (!task || !isOperationsSpecialist() || canUpdateTaskStatus(task)) {
         return statuses;
     }
-    return Array.from(new Set([String(task.status || '').trim(), 'Completed'].filter(Boolean)));
+    return Array.from(new Set([String(task.status || '').trim()].filter(Boolean)));
 }
 
 function getTaskModalOpenOptions(task) {
@@ -2542,14 +2543,6 @@ function initModals() {
             taskData.staff = currentUser?.username || taskData.staff;
         }
 
-        if (existingTask && modalMode === 'status-only' && taskData.status !== existingTask.status && taskData.status !== 'Completed') {
-            showNotification('Access Restricted', 'Operations Specialists can only mark assigned tasks as completed.', 'warning');
-            submitBtn.disabled = false;
-            spinner.classList.add('hidden');
-            document.getElementById('save-task-text').textContent = 'Update Status';
-            return;
-        }
-
         try {
             let savedTask;
 
@@ -3499,7 +3492,7 @@ function updateHeaderProfile() {
             
             if (presence && presence.online && presence.lastSeen) {
                 const diffObj = now - new Date(presence.lastSeen).getTime();
-                if (diffObj < 60000) {
+                if (diffObj < PRESENCE_STALE_MS) {
                     status = normalizePresenceStatus(presence.status || 'online');
                 }
             }
