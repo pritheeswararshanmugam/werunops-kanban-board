@@ -331,7 +331,6 @@
 
     <script id='portal-data' type='application/json'>__BOOTSTRAP_JSON__</script>
     <script>
-        window.__ADMIN_TOKEN__ = '__WERUNOPS_ADMIN_TOKEN__';
         const RAW = JSON.parse(document.getElementById('portal-data').textContent || '{}');
         const API_BASE = '/api/v1/admin';
         const PORTAL_UI_STATE_KEY = 'werunops_admin_portal_ui_v2';
@@ -451,9 +450,9 @@
         async function apiFetch(path, options = {}) {
             const response = await fetch(path, {
                 ...options,
+                credentials: 'same-origin',
                 headers: {
                     'Content-Type': 'application/json',
-                    Authorization: `Bearer ${window.__ADMIN_TOKEN__}`,
                     ...(options.headers || {}),
                 },
             });

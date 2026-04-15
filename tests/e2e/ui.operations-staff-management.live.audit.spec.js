@@ -195,6 +195,7 @@ test('live operations and staff management audit captures current auth, RBAC, pr
     popupUrl: popup.url(),
     usesAccessTokenQuery: /[?&]accessToken=/i.test(popup.url()),
   };
+  expect(report.observations.portal.usesAccessTokenQuery).toBeFalsy();
   report.screenshots.push(await saveScreenshot(popup, runDir, 'live-ops-admin-portal-launch'));
   await popup.close();
 

@@ -99,7 +99,8 @@ test('live admin portal opens in a new tab', async ({ page }) => {
   ]);
 
   await popup.waitForLoadState('domcontentloaded', { timeout: 30_000 });
-  await expect.poll(() => popup.url(), { timeout: 20_000 }).toMatch(/\/admin\/portal\?accessToken=/i);
+  await expect.poll(() => popup.url(), { timeout: 20_000 }).toMatch(/\/admin\/portal$/i);
+  expect(popup.url()).not.toContain('accessToken=');
 
   await popup.close();
 });

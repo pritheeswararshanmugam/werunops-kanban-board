@@ -145,7 +145,8 @@ test('operations and staff management flows honor the new auth, presence, and RB
     page.waitForEvent('popup', { timeout: 20_000 }),
     page.click('#btn-open-admin-portal'),
   ]);
-  await expect.poll(() => popup.url(), { timeout: 20_000 }).toMatch(/\/admin\/portal\?accessToken=/i);
+  await expect.poll(() => popup.url(), { timeout: 20_000 }).toMatch(/\/admin\/portal$/i);
+  expect(popup.url()).not.toContain('accessToken=');
   await popup.close();
 
   await openUserMenu(page);

@@ -81,7 +81,7 @@ test.describe('full backend coverage', () => {
         client: clientName,
         project: 'PW API Project',
         task: `PW API Task ${runId}`,
-        staff: 'Mubarak',
+        staff: 'Radhakrishnan',
         status: 'New',
         priority: 'Medium',
         startDate: '',
@@ -102,7 +102,7 @@ test.describe('full backend coverage', () => {
         client: clientName,
         project: 'PW API Project Updated',
         task: `PW API Task ${runId}`,
-        staff: 'Mubarak',
+        staff: 'Radhakrishnan',
         status: 'In Progress',
         priority: 'High',
         startDate: '',
@@ -130,7 +130,7 @@ test.describe('full backend coverage', () => {
         client: clientName,
         project: 'Conflict Update',
         task: `PW API Task ${runId}`,
-        staff: 'Mubarak',
+        staff: 'Radhakrishnan',
         status: 'In Progress',
         priority: 'High',
         startDate: '',
@@ -158,6 +158,16 @@ test.describe('full backend coverage', () => {
       data: { ttlSeconds: 120 },
     });
     expect(refreshedLock.payload.data.taskId).toBe(taskId);
+
+    const specialistToken = await login(request, 'Radhakrishnan', '110495');
+    const patchedWhileLocked = await api(request, 'PATCH', `/tasks/${taskId}/status`, {
+      token: specialistToken,
+      data: {
+        status: 'Waiting Supplier',
+        version: patchedTask.payload.data.version,
+      },
+    });
+    expect(patchedWhileLocked.payload.data.status).toBe('Waiting Supplier');
 
     await api(request, 'DELETE', `/locks/tasks/${taskId}`, { token });
 
@@ -260,7 +270,7 @@ test.describe('full backend coverage', () => {
     const runId = Date.now();
 
     const operations = await api(request, 'GET', '/admin/operations', { token: adminToken });
-    expect(operations.payload.data).toHaveProperty('summaryByUser');
+    expect(operations.payload.data).toHaveProperty('efficiencyByUser');
 
     const alerts = await api(request, 'GET', '/admin/alerts', { token: adminToken });
     expect(alerts.payload.data).toHaveProperty('alerts');

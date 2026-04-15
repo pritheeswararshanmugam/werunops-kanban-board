@@ -1,6 +1,6 @@
 /**
  * Firebase Realtime Database & Data Persistence Layer
- * Handles fetching and saving data to Firebase, with localStorage fallback.
+ * Handles fetching and saving data to Firebase, with IndexedDB-backed local fallback.
  */
 
 const RUNTIME_CONFIG = (typeof window !== 'undefined' && window.WERUNOPS_CONFIG)
@@ -107,6 +107,16 @@ function getRuntimePresenceState() {
     }
     return normalizePresenceRecord({ online: true, status: 'online', browser: navigator.userAgent, device: 'Web' });
 }
+
+const ADAPTIVE_POLLING_IDLE_AFTER_MS = 60 * 1000;
+const ADAPTIVE_POLLING_INTERVALS = {
+    taskLocks: { active: 5000, idle: 20000, hidden: 60000 },
+    backendSync: { active: 8000, idle: 25000, hidden: 90000 },
+    presenceHeartbeat: { active: 20000, idle: 30000, hidden: 60000 },
+    presenceListener: { active: 10000, idle: 25000, hidden: 60000 }
+};
+const LOCAL_STATE_CACHE_KEY = 'backoffice_state';
+const LOCAL_STATE_BACKUP_KEY = 'backoffice_state_backup';
 
 const DEFAULT_AUTH_USERS = [
     { username: 'Eshwar', passwordHash: 'f91b043302878951ce9258214033bd206ea0a92bb88931ba8bb6edb01b57d020', name: 'Pritheeswarar', role: 'Admin', initials: 'P', isActive: true },
@@ -322,8 +332,15 @@ class DataStore {
         this.taskLocksInterval = null;
         this.backendSyncInterval = null;
         this.backendSyncInFlight = null;
+        this.presenceInterval = null;
+        this.presenceListenerInterval = null;
         this.offlineQueueKey = 'werunops_offline_actions';
         this.failedOfflineQueueKey = 'werunops_offline_failed_actions';
+        this.persistence = typeof window !== 'undefined' ? window.WERUNOPS_PERSISTENCE || null : null;
+        this.persistenceReady = null;
+        this.lastUserActivityAt = Date.now();
+        this.pollingLifecycleBound = false;
+        this.bindAdaptivePollingLifecycle();
     }
 
     subscribe(listener) {
@@ -335,6 +352,174 @@ class DataStore {
 
     notify() {
         this.listeners.forEach(listener => listener(this.state));
+    }
+
+    async preparePersistence() {
+        if (this.persistenceReady) {
+            return this.persistenceReady;
+        }
+
+        const hydrate = this.persistence?.hydrate?.bind(this.persistence);
+        const keys = [LOCAL_STATE_CACHE_KEY, LOCAL_STATE_BACKUP_KEY, this.offlineQueueKey, this.failedOfflineQueueKey];
+        this.persistenceReady = Promise.resolve(hydrate ? hydrate(keys) : undefined).catch((error) => {
+            console.warn('IndexedDB hydration failed, continuing with localStorage fallback:', error);
+        });
+
+        return this.persistenceReady;
+    }
+
+    readPersistedJson(key, fallbackValue = null) {
+        try {
+            if (this.persistence?.getJSON) {
+                const value = this.persistence.getJSON(key, fallbackValue);
+                return value === undefined ? fallbackValue : value;
+            }
+
+            const raw = localStorage.getItem(key);
+            if (!raw) return fallbackValue;
+            return JSON.parse(raw);
+        } catch (error) {
+            return fallbackValue;
+        }
+    }
+
+    persistJson(key, value) {
+        try {
+            if (this.persistence?.setJSON) {
+                void this.persistence.setJSON(key, value);
+                return;
+            }
+
+            localStorage.setItem(key, JSON.stringify(value));
+        } catch (error) {
+            console.warn(`Failed to persist ${key}:`, error);
+        }
+    }
+
+    bindAdaptivePollingLifecycle() {
+        if (this.pollingLifecycleBound || typeof window === 'undefined' || typeof document === 'undefined') return;
+
+        const markActivity = () => {
+            this.lastUserActivityAt = Date.now();
+        };
+
+        ['pointerdown', 'keydown', 'touchstart'].forEach((eventName) => {
+            window.addEventListener(eventName, markActivity, { passive: true });
+        });
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                this.lastUserActivityAt = Date.now();
+                this.flushOfflineQueue().catch(() => {});
+                this.refreshAdaptivePolling({ immediate: true });
+                this.refreshBackendSharedState().catch(() => {});
+                return;
+            }
+            this.refreshAdaptivePolling();
+        }, { passive: true });
+
+        window.addEventListener('online', () => {
+            this.lastUserActivityAt = Date.now();
+            this.flushOfflineQueue().catch(() => {});
+            this.refreshAdaptivePolling({ immediate: true });
+            this.refreshBackendSharedState().catch(() => {});
+        });
+
+        window.addEventListener('offline', () => {
+            this.refreshAdaptivePolling();
+        });
+
+        this.pollingLifecycleBound = true;
+    }
+
+    getAdaptivePollingMode() {
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+            return 'offline';
+        }
+        if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+            return 'hidden';
+        }
+        return (Date.now() - this.lastUserActivityAt) > ADAPTIVE_POLLING_IDLE_AFTER_MS ? 'idle' : 'active';
+    }
+
+    getAdaptivePollingInterval(kind, fallbackMs = 10000) {
+        const mode = this.getAdaptivePollingMode();
+        if (mode === 'offline') {
+            return null;
+        }
+
+        const profile = ADAPTIVE_POLLING_INTERVALS[kind] || {};
+        const candidate = profile[mode] || profile.active || fallbackMs;
+        return Math.max(1000, Number(candidate) || 10000);
+    }
+
+    scheduleAdaptiveLoop(timerKey, task, kind, fallbackMs = 10000, runImmediately = true) {
+        this.stopAdaptiveLoop(timerKey);
+
+        const loop = {
+            stopped: false,
+            running: false,
+            timeoutId: null,
+            kind,
+            fallbackMs,
+            schedule: (delayOverride = null) => {
+                if (loop.stopped) return;
+                if (loop.timeoutId) clearTimeout(loop.timeoutId);
+
+                const delay = delayOverride === null
+                    ? this.getAdaptivePollingInterval(kind, fallbackMs)
+                    : delayOverride;
+
+                if (delay === null || delay === undefined) {
+                    loop.timeoutId = null;
+                    return;
+                }
+
+                loop.timeoutId = setTimeout(loop.runner, Math.max(0, delay));
+            },
+            runner: async () => {
+                if (loop.stopped) return;
+                if (loop.running) return;
+
+                loop.running = true;
+                try {
+                    await task();
+                } finally {
+                    loop.running = false;
+                    if (!loop.stopped) {
+                        loop.schedule();
+                    }
+                }
+            }
+        };
+
+        this[timerKey] = loop;
+
+        if (runImmediately && this.getAdaptivePollingMode() !== 'offline') {
+            loop.runner();
+        } else {
+            loop.schedule();
+        }
+    }
+
+    stopAdaptiveLoop(timerKey) {
+        const loop = this[timerKey];
+        if (loop?.timeoutId) {
+            clearTimeout(loop.timeoutId);
+        }
+        if (loop) {
+            loop.stopped = true;
+        }
+        this[timerKey] = null;
+    }
+
+    refreshAdaptivePolling(options = {}) {
+        const immediate = options.immediate === true;
+        ['taskLocksInterval', 'backendSyncInterval', 'presenceInterval', 'presenceListenerInterval'].forEach((timerKey) => {
+            const loop = this[timerKey];
+            if (!loop || loop.stopped || loop.running) return;
+            loop.schedule(immediate ? 0 : null);
+        });
     }
 
     isFirebaseReady() {
@@ -463,9 +648,9 @@ class DataStore {
                 return;
             }
             if (!navigator.onLine || error?.message?.toLowerCase().includes('failed to fetch')) {
-                const localData = localStorage.getItem('backoffice_state');
+                const localData = this.readPersistedJson(LOCAL_STATE_CACHE_KEY, null);
                 if (localData) {
-                    this.state = JSON.parse(localData);
+                    this.state = localData;
                     this.migrateData();
                     this.notify();
                     return;
@@ -476,33 +661,21 @@ class DataStore {
     }
 
     readOfflineQueue() {
-        try {
-            const raw = localStorage.getItem(this.offlineQueueKey);
-            if (!raw) return [];
-            const parsed = JSON.parse(raw);
-            return Array.isArray(parsed) ? parsed : [];
-        } catch (error) {
-            return [];
-        }
+        const parsed = this.readPersistedJson(this.offlineQueueKey, []);
+        return Array.isArray(parsed) ? parsed : [];
     }
 
     writeOfflineQueue(queue) {
-        localStorage.setItem(this.offlineQueueKey, JSON.stringify(queue));
+        this.persistJson(this.offlineQueueKey, Array.isArray(queue) ? queue : []);
     }
 
     readFailedOfflineQueue() {
-        try {
-            const raw = localStorage.getItem(this.failedOfflineQueueKey);
-            if (!raw) return [];
-            const parsed = JSON.parse(raw);
-            return Array.isArray(parsed) ? parsed : [];
-        } catch (error) {
-            return [];
-        }
+        const parsed = this.readPersistedJson(this.failedOfflineQueueKey, []);
+        return Array.isArray(parsed) ? parsed : [];
     }
 
     writeFailedOfflineQueue(queue) {
-        localStorage.setItem(this.failedOfflineQueueKey, JSON.stringify(queue));
+        this.persistJson(this.failedOfflineQueueKey, Array.isArray(queue) ? queue : []);
     }
 
     getOfflineQueueStatus() {
@@ -726,16 +899,11 @@ class DataStore {
             } catch (error) { }
         };
 
-        pollLocks();
-        if (this.taskLocksInterval) clearInterval(this.taskLocksInterval);
-        this.taskLocksInterval = setInterval(pollLocks, 5000);
+        this.scheduleAdaptiveLoop('taskLocksInterval', pollLocks, 'taskLocks', 5000, true);
     }
 
     stopTaskLockListener() {
-        if (this.taskLocksInterval) {
-            clearInterval(this.taskLocksInterval);
-            this.taskLocksInterval = null;
-        }
+        this.stopAdaptiveLoop('taskLocksInterval');
     }
 
     async refreshBackendSharedState() {
@@ -778,19 +946,17 @@ class DataStore {
 
     startBackendSyncPolling(intervalMs = 8000) {
         if (!this.isBackendReady() || !this.hasBackendAuth()) return;
-        this.stopBackendSyncPolling();
-
-        this.refreshBackendSharedState();
-        this.backendSyncInterval = setInterval(() => {
-            this.refreshBackendSharedState();
-        }, Math.max(3000, Number(intervalMs) || 8000));
+        this.scheduleAdaptiveLoop(
+            'backendSyncInterval',
+            () => this.refreshBackendSharedState(),
+            'backendSync',
+            Math.max(3000, Number(intervalMs) || 8000),
+            true
+        );
     }
 
     stopBackendSyncPolling() {
-        if (this.backendSyncInterval) {
-            clearInterval(this.backendSyncInterval);
-            this.backendSyncInterval = null;
-        }
+        this.stopAdaptiveLoop('backendSyncInterval');
     }
 
     async acquireTaskLock(taskId, ttlSeconds = 60) {
@@ -839,9 +1005,7 @@ class DataStore {
                 } catch (error) { }
             };
 
-            pingPresence();
-            if (this.presenceInterval) clearInterval(this.presenceInterval);
-            this.presenceInterval = setInterval(pingPresence, 20000);
+            this.scheduleAdaptiveLoop('presenceInterval', pingPresence, 'presenceHeartbeat', 20000, true);
             return;
         }
 
@@ -861,16 +1025,11 @@ class DataStore {
                 } catch (e) { /* heartbeat is non-critical */ }
             };
 
-            pingPresence();
-            if (this.presenceInterval) clearInterval(this.presenceInterval);
-            this.presenceInterval = setInterval(pingPresence, 20000); // every 20s
+            this.scheduleAdaptiveLoop('presenceInterval', pingPresence, 'presenceHeartbeat', 20000, true);
             return;
         }
 
-        if (this.presenceInterval) {
-            clearInterval(this.presenceInterval);
-            this.presenceInterval = null;
-        }
+        this.stopAdaptiveLoop('presenceInterval');
     }
 
     // Lightweight presence polling — reads only livePresence node
@@ -904,9 +1063,7 @@ class DataStore {
                 } catch (error) { }
             };
 
-            pollPresence();
-            if (this.presenceListenerInterval) clearInterval(this.presenceListenerInterval);
-            this.presenceListenerInterval = setInterval(pollPresence, 10000);
+            this.scheduleAdaptiveLoop('presenceListenerInterval', pollPresence, 'presenceListener', 10000, true);
             return;
         }
 
@@ -929,27 +1086,16 @@ class DataStore {
                 } catch (e) { /* ignore */ }
             };
 
-            pollPresence();
-            if (this.presenceListenerInterval) clearInterval(this.presenceListenerInterval);
-            this.presenceListenerInterval = setInterval(pollPresence, 10000); // every 10s
+            this.scheduleAdaptiveLoop('presenceListenerInterval', pollPresence, 'presenceListener', 10000, true);
             return;
         }
 
-        if (this.presenceListenerInterval) {
-            clearInterval(this.presenceListenerInterval);
-            this.presenceListenerInterval = null;
-        }
+        this.stopAdaptiveLoop('presenceListenerInterval');
     }
 
     stopPresenceHeartbeat() {
-        if (this.presenceInterval) {
-            clearInterval(this.presenceInterval);
-            this.presenceInterval = null;
-        }
-        if (this.presenceListenerInterval) {
-            clearInterval(this.presenceListenerInterval);
-            this.presenceListenerInterval = null;
-        }
+        this.stopAdaptiveLoop('presenceInterval');
+        this.stopAdaptiveLoop('presenceListenerInterval');
     }
 
     stopRealtimeStateListener() {
@@ -1039,6 +1185,8 @@ class DataStore {
     }
 
     async init() {
+        await this.preparePersistence();
+
         if (this.isBackendReady()) {
             this.stopRealtimeStateListener();
             const hasValidToken = await this.validateBackendToken();
@@ -1051,9 +1199,6 @@ class DataStore {
                     this.notify();
                 }
             }
-            window.addEventListener('online', () => {
-                this.flushOfflineQueue().catch(() => {});
-            });
             return this.state;
         }
 
@@ -1069,9 +1214,9 @@ class DataStore {
 
     fetchFromLocal() {
         try {
-            const localData = localStorage.getItem('backoffice_state');
+            const localData = this.readPersistedJson(LOCAL_STATE_CACHE_KEY, null);
             if (localData) {
-                this.state = JSON.parse(localData);
+                this.state = localData;
                 this.migrateData();
             } else {
                 this.state = JSON.parse(JSON.stringify(DEFAULT_STATE));
@@ -1086,7 +1231,7 @@ class DataStore {
 
     saveToLocal() {
         try {
-            localStorage.setItem('backoffice_state', JSON.stringify(this.state));
+            this.persistJson(LOCAL_STATE_CACHE_KEY, this.state);
             this.notify();
         } catch (e) {
             console.error("Error saving to local storage:", e);
@@ -1112,7 +1257,7 @@ class DataStore {
             if (data) {
                 this.state = data;
                 this.migrateData();
-                localStorage.setItem('backoffice_state_backup', JSON.stringify(this.state));
+                this.persistJson(LOCAL_STATE_BACKUP_KEY, this.state);
                 this.lastRemoteSyncAt = Date.now();
             } else {
                 // Database is empty — initialize with default state
@@ -1121,8 +1266,8 @@ class DataStore {
             }
         } catch (error) {
             console.error("Failed to fetch from Firebase, falling back to local:", error);
-            const backup = localStorage.getItem('backoffice_state_backup');
-            this.state = backup ? JSON.parse(backup) : JSON.parse(JSON.stringify(DEFAULT_STATE));
+            const backup = this.readPersistedJson(LOCAL_STATE_BACKUP_KEY, null);
+            this.state = backup || JSON.parse(JSON.stringify(DEFAULT_STATE));
             this.migrateData();
         }
         this.notify();
@@ -1171,7 +1316,7 @@ class DataStore {
             this.lastRemoteSyncAt = Date.now();
 
             // Also cache locally
-            localStorage.setItem('backoffice_state_backup', JSON.stringify(this.state));
+            this.persistJson(LOCAL_STATE_BACKUP_KEY, this.state);
             this.notify();
             return true;
         } catch (error) {

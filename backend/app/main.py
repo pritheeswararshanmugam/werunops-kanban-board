@@ -25,7 +25,6 @@ from app.models import (
     ClientOut,
     ClientUpdate,
     LoginRequest,
-    LoginResponse,
     PresenceStatus,
     PresenceMeRequest,
     PresenceOut,
@@ -84,6 +83,8 @@ PRESENCE_STATUS_ALIASES = {
 }
 
 PRESENCE_STALE_AFTER = timedelta(seconds=75)
+ADMIN_PORTAL_COOKIE_NAME = "werunops_admin_portal"
+ADMIN_PORTAL_COOKIE_MAX_AGE_SECONDS = 3600
 
 ROLE_CAPABILITIES = {
     "Admin": {
@@ -627,7 +628,11 @@ def _get_env_compat(names: tuple[str, ...], suffixes: tuple[str, ...], default: 
 cors_origins_raw = _get_env_compat(
     names=("CORS_ALLOW_ORIGINS",),
     suffixes=("_CORS_ALLOW_ORIGINS",),
-    default="*",
+    default=(
+        "http://127.0.0.1:4173,"
+        "http://localhost:4173,"
+        "https://pritheeswararshanmugam.github.io"
+    ),
 )
 allow_origins = [item.strip() for item in cors_origins_raw.split(",") if item.strip()] or ["*"]
 allow_credentials = allow_origins != ["*"]
@@ -656,6 +661,24 @@ def parse_bearer(authorization: str | None) -> str:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing bearer token")
     return authorization.removeprefix("Bearer ").strip()
+
+
+def request_is_secure(request: Request) -> bool:
+    forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower()
+    return forwarded_proto == "https" or request.url.scheme == "https"
+
+
+def set_admin_portal_cookie(response: Response, request: Request, token: str) -> None:
+    secure = request_is_secure(request)
+    response.set_cookie(
+        key=ADMIN_PORTAL_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        secure=secure,
+        samesite="none" if secure else "lax",
+        max_age=ADMIN_PORTAL_COOKIE_MAX_AGE_SECONDS,
+        path="/",
+    )
 
 
 def current_user(authorization: str | None = Header(default=None, alias="Authorization")) -> UserProfile:
@@ -925,6 +948,20 @@ def serialize_admin_user(username: str, raw_user: dict[str, Any] | None) -> dict
     }
 
 
+def serialize_authenticated_user(user: UserProfile) -> dict[str, Any]:
+    serialized = serialize_admin_user(user.username, store.users.get(user.username))
+    if serialized is not None:
+        return serialized
+
+    role = normalized_role(user.role)
+    return {
+        **user.model_dump(),
+        "role": role,
+        "accessLevel": role_access_label(role),
+        "capabilities": role_capabilities(role),
+    }
+
+
 def build_user_directory() -> list[dict[str, Any]]:
     rank = {"Admin": 0, "Manager": 1, "User": 2}
     rows = [
@@ -1076,12 +1113,12 @@ def reassign_tasks(source_username: str, target_username: str, actor_name: str, 
     return changed_ids
 
 
-def resolve_admin_user(access_token: str | None, authorization: str | None) -> tuple[UserProfile, str]:
+def resolve_admin_user(request: Request, authorization: str | None) -> tuple[UserProfile, str]:
     token = ""
     if authorization and authorization.lower().startswith("bearer "):
         token = authorization[7:].strip()
-    if not token and access_token:
-        token = access_token.strip()
+    if not token:
+        token = request.cookies.get(ADMIN_PORTAL_COOKIE_NAME, "").strip()
     if not token:
         raise HTTPException(status_code=401, detail="Missing bearer token")
 
@@ -1096,8 +1133,11 @@ def resolve_admin_user(access_token: str | None, authorization: str | None) -> t
     return user, token
 
 
-def current_admin_user(authorization: str | None = Header(default=None, alias="Authorization")) -> UserProfile:
-    user, _ = resolve_admin_user(None, authorization)
+def current_admin_user(
+    request: Request,
+    authorization: str | None = Header(default=None, alias="Authorization"),
+) -> UserProfile:
+    user, _ = resolve_admin_user(request, authorization)
     return user
 
 
@@ -1177,12 +1217,25 @@ def api_root(request: Request):
     )
 
 
+@app.post("/api/v1/admin/portal/session", response_model=APIResponse)
+def admin_portal_session(
+    request: Request,
+    response: Response,
+    authorization: str | None = Header(default=None, alias="Authorization"),
+    user: UserProfile = Depends(current_user),
+):
+    require_admin_capability(user, "viewOverview")
+    token = parse_bearer(authorization)
+    set_admin_portal_cookie(response, request, token)
+    return build_response({"ok": True, "portalPath": "/api/v1/admin/portal"}, request)
+
+
 @app.get("/api/v1/admin/portal", response_class=HTMLResponse)
 def admin_portal(
+    request: Request,
     authorization: str | None = Header(default=None, alias="Authorization"),
-    access_token: str | None = Query(default=None, alias="accessToken"),
 ):
-    admin, token = resolve_admin_user(access_token, authorization)
+    admin, _ = resolve_admin_user(request, authorization)
     now = datetime.now(UTC)
     sessions = sorted(store.sessions.values(), key=lambda item: item.loginTime, reverse=True)[:2000]
     tasks = sorted(store.tasks.values(), key=lambda item: item.updatedAt, reverse=True)[:2000]
@@ -1208,16 +1261,15 @@ def admin_portal(
 
     html = ADMIN_PORTAL_TEMPLATE.read_text(encoding="utf-8")
     html = html.replace("__BOOTSTRAP_JSON__", bootstrap_json)
-    html = html.replace("__WERUNOPS_ADMIN_TOKEN__", token)
     return HTMLResponse(content=html)
 
 
 @app.get("/admin/portal", response_class=HTMLResponse)
 def admin_portal_alias(
+    request: Request,
     authorization: str | None = Header(default=None, alias="Authorization"),
-    access_token: str | None = Query(default=None, alias="accessToken"),
 ):
-    return admin_portal(authorization=authorization, access_token=access_token)
+    return admin_portal(request=request, authorization=authorization)
 
 
 @app.get("/api/v1/admin/operations", response_model=APIResponse)
@@ -1839,14 +1891,18 @@ def auth_login(payload: LoginRequest, request: Request):
         raise HTTPException(status_code=401, detail=str(error)) from error
 
     return build_response(
-        LoginResponse(accessToken=token, profile=profile, expiresInSeconds=3600).model_dump(),
+        {
+            "accessToken": token,
+            "profile": serialize_authenticated_user(profile),
+            "expiresInSeconds": 3600,
+        },
         request,
     )
 
 
 @app.get("/api/v1/auth/me", response_model=APIResponse)
 def auth_me(request: Request, user: UserProfile = Depends(current_user)):
-    return build_response(user.model_dump(), request)
+    return build_response(serialize_authenticated_user(user), request)
 
 
 @app.post("/api/v1/auth/logout", response_model=APIResponse)
@@ -1942,7 +1998,6 @@ def update_task(task_id: int, payload: TaskUpdate, request: Request, user: UserP
     ensure_user_can_access_task(task, user)
     if not user_can_edit_task_details(task, user):
         raise HTTPException(status_code=403, detail="Operations Specialists can only edit tasks they created")
-    ensure_task_not_locked_by_other(task_id, user)
     if task.version != payload.version:
         raise HTTPException(status_code=409, detail={"code": "TASK_CONFLICT", "latest": jsonable_encoder(task.model_dump())})
 
@@ -1968,7 +2023,6 @@ def patch_task_status(task_id: int, payload: TaskStatusPatch, request: Request, 
     ensure_user_can_access_task(task, user)
     if not user_can_update_task_status(task, user, payload.status):
         raise HTTPException(status_code=403, detail="Operations Specialists can only update status on tasks assigned to them")
-    ensure_task_not_locked_by_other(task_id, user)
     if task.version != payload.version:
         raise HTTPException(status_code=409, detail={"code": "TASK_CONFLICT", "latest": jsonable_encoder(task.model_dump())})
 
@@ -1988,7 +2042,6 @@ def delete_task(task_id: int, request: Request, user: UserProfile = Depends(curr
     ensure_user_can_access_task(task, user)
     if not user_can_delete_task(task, user):
         raise HTTPException(status_code=403, detail="Operations Specialists can only delete tasks they created")
-    ensure_task_not_locked_by_other(task_id, user)
     store.mark_task_deleted(task_id)
     store.tasks.pop(task_id)
     store.task_locks.pop(task_id, None)
@@ -2006,7 +2059,6 @@ def bulk_delete_tasks(payload: BulkDeleteRequest, request: Request, user: UserPr
         ensure_user_can_access_task(task, user)
         if not user_can_delete_task(task, user):
             raise HTTPException(status_code=403, detail="Operations Specialists can only delete tasks they created")
-        ensure_task_not_locked_by_other(task_id, user)
         store.mark_task_deleted(task_id)
         store.tasks.pop(task_id)
         store.task_locks.pop(task_id, None)

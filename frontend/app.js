@@ -19,8 +19,7 @@ let lastActivityAt = Date.now();
 let lastHeartbeatAt = Date.now();
 let dashboardOpsInFlight = null;
 let dashboardOpsLastFetchAt = 0;
-let currentLockedTaskId = null;
-let taskLockRefreshTimer = null;
+let currentTaskEditSession = null;
 const undoStack = [];
 const redoStack = [];
 let historyReplay = false;
@@ -28,6 +27,9 @@ const selectedTaskIds = new Set();
 const APP_RUNTIME_CONFIG = (typeof window !== 'undefined' && window.WERUNOPS_CONFIG)
     ? window.WERUNOPS_CONFIG
     : {};
+const taskCollaboration = (typeof window !== 'undefined' && window.WeRunOpsTaskCollaboration)
+    ? window.WeRunOpsTaskCollaboration
+    : null;
 const ALLOW_USER_ENDPOINT_CONFIG = APP_RUNTIME_CONFIG.allowUserEndpointConfig === true;
 const SHOW_SESSION_OPS_IN_DASHBOARD = APP_RUNTIME_CONFIG.showSessionOpsInDashboard !== false;
 const ROLE_KEY_ALIASES = {
@@ -103,7 +105,19 @@ function getRoleDisplayLabel(value) {
     return ROLE_DISPLAY_LABELS[normalizeRoleKey(value)] || ROLE_DISPLAY_LABELS.user;
 }
 
+function getCapabilityFlag(capability, role = currentUser?.role) {
+    const capabilityMap = currentUser?.capabilities;
+    if ((role == null || role === currentUser?.role) && capabilityMap && Object.prototype.hasOwnProperty.call(capabilityMap, capability)) {
+        return Boolean(capabilityMap[capability]);
+    }
+    return null;
+}
+
 function canOpenOperationsPortal(role = currentUser?.role) {
+    const capabilityValue = getCapabilityFlag('viewOverview', role);
+    if (capabilityValue !== null) {
+        return capabilityValue;
+    }
     const normalizedRole = normalizeRoleKey(role);
     return normalizedRole === 'admin' || normalizedRole === 'manager';
 }
@@ -113,6 +127,10 @@ function isOperationsSpecialist(role = currentUser?.role) {
 }
 
 function canManageSharedRecords(role = currentUser?.role) {
+    const capabilityValue = getCapabilityFlag('manageTasks', role);
+    if (capabilityValue !== null) {
+        return capabilityValue;
+    }
     return !isOperationsSpecialist(role);
 }
 
@@ -586,11 +604,43 @@ async function redoLastMutation() {
 }
 
 function getTaskLockInfo(taskId) {
-    if (!store?.state?.taskLocks) return null;
-    const lock = store.state.taskLocks[parseInt(taskId)];
-    if (!lock) return null;
-    if (lock.lockedBy === currentUser?.username) return null;
-    return lock;
+    return taskCollaboration?.getTaskLockInfo
+        ? taskCollaboration.getTaskLockInfo(store?.state?.taskLocks, taskId, currentUser?.username)
+        : null;
+}
+
+function describeTaskChangeError(error, actionLabel, fallbackMessage) {
+    if (taskCollaboration?.describeTaskChangeError) {
+        return taskCollaboration.describeTaskChangeError(error, actionLabel, fallbackMessage);
+    }
+
+    return {
+        title: 'Update Failed',
+        message: fallbackMessage || `Unable to ${actionLabel} right now.`,
+        level: 'error'
+    };
+}
+
+async function startCurrentTaskEditSession(taskId) {
+    if (!taskCollaboration?.startTaskEditSession) {
+        currentTaskEditSession = null;
+        return null;
+    }
+
+    currentTaskEditSession = await taskCollaboration.startTaskEditSession(store, taskId, currentUser?.username);
+    return currentTaskEditSession;
+}
+
+async function stopCurrentTaskEditSession() {
+    if (!currentTaskEditSession) return;
+
+    if (taskCollaboration?.stopTaskEditSession) {
+        await taskCollaboration.stopTaskEditSession(store, currentTaskEditSession);
+    } else if (currentTaskEditSession.lockAcquired && currentTaskEditSession.taskId) {
+        await store.releaseTaskLock(currentTaskEditSession.taskId).catch(() => {});
+    }
+
+    currentTaskEditSession = null;
 }
 
 function refreshOfflineSyncControls() {
@@ -689,6 +739,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         store.stopPresenceHeartbeat();
         store.stopTaskLockListener();
         store.stopBackendSyncPolling?.();
+        void stopCurrentTaskEditSession();
         stopSessionActivityTracking();
         currentUser = null;
         clearSession();
@@ -1661,12 +1712,8 @@ function renderKanban(state) {
                             });
                         }
                     } catch (error) {
-                        if (error?.detail?.code === 'TASK_LOCKED') {
-                            showNotification('Task Locked', error.detail.message || 'Another user is editing this task.', 'warning');
-                            await store.fetchTaskLocks().catch(() => {});
-                        } else {
-                            showNotification('Update Failed', 'Unable to change task status right now.', 'error');
-                        }
+                        const notice = describeTaskChangeError(error, 'change task status', 'Unable to change task status right now.');
+                        showNotification(notice.title, notice.message, notice.level);
                         await store.fetchFromBackend(true).catch(() => {});
                     }
                 }
@@ -1693,9 +1740,9 @@ function createKanbanCard(task) {
     const dragClass = canDragTask(task) ? 'task-card-draggable cursor-grab active:cursor-grabbing' : 'task-card-static cursor-pointer';
     const lock = getTaskLockInfo(task.id);
     const lockBadge = lock
-        ? `<div class="absolute top-2 left-2 text-[10px] px-2 py-1 rounded-full bg-red-50 text-red-600 border border-red-200">Editing: ${safe(lock.lockedByName || lock.lockedBy)}</div>`
+        ? `<div class="absolute top-2 left-2 text-[10px] px-2 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200">Collaborating: ${safe(lock.lockedByName || lock.lockedBy)}</div>`
         : '';
-    const lockClass = lock ? 'opacity-75 border-red-200' : '';
+    const lockClass = lock ? 'border-amber-200' : '';
     const quickActionHtml = taskMode === 'view'
         ? ''
         : `
@@ -2565,11 +2612,9 @@ function initModals() {
             closeTaskModal();
             showNotification('Success', `Task successfully saved.`, 'success');
         } catch (error) {
-            if (error?.detail?.code === 'TASK_LOCKED') {
-                showNotification('Task Locked', error.detail.message || 'Another user is editing this task.', 'warning');
-            } else {
-                showNotification('Error', 'Failed to save task. Please try again.', 'error');
-            }
+            const notice = describeTaskChangeError(error, 'save this task', 'Failed to save task. Please try again.');
+            showNotification(notice.title, notice.message, notice.level);
+            await store.fetchFromBackend(true).catch(() => {});
             console.error(error);
         } finally {
             submitBtn.disabled = false;
@@ -2684,13 +2729,8 @@ window.openTaskModal = async function (taskId = null, defaults = {}) {
     form.reset();
     form.dataset.mode = task ? (defaults.viewOnly ? 'view' : (defaults.statusOnly ? 'status-only' : 'edit')) : 'create';
 
-    if (currentLockedTaskId && (!normalizedTaskId || normalizedTaskId !== parseInt(currentLockedTaskId))) {
-        await store.releaseTaskLock(currentLockedTaskId);
-        currentLockedTaskId = null;
-    }
-    if (taskLockRefreshTimer) {
-        clearInterval(taskLockRefreshTimer);
-        taskLockRefreshTimer = null;
+    if (currentTaskEditSession?.taskId && (!normalizedTaskId || normalizedTaskId !== parseInt(currentTaskEditSession.taskId))) {
+        await stopCurrentTaskEditSession();
     }
 
     const fields = ['task-client', 'task-project', 'task-name', 'task-staff', 'task-status', 'task-priority', 'task-start-date', 'task-due-date', 'task-waiting', 'task-notes'];
@@ -2708,17 +2748,9 @@ window.openTaskModal = async function (taskId = null, defaults = {}) {
 
     if (normalizedTaskId) {
         if (!defaults.viewOnly && store.isBackendReady()) {
-            try {
-                await store.acquireTaskLock(normalizedTaskId, 75);
-                currentLockedTaskId = normalizedTaskId;
-                taskLockRefreshTimer = setInterval(() => {
-                    store.acquireTaskLock(normalizedTaskId, 75).catch(() => {});
-                }, 30000);
-            } catch (error) {
-                defaults.viewOnly = true;
-                form.dataset.mode = 'view';
-                const lockMessage = error?.detail?.message || 'Another user is editing this task right now.';
-                showNotification('Task Locked', lockMessage, 'warning');
+            const editSession = await startCurrentTaskEditSession(normalizedTaskId);
+            if (editSession?.warning) {
+                showNotification('Shared Editing', editSession.warning, 'info');
             }
         }
 
@@ -2871,14 +2903,7 @@ function closeTaskModal() {
         document.body.classList.remove('modal-open');
     }, 300); // match duration-300
 
-    if (currentLockedTaskId) {
-        store.releaseTaskLock(currentLockedTaskId).catch(() => {});
-        currentLockedTaskId = null;
-    }
-    if (taskLockRefreshTimer) {
-        clearInterval(taskLockRefreshTimer);
-        taskLockRefreshTimer = null;
-    }
+    void stopCurrentTaskEditSession();
 }
 
 window.openClientModal = function (clientName = null) {
@@ -2996,9 +3021,12 @@ function buildSafeSession(user, options = {}) {
         username: user.username,
         name: user.name,
         role: user.role,
+        accessLevel: user.accessLevel || null,
+        capabilities: user.capabilities || null,
         initials: user.initials,
         presenceStatus: normalizePresenceStatus(options.presenceStatus || user.presenceStatus || 'online'),
         sessionStart: options.sessionStart || now,
+        sessionId: options.sessionId || null,
         provider: options.provider || 'legacy',
         accessToken: options.accessToken || null,
         firebaseUid: options.firebaseUid || null,
@@ -3232,13 +3260,27 @@ function stopSessionActivityTracking() {
     sessionIdleSecondsBucket = 0;
 }
 
-async function validateBackendSessionToken(session) {
-    if (!session?.accessToken) return false;
+async function hydrateBackendSession(session) {
+    if (!session?.accessToken) return null;
     try {
         const response = await backendApiFetch('/auth/me', {}, session.accessToken);
-        return !!(response && response.ok);
+        if (!response || !response.ok) return null;
+        const payload = await response.json();
+        const profile = payload?.data;
+        if (!profile?.username) return null;
+        return buildSafeSession(profile, {
+            provider: session.provider || 'backend',
+            accessToken: session.accessToken,
+            sessionId: session.sessionId || null,
+            sessionStart: session.sessionStart,
+            presenceStatus: session.presenceStatus,
+            firebaseUid: session.firebaseUid || null,
+            idToken: session.idToken || null,
+            refreshToken: session.refreshToken || null,
+            email: session.email || profile.email || null,
+        });
     } catch (error) {
-        return false;
+        return null;
     }
 }
 
@@ -3250,13 +3292,14 @@ async function setupAuth() {
     const storedSession = readSession();
     if (storedSession) {
         if (store.isBackendReady()) {
-            const validBackendSession = await validateBackendSessionToken(storedSession);
-            if (!validBackendSession) {
+            const refreshedBackendSession = await hydrateBackendSession(storedSession);
+            if (!refreshedBackendSession) {
                 clearSession();
                 currentUser = null;
                 window.location.hash = '#/login';
             } else {
-                currentUser = { ...storedSession };
+                currentUser = { ...storedSession, ...refreshedBackendSession };
+                persistSession(currentUser);
                 if (!store.hasLoadedBackendState) {
                     store.fetchFromBackend(true).catch(() => {});
                 }
@@ -3351,14 +3394,7 @@ async function setupAuth() {
         store.stopPresenceHeartbeat();
         store.stopTaskLockListener();
         store.stopBackendSyncPolling?.();
-        if (currentLockedTaskId) {
-            await store.releaseTaskLock(currentLockedTaskId);
-            currentLockedTaskId = null;
-        }
-        if (taskLockRefreshTimer) {
-            clearInterval(taskLockRefreshTimer);
-            taskLockRefreshTimer = null;
-        }
+        await stopCurrentTaskEditSession();
         if (currentUser) {
             currentUser.presenceStatus = 'offline';
             persistSession(currentUser);
@@ -3525,10 +3561,46 @@ function getAdminPortalUrl() {
     if (!baseApi) {
         return '';
     }
-    return `${baseApi}/admin/portal?accessToken=${encodeURIComponent(currentUser.accessToken)}`;
+    return `${baseApi}/admin/portal`;
 }
 
-function openAdminPortal() {
+async function prepareAdminPortalSession() {
+    if (!store.isBackendReady() || !currentUser?.accessToken) {
+        throw new Error('Connect backend API to open admin portal.');
+    }
+
+    const response = await backendApiFetch(
+        '/admin/portal/session',
+        {
+            method: 'POST',
+            credentials: 'include'
+        },
+        currentUser.accessToken
+    );
+
+    if (!response) {
+        throw new Error('Backend API is unavailable.');
+    }
+
+    if (!response.ok) {
+        let message = 'Unable to open admin portal right now.';
+        try {
+            const payload = await response.json();
+            message = payload?.detail || payload?.message || payload?.data?.message || message;
+        } catch (error) {
+            if (response.status === 401) {
+                message = 'Your admin session is missing or expired. Sign in again and retry.';
+            } else if (response.status === 403) {
+                message = 'System Administrator or Operations Manager access is required to open the backend portal.';
+            }
+        }
+        throw new Error(message);
+    }
+
+    return getAdminPortalUrl();
+}
+
+async function openAdminPortal() {
     if (!currentUser || !canOpenOperationsPortal()) {
         showNotification('Access Denied', 'System Administrator or Operations Manager access is required to open the backend portal.', 'warning');
         return false;
@@ -3539,8 +3611,19 @@ function openAdminPortal() {
         return false;
     }
 
-    const opened = window.open(url, '_blank');
+    const opened = window.open('', '_blank');
+    try {
+        await prepareAdminPortalSession();
+    } catch (error) {
+        if (opened && !opened.closed) {
+            opened.close();
+        }
+        showNotification('Portal Unavailable', error?.message || 'Unable to open admin portal right now.', 'warning');
+        return false;
+    }
+
     if (opened) {
+        opened.location.replace(url);
         return true;
     }
 
@@ -3556,20 +3639,9 @@ function setupProfileModal() {
     if (!modalProfile || !btnOpen) return;
 
     adminPortalBtn?.addEventListener('click', (e) => {
+        e.preventDefault();
         document.getElementById('header-user-panel')?.classList.add('hidden');
-        if (!canOpenOperationsPortal()) {
-            e.preventDefault();
-            showNotification('Access Denied', 'System Administrator or Operations Manager access is required to open the backend portal.', 'warning');
-            return;
-        }
-        const portalUrl = getAdminPortalUrl();
-        if (!portalUrl) {
-            e.preventDefault();
-            showNotification('Backend Not Connected', 'Connect backend API to open admin portal.', 'warning');
-            return;
-        }
-        // Use native anchor navigation in direct click context to minimize popup-blocker interference.
-        adminPortalBtn.setAttribute('href', portalUrl);
+        void openAdminPortal();
     });
 
     function closeProfile() {
