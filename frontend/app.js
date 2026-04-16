@@ -1694,7 +1694,7 @@ function renderKanban(state) {
         const headClass = `kanban-col-head-${status.replace(/\s+/g, '')}`;
 
         html += `
-            <div class="flex flex-col bg-slate-100/60 rounded-xl p-3 w-72 flex-shrink-0 ${headClass} max-h-full overflow-hidden">
+            <div class="flex flex-col bg-slate-100/60 rounded-xl p-3 w-56 flex-shrink-0 ${headClass} max-h-full overflow-hidden">
                 <div class="px-1 pb-3 sticky top-0 bg-slate-100/95 backdrop-blur z-10 shrink-0">
                     <div class="flex justify-between items-center rounded-xl bg-white/80 border border-slate-200 px-3 py-3 shadow-sm">
                         <h3 class="font-bold tracking-tight text-slate-900 flex items-center gap-2">
@@ -1919,8 +1919,10 @@ function renderAllTasksList(state) {
                         ${safePriority}
                     </span>
                 </td>
-                <td class="px-4 py-3 whitespace-nowrap tabular-nums ${isOverdue(task.dueDate) && task.status !== 'Completed' ? 'text-rose-700 font-semibold bg-rose-50 rounded-xl px-2' : 'text-slate-600 font-medium'}">
-                    ${formatDate(task.dueDate)}
+                <td class="px-4 py-3 whitespace-nowrap tabular-nums text-slate-600 font-medium">
+                    <span class="inline-flex items-center rounded-xl px-3 py-2 ${isOverdue(task.dueDate) && task.status !== 'Completed' ? 'bg-rose-50 text-rose-700 font-semibold' : 'bg-transparent text-slate-600'}">
+                        ${formatDate(task.dueDate)}
+                    </span>
                 </td>
                 <td class="px-4 py-3 whitespace-nowrap text-right text-sm font-medium">
                     <div class="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
