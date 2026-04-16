@@ -230,6 +230,83 @@ class InMemoryStore:
                 pass
         return datetime.min.replace(tzinfo=UTC)
 
+    @staticmethod
+    def _normalize_shared_event_scope(value: Any) -> str:
+        raw = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+        allowed = {
+            "state",
+            "tasks",
+            "clients",
+            "presence",
+            "locks",
+            "sessions",
+            "users",
+            "filters",
+            "automation",
+            "audit",
+        }
+        if not raw:
+            return "state"
+        return raw if raw in allowed else "state"
+
+    @staticmethod
+    def _normalize_shared_event_updated_at(value: Any, fallback: str) -> str:
+        raw = str(value or "").strip()
+        return raw or fallback
+
+    def _apply_shared_event_cursor(self, event_id: Any, scope: Any, updated_at: Any) -> dict[str, Any]:
+        fallback_updated_at = getattr(self, "shared_event_updated_at", datetime.now(UTC).isoformat())
+        self.shared_event_id = max(0, _parse_int_env(str(event_id), 0))
+        self.shared_event_scope = self._normalize_shared_event_scope(scope)
+        self.shared_event_updated_at = self._normalize_shared_event_updated_at(updated_at, fallback_updated_at)
+        return self.get_shared_event_cursor()
+
+    def _apply_shared_event_to_payload(
+        self,
+        payload: dict[str, Any],
+        change_scope: str | None = None,
+        *baseline_payloads: dict[str, Any],
+    ) -> dict[str, Any]:
+        fallback_updated_at = datetime.now(UTC).isoformat()
+        event_id = max(
+            [max(0, _parse_int_env(str(getattr(self, "shared_event_id", 0)), 0))]
+            + [
+                max(0, _parse_int_env(str(candidate.get("shared_event_id", 0)), 0))
+                for candidate in (payload, *baseline_payloads)
+            ]
+        )
+        scope = self._normalize_shared_event_scope(getattr(self, "shared_event_scope", "state"))
+        updated_at = self._normalize_shared_event_updated_at(
+            getattr(self, "shared_event_updated_at", fallback_updated_at),
+            fallback_updated_at,
+        )
+
+        for candidate in (payload, *baseline_payloads):
+            if candidate.get("shared_event_scope") is not None:
+                scope = self._normalize_shared_event_scope(candidate.get("shared_event_scope"))
+            updated_at = self._normalize_shared_event_updated_at(candidate.get("shared_event_updated_at"), updated_at)
+
+        if change_scope:
+            event_id += 1
+            scope = self._normalize_shared_event_scope(change_scope)
+            updated_at = fallback_updated_at
+
+        payload["shared_event_id"] = event_id
+        payload["shared_event_scope"] = scope
+        payload["shared_event_updated_at"] = updated_at
+        self._apply_shared_event_cursor(event_id, scope, updated_at)
+        return payload
+
+    def get_shared_event_cursor(self) -> dict[str, Any]:
+        return {
+            "eventId": max(0, _parse_int_env(str(getattr(self, "shared_event_id", 0)), 0)),
+            "scope": self._normalize_shared_event_scope(getattr(self, "shared_event_scope", "state")),
+            "updatedAt": self._normalize_shared_event_updated_at(
+                getattr(self, "shared_event_updated_at", datetime.now(UTC).isoformat()),
+                datetime.now(UTC).isoformat(),
+            ),
+        }
+
     def _resolve_username_key(self, username: str) -> str | None:
         candidate = str(username or "").strip()
         if not candidate:
@@ -693,7 +770,11 @@ class InMemoryStore:
         self.task_comments: dict[int, list[dict[str, Any]]] = {}
         self.next_task_id = 2 if self.state_driver == "file" else 1
         self.next_client_id = 3 if self.state_driver == "file" else 1
+        self.shared_event_id = 0
+        self.shared_event_scope = "state"
+        self.shared_event_updated_at = datetime.now(UTC).isoformat()
         self._last_remote_refresh_monotonic = 0.0
+        self._last_shared_event_refresh_monotonic = 0.0
         self._deleted_task_ids: set[int] = set()
         self._deleted_client_ids: set[int] = set()
         self._restored_task_ids: set[int] = set()
@@ -1063,7 +1144,9 @@ class InMemoryStore:
         cursor.execute(f"delete from public.{rules_table}")
         cursor.execute(f"delete from public.{deleted_tasks_table}")
         cursor.execute(f"delete from public.{deleted_clients_table}")
-        cursor.execute(f"delete from public.{meta_table} where key in ('next_task_id', 'next_client_id')")
+        cursor.execute(
+            f"delete from public.{meta_table} where key in ('next_task_id', 'next_client_id', 'shared_event_id', 'shared_event_scope', 'shared_event_updated_at')"
+        )
 
         users_source_raw = payload.get("users", {})
         users_source: dict[str, Any] = cast(dict[str, Any], users_source_raw) if isinstance(users_source_raw, dict) else {}
@@ -1377,6 +1460,18 @@ class InMemoryStore:
             f"insert into public.{meta_table} (key, value_text) values (%s, %s)",
             ("next_client_id", str(next_client_id)),
         )
+        cursor.execute(
+            f"insert into public.{meta_table} (key, value_text) values (%s, %s)",
+            ("shared_event_id", str(_parse_int_env(str(payload.get("shared_event_id", 0)), 0))),
+        )
+        cursor.execute(
+            f"insert into public.{meta_table} (key, value_text) values (%s, %s)",
+            ("shared_event_scope", self._normalize_shared_event_scope(payload.get("shared_event_scope"))),
+        )
+        cursor.execute(
+            f"insert into public.{meta_table} (key, value_text) values (%s, %s)",
+            ("shared_event_updated_at", self._normalize_shared_event_updated_at(payload.get("shared_event_updated_at"), datetime.now(UTC).isoformat())),
+        )
 
     def _load_state_from_supabase_relational(self) -> dict[str, Any] | None:
         if not self._bootstrap_supabase_relational_storage():
@@ -1673,16 +1768,25 @@ class InMemoryStore:
                 deleted_client_ids = [int(client_id) for (client_id,) in cursor.fetchall()]
 
                 cursor.execute(
-                    f"select key, value_text from public.{meta_table} where key in ('next_task_id', 'next_client_id')"
+                    f"select key, value_text from public.{meta_table} where key in ('next_task_id', 'next_client_id', 'shared_event_id', 'shared_event_scope', 'shared_event_updated_at')"
                 )
                 meta_rows = cursor.fetchall()
                 next_task_id = 1
                 next_client_id = 1
+                shared_event_id = 0
+                shared_event_scope = "state"
+                shared_event_updated_at = ""
                 for key, value_text in meta_rows:
                     if key == "next_task_id":
                         next_task_id = _parse_int_env(str(value_text), 1)
                     if key == "next_client_id":
                         next_client_id = _parse_int_env(str(value_text), 1)
+                    if key == "shared_event_id":
+                        shared_event_id = max(0, _parse_int_env(str(value_text), 0))
+                    if key == "shared_event_scope":
+                        shared_event_scope = self._normalize_shared_event_scope(value_text)
+                    if key == "shared_event_updated_at":
+                        shared_event_updated_at = str(value_text or "").strip()
 
         payload: dict[str, Any] = {
             "users": users,
@@ -1699,6 +1803,9 @@ class InMemoryStore:
             "next_client_id": next_client_id,
             "deleted_task_ids": deleted_task_ids,
             "deleted_client_ids": deleted_client_ids,
+            "shared_event_id": shared_event_id,
+            "shared_event_scope": shared_event_scope,
+            "shared_event_updated_at": shared_event_updated_at,
         }
 
         if not users and not tasks and not clients and not sessions and not presence:
@@ -1827,6 +1934,66 @@ class InMemoryStore:
             if response.status_code >= 400:
                 raise RuntimeError(f"Supabase save failed with HTTP {response.status_code}: {response.text}")
 
+    def _firebase_child_endpoint(self, key: str) -> str:
+        return f"{self.firebase_url}/{self.firebase_state_path}/{key}.json"
+
+    def _read_shared_event_cursor_from_supabase_relational(self) -> dict[str, Any]:
+        if not self._bootstrap_supabase_relational_storage():
+            return self.get_shared_event_cursor()
+
+        if psycopg is None:
+            return self.get_shared_event_cursor()
+
+        meta_table = self._supabase_rel_table("state_meta")
+        with psycopg.connect(self._supabase_postgres_conninfo()) as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("select pg_advisory_xact_lock_shared(%s)", (self.SUPABASE_ADVISORY_LOCK_KEY,))
+                cursor.execute(
+                    f"select key, value_text from public.{meta_table} where key in ('shared_event_id', 'shared_event_scope', 'shared_event_updated_at')"
+                )
+                rows = cursor.fetchall()
+
+        mapping = {str(key): value for key, value in rows}
+        return {
+            "eventId": max(0, _parse_int_env(str(mapping.get("shared_event_id", 0)), 0)),
+            "scope": self._normalize_shared_event_scope(mapping.get("shared_event_scope")),
+            "updatedAt": self._normalize_shared_event_updated_at(mapping.get("shared_event_updated_at"), self.shared_event_updated_at),
+        }
+
+    def _read_shared_event_cursor_from_supabase(self) -> dict[str, Any]:
+        if self.supabase_storage_mode == "relational":
+            return self._read_shared_event_cursor_from_supabase_relational()
+
+        payload = self._load_state_from_supabase() or {}
+        return {
+            "eventId": max(0, _parse_int_env(str(payload.get("shared_event_id", 0)), 0)),
+            "scope": self._normalize_shared_event_scope(payload.get("shared_event_scope")),
+            "updatedAt": self._normalize_shared_event_updated_at(payload.get("shared_event_updated_at"), self.shared_event_updated_at),
+        }
+
+    def _read_shared_event_cursor_from_firebase(self) -> dict[str, Any]:
+        with httpx.Client(timeout=8.0) as client:
+            event_id_response = client.get(self._firebase_child_endpoint("shared_event_id"), params=self._firebase_params())
+            scope_response = client.get(self._firebase_child_endpoint("shared_event_scope"), params=self._firebase_params())
+            updated_at_response = client.get(self._firebase_child_endpoint("shared_event_updated_at"), params=self._firebase_params())
+
+            if event_id_response.status_code >= 400:
+                raise RuntimeError(f"Firebase shared event load failed with HTTP {event_id_response.status_code}")
+            if scope_response.status_code >= 400:
+                raise RuntimeError(f"Firebase shared event load failed with HTTP {scope_response.status_code}")
+            if updated_at_response.status_code >= 400:
+                raise RuntimeError(f"Firebase shared event load failed with HTTP {updated_at_response.status_code}")
+
+            event_id = event_id_response.json()
+            scope = scope_response.json()
+            updated_at = updated_at_response.json()
+
+        return {
+            "eventId": max(0, _parse_int_env(str(event_id), 0)),
+            "scope": self._normalize_shared_event_scope(scope),
+            "updatedAt": self._normalize_shared_event_updated_at(updated_at, self.shared_event_updated_at),
+        }
+
     def _firebase_endpoint(self) -> str:
         return f"{self.firebase_url}/{self.firebase_state_path}.json"
 
@@ -1907,7 +2074,7 @@ class InMemoryStore:
         if user["passwordHash"] != self._sha256(current_password):
             raise UnauthorizedError("Incorrect current password")
         user["passwordHash"] = self._sha256(new_password)
-        self.save_state()
+        self.save_state("users")
 
     def user_from_token(self, token: str) -> UserProfile:
         username = self._username_from_token(token)
@@ -1947,7 +2114,7 @@ class InMemoryStore:
             expiresAt=now + timedelta(seconds=max(15, min(ttl_seconds, 300))),
         )
         self.task_locks[task_id] = lock
-        self.save_state()
+        self.save_state("locks")
         return lock
 
     def unlock_task(self, task_id: int, username: str) -> None:
@@ -1958,7 +2125,7 @@ class InMemoryStore:
         if existing.lockedBy != username:
             raise ConflictError("Task lock owned by another user")
         self.task_locks.pop(task_id, None)
-        self.save_state()
+        self.save_state("locks")
 
     def lock_for_task(self, task_id: int) -> TaskLockOut | None:
         self._cleanup_expired_locks()
@@ -1988,7 +2155,7 @@ class InMemoryStore:
             self._restored_client_ids.add(parsed)
             self._deleted_client_ids.discard(parsed)
 
-    def save_state(self) -> None:
+    def save_state(self, change_scope: str | None = None) -> None:
         payload: dict[str, Any] = {
             "users": self.users,
             "tasks": [task.model_dump(mode="json") for task in self.tasks.values()],
@@ -2054,12 +2221,16 @@ class InMemoryStore:
                 max(((self._coerce_id(item.get("id")) or 0) for item in merged_clients), default=0) + 1,
             )
 
+            merged_payload = self._apply_shared_event_to_payload(merged_payload, change_scope, remote_payload)
+
             self._save_state_to_supabase(merged_payload)
             self._deleted_task_ids.clear()
             self._deleted_client_ids.clear()
             self._restored_task_ids.clear()
             self._restored_client_ids.clear()
             return
+
+        payload = self._apply_shared_event_to_payload(payload, change_scope)
         if self.state_driver == "firebase":
             self._save_state_to_firebase(payload)
             self._deleted_task_ids.clear()
@@ -2081,6 +2252,7 @@ class InMemoryStore:
     def reload_state(self) -> None:
         self._load_state()
         self._last_remote_refresh_monotonic = time.monotonic()
+        self._last_shared_event_refresh_monotonic = time.monotonic()
 
     def refresh_remote_state_if_needed(self, min_interval_seconds: float = 2.0) -> None:
         if self.state_driver not in {"supabase", "firebase"}:
@@ -2091,6 +2263,26 @@ class InMemoryStore:
             return
 
         self.reload_state()
+
+    def refresh_shared_event_cursor_if_needed(self, min_interval_seconds: float = 1.0) -> dict[str, Any]:
+        if self.state_driver not in {"supabase", "firebase"}:
+            return self.get_shared_event_cursor()
+
+        now = time.monotonic()
+        if now - self._last_shared_event_refresh_monotonic < max(0.0, float(min_interval_seconds)):
+            return self.get_shared_event_cursor()
+
+        try:
+            if self.state_driver == "supabase":
+                cursor = self._read_shared_event_cursor_from_supabase()
+            else:
+                cursor = self._read_shared_event_cursor_from_firebase()
+            self._apply_shared_event_cursor(cursor.get("eventId"), cursor.get("scope"), cursor.get("updatedAt"))
+            self._last_shared_event_refresh_monotonic = now
+        except Exception:
+            return self.get_shared_event_cursor()
+
+        return self.get_shared_event_cursor()
 
     def _load_state(self) -> None:
         if self.state_driver == "supabase":
@@ -2224,6 +2416,11 @@ class InMemoryStore:
 
         self.next_task_id = _parse_int_env(str(raw.get("next_task_id", next_task_default)), next_task_default)
         self.next_client_id = _parse_int_env(str(raw.get("next_client_id", next_client_default)), next_client_default)
+        self._apply_shared_event_cursor(
+            raw.get("shared_event_id", 0),
+            raw.get("shared_event_scope", "state"),
+            raw.get("shared_event_updated_at", datetime.now(UTC).isoformat()),
+        )
 
         if skipped_tasks or skipped_clients or skipped_presence or skipped_sessions or skipped_locks:
             self.state_driver_note = (

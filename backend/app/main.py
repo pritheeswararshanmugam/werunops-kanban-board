@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import difflib
 import uuid
 import os
@@ -12,7 +13,7 @@ from typing import Any, cast
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, PlainTextResponse, Response
+from fastapi.responses import HTMLResponse, PlainTextResponse, Response, StreamingResponse
 from starlette.middleware.base import RequestResponseEndpoint
 
 from app.models import (
@@ -658,9 +659,31 @@ def build_response(data: object, request: Request) -> APIResponse:
 
 
 def parse_bearer(authorization: str | None) -> str:
-    if not authorization or not authorization.startswith("Bearer "):
+    if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="Missing bearer token")
-    return authorization.removeprefix("Bearer ").strip()
+    return authorization[7:].strip()
+
+
+def resolve_request_token(
+    request: Request,
+    authorization: str | None,
+    *,
+    allow_cookie: bool = False,
+) -> str:
+    if authorization and authorization.lower().startswith("bearer "):
+        return authorization[7:].strip()
+
+    for key in ("access_token", "accessToken"):
+        token = request.query_params.get(key, "").strip()
+        if token:
+            return token
+
+    if allow_cookie:
+        token = request.cookies.get(ADMIN_PORTAL_COOKIE_NAME, "").strip()
+        if token:
+            return token
+
+    raise HTTPException(status_code=401, detail="Missing bearer token")
 
 
 def request_is_secure(request: Request) -> bool:
@@ -681,8 +704,11 @@ def set_admin_portal_cookie(response: Response, request: Request, token: str) ->
     )
 
 
-def current_user(authorization: str | None = Header(default=None, alias="Authorization")) -> UserProfile:
-    token = parse_bearer(authorization)
+def current_user(
+    request: Request,
+    authorization: str | None = Header(default=None, alias="Authorization"),
+) -> UserProfile:
+    token = resolve_request_token(request, authorization)
     try:
         return store.user_from_token(token)
     except UnauthorizedError as error:
@@ -1114,13 +1140,7 @@ def reassign_tasks(source_username: str, target_username: str, actor_name: str, 
 
 
 def resolve_admin_user(request: Request, authorization: str | None) -> tuple[UserProfile, str]:
-    token = ""
-    if authorization and authorization.lower().startswith("bearer "):
-        token = authorization[7:].strip()
-    if not token:
-        token = request.cookies.get(ADMIN_PORTAL_COOKIE_NAME, "").strip()
-    if not token:
-        raise HTTPException(status_code=401, detail="Missing bearer token")
+    token = resolve_request_token(request, authorization, allow_cookie=True)
 
     try:
         user = store.user_from_token(token)
@@ -1407,7 +1427,7 @@ async def admin_update_user_role(username: str, request: Request, admin: UserPro
 
     previous = user.get("role")
     user["role"] = role
-    store.save_state()
+    store.save_state("users")
     admin_log_event(admin, "user_role_updated", {"username": username, "from": previous, "to": role})
     return build_response({"ok": True, "username": username, "role": role, "accessLevel": role_access_label(role)}, request)
 
@@ -1439,7 +1459,7 @@ async def admin_create_user(request: Request, admin: UserProfile = Depends(curre
         "timezone": timezone,
         "isActive": True,
     }
-    store.save_state()
+    store.save_state("users")
     admin_log_event(admin, "user_created", {"username": username, "role": role, "department": department})
     return build_response(serialize_admin_user(username, store.users[username]), request)
 
@@ -1481,7 +1501,7 @@ async def admin_update_user_profile(username: str, request: Request, admin: User
     if password:
         user["passwordHash"] = sha256_hex(password)
 
-    store.save_state()
+    store.save_state("state")
     admin_log_event(
         admin,
         "user_profile_updated",
@@ -1509,7 +1529,7 @@ async def admin_reassign_user_tasks(username: str, request: Request, admin: User
         raise HTTPException(status_code=404, detail="Reassign target not found")
 
     changed_ids = reassign_tasks(username, target_username, admin.name, include_completed=include_completed)
-    store.save_state()
+    store.save_state("tasks")
     admin_log_event(admin, "tasks_reassigned", {"from": username, "to": target_username, "taskIds": changed_ids})
     return build_response({"from": username, "to": target_username, "taskIds": changed_ids, "count": len(changed_ids)}, request)
 
@@ -1544,7 +1564,7 @@ async def admin_update_task_approval(task_id: int, request: Request, admin: User
     )
     updated.activityLog.append(ActivityEntry(action=f"Approval set to {approval_status}", user=admin.name, timestamp=now))
     store.tasks[task_id] = updated
-    store.save_state()
+    store.save_state("tasks")
     admin_log_event(admin, "task_approval_updated", {"taskId": task_id, "approvalStatus": approval_status})
     return build_response(updated.model_dump(), request)
 
@@ -1570,7 +1590,7 @@ async def admin_save_filter(request: Request, admin: UserProfile = Depends(curre
     entry: dict[str, Any] = {"name": name, "filters": filters, "savedAt": datetime.now(UTC).isoformat(), "savedBy": admin.username}
     store.saved_filter_sets.insert(0, entry)
     store.saved_filter_sets = store.saved_filter_sets[:100]
-    store.save_state()
+    store.save_state("filters")
     admin_log_event(admin, "filter_saved", {"name": name})
     return build_response(entry, request)
 
@@ -1580,7 +1600,7 @@ def admin_delete_filter(name: str, request: Request, admin: UserProfile = Depend
     before = len(store.saved_filter_sets)
     store.saved_filter_sets = [item for item in store.saved_filter_sets if item.get("name") != name]
     if len(store.saved_filter_sets) != before:
-        store.save_state()
+        store.save_state("filters")
         admin_log_event(admin, "filter_deleted", {"name": name})
     return build_response({"deleted": len(store.saved_filter_sets) != before, "name": name}, request)
 
@@ -1630,7 +1650,7 @@ async def admin_bulk_update_tasks(request: Request, admin: UserProfile = Depends
         changed_ids.append(task_id)
 
     if updated:
-        store.save_state()
+        store.save_state("tasks")
         admin_log_event(admin, "tasks_bulk_updated", {"count": updated, "taskIds": changed_ids})
 
     return build_response({"updated": updated, "taskIds": changed_ids}, request)
@@ -1662,7 +1682,7 @@ async def admin_add_task_comment(task_id: int, request: Request, admin: UserProf
     bucket = store.task_comments.setdefault(task_id, [])
     bucket.insert(0, entry)
     store.task_comments[task_id] = bucket[:500]
-    store.save_state()
+    store.save_state("tasks")
     admin_log_event(admin, "task_comment_added", {"taskId": task_id, "commentId": entry["id"]})
     return build_response(entry, request)
 
@@ -1702,7 +1722,7 @@ async def admin_create_report_schedule(request: Request, admin: UserProfile = De
         "recipients": recipients,
     }
     store.automation_rules.append(schedule)
-    store.save_state()
+    store.save_state("automation")
     admin_log_event(admin, "report_schedule_created", {"id": schedule["id"], "reportName": report_name})
     return build_response(schedule, request)
 
@@ -1716,7 +1736,7 @@ def admin_delete_report_schedule(schedule_id: str, request: Request, admin: User
     ]
     deleted = len(store.automation_rules) != before
     if deleted:
-        store.save_state()
+        store.save_state("automation")
         admin_log_event(admin, "report_schedule_deleted", {"id": schedule_id})
     return build_response({"deleted": deleted, "id": schedule_id}, request)
 
@@ -1727,7 +1747,7 @@ def admin_toggle_rule(rule_id: str, request: Request, admin: UserProfile = Depen
     for rule in store.automation_rules:
         if str(rule.get("id")) == rule_id:
             rule["enabled"] = not bool(rule.get("enabled"))
-            store.save_state()
+            store.save_state("automation")
             admin_log_event(admin, "automation_rule_toggled", {"ruleId": rule_id, "enabled": rule["enabled"]})
             return build_response(rule, request)
     raise HTTPException(status_code=404, detail="Rule not found")
@@ -1905,9 +1925,45 @@ def auth_me(request: Request, user: UserProfile = Depends(current_user)):
     return build_response(serialize_authenticated_user(user), request)
 
 
+@app.get("/api/v1/events/shared-state")
+async def shared_state_events(request: Request, _: UserProfile = Depends(current_user)):
+    async def event_stream():
+        last_event_id = -1
+        keepalive_counter = 0
+
+        while True:
+            if await request.is_disconnected():
+                break
+
+            cursor = store.refresh_shared_event_cursor_if_needed(1.0)
+            event_id = int(cursor.get("eventId", 0))
+
+            if event_id != last_event_id:
+                yield f"id: {event_id}\nevent: shared-state\ndata: {json.dumps(cursor)}\n\n"
+                last_event_id = event_id
+                keepalive_counter = 0
+            else:
+                keepalive_counter += 1
+                if keepalive_counter >= 15:
+                    yield ": keepalive\n\n"
+                    keepalive_counter = 0
+
+            await asyncio.sleep(1.0)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @app.post("/api/v1/auth/logout", response_model=APIResponse)
 def auth_logout(request: Request, authorization: str | None = Header(default=None, alias="Authorization")):
-    token = parse_bearer(authorization)
+    token = resolve_request_token(request, authorization)
     store.logout(token)
     return build_response({"ok": True}, request)
 
@@ -1974,7 +2030,7 @@ def create_task(payload: TaskCreate, request: Request, user: UserProfile = Depen
         version=1,
     )
     store.tasks[task_id] = task
-    store.save_state()
+    store.save_state("tasks")
     return build_response(task.model_dump(), request)
 
 
@@ -1986,7 +2042,7 @@ def restore_task(payload: TaskRestoreRequest, request: Request, user: UserProfil
     store.tasks[task.id] = task
     if task.id >= store.next_task_id:
         store.next_task_id = task.id + 1
-    store.save_state()
+    store.save_state("tasks")
     return build_response(task.model_dump(), request)
 
 
@@ -2011,7 +2067,7 @@ def update_task(task_id: int, payload: TaskUpdate, request: Request, user: UserP
     updated = task.model_copy(update={**update_payload, "version": task.version + 1, "updatedAt": datetime.now(UTC)})
     updated.activityLog.append(ActivityEntry(action="Task updated", user=user.name, timestamp=datetime.now(UTC)))
     store.tasks[task_id] = updated
-    store.save_state()
+    store.save_state("tasks")
     return build_response(updated.model_dump(), request)
 
 
@@ -2030,7 +2086,7 @@ def patch_task_status(task_id: int, payload: TaskStatusPatch, request: Request, 
     updated = task.model_copy(update={"status": payload.status, "version": task.version + 1, "updatedAt": now})
     updated.activityLog.append(ActivityEntry(action=f'Status changed to "{payload.status}"', user=user.name, timestamp=now))
     store.tasks[task_id] = updated
-    store.save_state()
+    store.save_state("tasks")
     return build_response(updated.model_dump(), request)
 
 
@@ -2045,7 +2101,7 @@ def delete_task(task_id: int, request: Request, user: UserProfile = Depends(curr
     store.mark_task_deleted(task_id)
     store.tasks.pop(task_id)
     store.task_locks.pop(task_id, None)
-    store.save_state()
+    store.save_state("tasks")
     return build_response({"deleted": True, "taskId": task_id}, request)
 
 
@@ -2064,7 +2120,7 @@ def bulk_delete_tasks(payload: BulkDeleteRequest, request: Request, user: UserPr
         store.task_locks.pop(task_id, None)
         deleted += 1
     if deleted:
-        store.save_state()
+        store.save_state("tasks")
     return build_response({"deleted": deleted}, request)
 
 
@@ -2080,7 +2136,7 @@ def create_client(payload: ClientCreate, request: Request, user: UserProfile = D
     store.next_client_id += 1
     client = ClientOut.model_validate({"id": client_id, "version": 1, **payload.model_dump()})
     store.clients[client_id] = client
-    store.save_state()
+    store.save_state("clients")
     return build_response(client.model_dump(), request)
 
 
@@ -2095,7 +2151,7 @@ def update_client(client_id: int, payload: ClientUpdate, request: Request, user:
 
     updated = client.model_copy(update={**payload.model_dump(exclude={"version"}), "version": client.version + 1})
     store.clients[client_id] = updated
-    store.save_state()
+    store.save_state("clients")
     return build_response(updated.model_dump(), request)
 
 
@@ -2112,7 +2168,7 @@ def delete_client(client_id: int, request: Request, user: UserProfile = Depends(
 
     store.mark_client_deleted(client_id)
     store.clients.pop(client_id)
-    store.save_state()
+    store.save_state("clients")
     return build_response({"deleted": True, "clientId": client_id}, request)
 
 
@@ -2130,7 +2186,7 @@ def set_presence(payload: PresenceMeRequest, request: Request, user: UserProfile
         device=payload.device,
     )
     store.presence[user.username] = record
-    store.save_state()
+    store.save_state("presence")
     return build_response(record.model_dump(), request)
 
 
@@ -2154,7 +2210,7 @@ def start_session(payload: SessionStartRequest, request: Request, user: UserProf
         administrativeSeconds=payload.administrativeSeconds,
     )
     store.sessions[session_id] = session
-    store.save_state()
+    store.save_state("sessions")
     return build_response(session.model_dump(), request)
 
 
@@ -2180,7 +2236,7 @@ def end_session(session_id: str, request: Request, user: UserProfile = Depends(c
 
     session.logoutTime = datetime.now(UTC)
     store.sessions[session_id] = session
-    store.save_state()
+    store.save_state("sessions")
     return build_response(session.model_dump(), request)
 
 

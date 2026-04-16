@@ -739,6 +739,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         store.stopPresenceHeartbeat();
         store.stopTaskLockListener();
         store.stopBackendSyncPolling?.();
+        store.stopBackendEventStream?.();
         void stopCurrentTaskEditSession();
         stopSessionActivityTracking();
         currentUser = null;
@@ -3364,6 +3365,7 @@ async function setupAuth() {
                 store.startPresenceListener(() => updateHeaderProfile());
                 store.startTaskLockListener();
                 store.startBackendSyncPolling?.();
+                store.startBackendEventStream?.(() => updateHeaderProfile());
                 startSessionActivityTracking();
                 setCurrentPresenceStatus(currentUser.presenceStatus || 'online', { silent: true, sync: false });
                 updateHeaderProfile();
@@ -3420,6 +3422,7 @@ async function setupAuth() {
                     });
                     store.startTaskLockListener();
                     store.startBackendSyncPolling?.();
+                    store.startBackendEventStream?.(() => updateHeaderProfile());
                 }
 
                 store.startPresenceHeartbeat(currentUser.username);
@@ -3456,6 +3459,7 @@ async function setupAuth() {
         store.stopPresenceHeartbeat();
         store.stopTaskLockListener();
         store.stopBackendSyncPolling?.();
+        store.stopBackendEventStream?.();
         await stopCurrentTaskEditSession();
         if (currentUser) {
             currentUser.presenceStatus = 'offline';
@@ -4152,6 +4156,7 @@ function setupHeaderFeatures() {
     const searchInput = document.getElementById('header-search-input');
     const resultsContainer = document.getElementById('header-search-results');
     const workStatusSelect = document.getElementById('header-work-status');
+    const headerUserPanel = document.getElementById('header-user-panel');
 
     workStatusSelect?.addEventListener('change', (event) => {
         const nextStatus = normalizePresenceStatus(event.target.value);
@@ -4160,6 +4165,7 @@ function setupHeaderFeatures() {
             return;
         }
         setCurrentPresenceStatus(nextStatus, { silent: true });
+        headerUserPanel?.classList.add('hidden');
         const nextLabel = getPresenceStatusMeta(nextStatus).label;
         if (nextStatus === 'away') {
             showNotification('Break Logged', `${nextLabel} is active. Idle tracking is paused until you return.`, 'info');

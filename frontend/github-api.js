@@ -111,9 +111,9 @@ function getRuntimePresenceState() {
 const ADAPTIVE_POLLING_IDLE_AFTER_MS = 60 * 1000;
 const ADAPTIVE_POLLING_INTERVALS = {
     taskLocks: { active: 5000, idle: 20000, hidden: 60000 },
-    backendSync: { active: 3000, idle: 10000, hidden: 30000 },
+    backendSync: { active: 30000, idle: 60000, hidden: 120000 },
     presenceHeartbeat: { active: 10000, idle: 20000, hidden: 45000 },
-    presenceListener: { active: 3000, idle: 8000, hidden: 30000 }
+    presenceListener: { active: 30000, idle: 60000, hidden: 120000 }
 };
 const LOCAL_STATE_CACHE_KEY = 'backoffice_state';
 const LOCAL_STATE_BACKUP_KEY = 'backoffice_state_backup';
@@ -332,6 +332,12 @@ class DataStore {
         this.taskLocksInterval = null;
         this.backendSyncInterval = null;
         this.backendSyncInFlight = null;
+        this.backendEventsSource = null;
+        this.backendEventReconnectTimer = null;
+        this.backendEventRefreshTimer = null;
+        this.backendEventPendingScopes = new Set();
+        this.backendEventLastCursorId = 0;
+        this.backendEventOnPresenceUpdate = null;
         this.presenceInterval = null;
         this.presenceListenerInterval = null;
         this.offlineQueueKey = 'werunops_offline_actions';
@@ -592,6 +598,7 @@ class DataStore {
             err.detail = detail;
 
             if (response.status === 401) {
+                this.stopBackendEventStream();
                 clearCurrentSession();
                 if (typeof window !== 'undefined') {
                     window.dispatchEvent(new CustomEvent('werunops-auth-invalid', { detail: { status: response.status } }));
@@ -889,6 +896,152 @@ class DataStore {
         return mapped;
     }
 
+    normalizeBackendEventScope(scope) {
+        const raw = String(scope || '').trim().toLowerCase().replace(/[-\s]+/g, '_');
+        const allowed = new Set(['state', 'tasks', 'clients', 'presence', 'locks', 'sessions', 'users', 'filters', 'automation', 'audit']);
+        return allowed.has(raw) ? raw : 'state';
+    }
+
+    async refreshBackendPresence(notify = false, onPresenceUpdate = null) {
+        if (!this.isBackendReady() || !this.hasBackendAuth()) return {};
+
+        const response = await this.backendFetch('/presence');
+        const payload = await response.json();
+        const data = payload?.data || [];
+        const mapped = {};
+        data.forEach(item => {
+            mapped[item.username] = normalizePresenceRecord({
+                online: !!item.online,
+                status: item.status,
+                lastSeen: item.lastSeen,
+                browser: item.browser,
+                device: item.device
+            });
+        });
+
+        if (this.state) {
+            this.state.livePresence = mapped;
+            if (notify) {
+                this.notify();
+            }
+            if (onPresenceUpdate) {
+                onPresenceUpdate(mapped);
+            }
+        }
+
+        return mapped;
+    }
+
+    queueBackendEventRefresh(scope = 'state') {
+        if (!this.isBackendReady() || !this.hasBackendAuth()) return;
+
+        this.backendEventPendingScopes.add(this.normalizeBackendEventScope(scope));
+        if (this.backendEventRefreshTimer) return;
+
+        this.backendEventRefreshTimer = setTimeout(async () => {
+            const scopes = new Set(this.backendEventPendingScopes);
+            this.backendEventPendingScopes.clear();
+            this.backendEventRefreshTimer = null;
+
+            try {
+                const needsFullRefresh = Array.from(scopes).some(candidate => !['presence', 'locks'].includes(candidate));
+                if (needsFullRefresh) {
+                    await this.refreshBackendSharedState();
+                    return;
+                }
+
+                let shouldNotify = false;
+                if (scopes.has('locks')) {
+                    await this.fetchTaskLocks().catch(() => {});
+                    shouldNotify = true;
+                }
+                if (scopes.has('presence')) {
+                    await this.refreshBackendPresence(false, this.backendEventOnPresenceUpdate).catch(() => {});
+                    shouldNotify = true;
+                }
+
+                if (shouldNotify && this.state) {
+                    this.notify();
+                }
+            } catch (error) {
+                // Best-effort realtime refresh; fallback polling still runs.
+            }
+        }, 120);
+    }
+
+    startBackendEventStream(onPresenceUpdate) {
+        if (!this.isBackendReady() || !this.hasBackendAuth() || typeof EventSource === 'undefined') return;
+
+        this.backendEventOnPresenceUpdate = onPresenceUpdate || null;
+        this.stopBackendEventStream({ preserveCursor: true, preservePresenceCallback: true });
+
+        const token = this.getBackendToken();
+        if (!token) return;
+
+        const url = `${CONFIG.backendApiBase}/events/shared-state?access_token=${encodeURIComponent(token)}`;
+        const source = new EventSource(url);
+        this.backendEventsSource = source;
+
+        source.addEventListener('shared-state', (event) => {
+            try {
+                const payload = JSON.parse(event.data || '{}');
+                const nextEventId = Math.max(0, Number(payload?.eventId) || 0);
+                if (nextEventId <= this.backendEventLastCursorId) {
+                    return;
+                }
+                this.backendEventLastCursorId = nextEventId;
+                this.queueBackendEventRefresh(payload?.scope || 'state');
+            } catch (error) {
+                // Ignore malformed realtime frames and rely on fallback polling.
+            }
+        });
+
+        source.onerror = () => {
+            if (this.backendEventsSource === source) {
+                this.backendEventsSource = null;
+            }
+            source.close();
+
+            if (this.backendEventReconnectTimer) {
+                clearTimeout(this.backendEventReconnectTimer);
+            }
+
+            if (!this.hasBackendAuth()) {
+                return;
+            }
+
+            this.backendEventReconnectTimer = setTimeout(() => {
+                this.backendEventReconnectTimer = null;
+                this.startBackendEventStream(this.backendEventOnPresenceUpdate);
+            }, 2000);
+        };
+    }
+
+    stopBackendEventStream(options = {}) {
+        const preserveCursor = options.preserveCursor === true;
+        const preservePresenceCallback = options.preservePresenceCallback === true;
+
+        if (this.backendEventsSource) {
+            this.backendEventsSource.close();
+            this.backendEventsSource = null;
+        }
+        if (this.backendEventReconnectTimer) {
+            clearTimeout(this.backendEventReconnectTimer);
+            this.backendEventReconnectTimer = null;
+        }
+        if (this.backendEventRefreshTimer) {
+            clearTimeout(this.backendEventRefreshTimer);
+            this.backendEventRefreshTimer = null;
+        }
+        this.backendEventPendingScopes.clear();
+        if (!preserveCursor) {
+            this.backendEventLastCursorId = 0;
+        }
+        if (!preservePresenceCallback) {
+            this.backendEventOnPresenceUpdate = null;
+        }
+    }
+
     startTaskLockListener(onLockUpdate) {
         if (!this.isBackendReady() || !this.hasBackendAuth()) return;
         const pollLocks = async () => {
@@ -914,24 +1067,9 @@ class DataStore {
             try {
                 await this.fetchFromBackend(true);
                 await this.fetchTaskLocks().catch(() => {});
-
-                // Keep presence in sync for all logged-in users while backend mode is active.
-                const response = await this.backendFetch('/presence');
-                const payload = await response.json();
-                const data = payload?.data || [];
-                const mapped = {};
-                data.forEach(item => {
-                    mapped[item.username] = normalizePresenceRecord({
-                        online: !!item.online,
-                        status: item.status,
-                        lastSeen: item.lastSeen,
-                        browser: item.browser,
-                        device: item.device
-                    });
-                });
+                await this.refreshBackendPresence(false, this.backendEventOnPresenceUpdate).catch(() => {});
 
                 if (this.state) {
-                    this.state.livePresence = mapped;
                     this.notify();
                 }
             } catch (error) {
@@ -944,13 +1082,13 @@ class DataStore {
         return this.backendSyncInFlight;
     }
 
-    startBackendSyncPolling(intervalMs = 8000) {
+    startBackendSyncPolling(intervalMs = 30000) {
         if (!this.isBackendReady() || !this.hasBackendAuth()) return;
         this.scheduleAdaptiveLoop(
             'backendSyncInterval',
             () => this.refreshBackendSharedState(),
             'backendSync',
-            Math.max(3000, Number(intervalMs) || 8000),
+            Math.max(10000, Number(intervalMs) || 30000),
             true
         );
     }
@@ -1036,34 +1174,18 @@ class DataStore {
     startPresenceListener(onPresenceUpdate) {
         if (this.isBackendReady()) {
             if (!this.hasBackendAuth()) return;
+            this.backendEventOnPresenceUpdate = onPresenceUpdate || null;
             const pollPresence = async () => {
                 if (!this.hasBackendAuth()) {
                     this.stopPresenceHeartbeat();
                     return;
                 }
                 try {
-                    const response = await this.backendFetch('/presence');
-                    const payload = await response.json();
-                    const data = payload?.data || [];
-                    const mapped = {};
-                    data.forEach(item => {
-                        mapped[item.username] = normalizePresenceRecord({
-                            online: !!item.online,
-                            status: item.status,
-                            lastSeen: item.lastSeen,
-                            browser: item.browser,
-                            device: item.device
-                        });
-                    });
-                    if (this.state) {
-                        this.state.livePresence = mapped;
-                        this.notify();
-                        if (onPresenceUpdate) onPresenceUpdate(mapped);
-                    }
+                    await this.refreshBackendPresence(true, onPresenceUpdate);
                 } catch (error) { }
             };
 
-            this.scheduleAdaptiveLoop('presenceListenerInterval', pollPresence, 'presenceListener', 10000, true);
+            this.scheduleAdaptiveLoop('presenceListenerInterval', pollPresence, 'presenceListener', 30000, true);
             return;
         }
 
