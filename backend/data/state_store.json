@@ -40,13 +40,13 @@
       "timezone": "Asia/Kolkata",
       "isActive": true
     },
-    "PortalVerify1776330075668": {
-      "username": "PortalVerify1776330075668",
-      "passwordHash": "9d6ca2185eba968706ba9ef07abde8e2dd8d7555f2d2590968a402318ac8cf9c",
-      "name": "Portal Verify User",
-      "role": "Manager",
+    "OpsSpec1776334173534": {
+      "username": "OpsSpec1776334173534",
+      "passwordHash": "aaaaced8224b65b30ce2b745d3a130b3370371d92c5f5f01ea75522b1f42ce3c",
+      "name": "Playwright Operations Specialist",
+      "role": "User",
       "initials": "P",
-      "department": "QA",
+      "department": "Operations",
       "timezone": "UTC",
       "isActive": true
     }
@@ -109,6 +109,35 @@
         }
       ],
       "version": 1
+    },
+    {
+      "client": "PW Specialist Client 1776334173534",
+      "project": "Specialist Access Validation",
+      "task": "PW Admin Assigned Task 1776334173534",
+      "staff": "OpsSpec1776334173534",
+      "status": "In Progress",
+      "priority": "High",
+      "startDate": "",
+      "dueDate": "",
+      "waitingFor": "",
+      "notes": "Created by admin for specialist RBAC validation",
+      "parentId": null,
+      "operationalCategory": "",
+      "approvalStatus": "Pending",
+      "approvedBy": null,
+      "approvedAt": null,
+      "id": 3,
+      "createdAt": "2026-04-16T10:09:33.594184Z",
+      "updatedAt": "2026-04-16T10:09:33.594184Z",
+      "createdBy": "Pritheeswarar",
+      "activityLog": [
+        {
+          "action": "Task created",
+          "user": "Pritheeswarar",
+          "timestamp": "2026-04-16T10:09:33.594184Z"
+        }
+      ],
+      "version": 1
     }
   ],
   "clients": [
@@ -127,23 +156,31 @@
       "phone": "555-0101",
       "id": 2,
       "version": 1
+    },
+    {
+      "name": "PW Specialist Client 1776334173534",
+      "contact": "Playwright Specialist Flow",
+      "email": "ops_spec_1776334173534@example.com",
+      "phone": "555-0101",
+      "id": 3,
+      "version": 1
     }
   ],
   "presence": [
     {
       "username": "Eshwar",
       "online": true,
-      "status": "online",
-      "lastSeen": "2026-04-16T09:01:12.974326Z",
+      "status": "away",
+      "lastSeen": "2026-04-16T10:12:24.564657Z",
       "browser": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.7632.6 Safari/537.36 Edg/145.0.7632.6",
       "device": "Web"
     }
   ],
   "sessions": [
     {
-      "id": "sess_df89f78c9104",
+      "id": "sess_7c0ac7bb44e9",
       "username": "Eshwar",
-      "loginTime": "2026-04-16T09:01:12.892148Z",
+      "loginTime": "2026-04-16T10:09:34.320218Z",
       "logoutTime": null,
       "durationSeconds": 0,
       "activeSeconds": 0,
@@ -159,26 +196,15 @@
   "task_locks": [],
   "admin_audit_logs": [
     {
-      "id": "audit_7ed4d17be7",
-      "timestamp": "2026-04-16T09:01:16.452610+00:00",
-      "admin": "Eshwar",
-      "adminName": "Pritheeswarar",
-      "action": "task_comment_added",
-      "details": {
-        "taskId": 1,
-        "commentId": "c_eef01f7a"
-      }
-    },
-    {
-      "id": "audit_5a01dcf398",
-      "timestamp": "2026-04-16T09:01:15.907041+00:00",
+      "id": "audit_66ea90c2b1",
+      "timestamp": "2026-04-16T10:09:33.545549+00:00",
       "admin": "Eshwar",
       "adminName": "Pritheeswarar",
       "action": "user_created",
       "details": {
-        "username": "PortalVerify1776330075668",
-        "role": "Manager",
-        "department": "QA"
+        "username": "OpsSpec1776334173534",
+        "role": "User",
+        "department": "Operations"
       }
     }
   ],
@@ -199,18 +225,7 @@
       "action": "notify_admin"
     }
   ],
-  "task_comments": {
-    "1": [
-      {
-        "id": "c_eef01f7a",
-        "taskId": 1,
-        "comment": "Portal verification comment",
-        "user": "Pritheeswarar",
-        "username": "Eshwar",
-        "timestamp": "2026-04-16T09:01:16.451340+00:00"
-      }
-    ]
-  },
-  "next_task_id": 3,
-  "next_client_id": 3
+  "task_comments": {},
+  "next_task_id": 4,
+  "next_client_id": 4
 }

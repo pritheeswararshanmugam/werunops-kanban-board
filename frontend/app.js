@@ -3407,8 +3407,17 @@ async function setupAuth() {
                 currentUser = { ...session };
                 persistSession(currentUser);
 
+                const signedInUsername = currentUser.username;
+                window.location.hash = '#/dashboard';
+                updateHeaderProfile();
+
                 if (store.isBackendReady()) {
-                    await store.fetchFromBackend();
+                    void store.fetchFromBackend().catch((error) => {
+                        console.error('Initial backend sync failed after sign-in:', error);
+                        if (readSession()?.username === signedInUsername) {
+                            showNotification('Sync Delayed', 'Signed in successfully. Fresh data is still loading.', 'warning');
+                        }
+                    });
                     store.startTaskLockListener();
                     store.startBackendSyncPolling?.();
                 }
@@ -3417,9 +3426,6 @@ async function setupAuth() {
                 store.startPresenceListener(() => updateHeaderProfile());
                 startSessionActivityTracking();
                 setCurrentPresenceStatus(currentUser.presenceStatus || 'online', { silent: true, sync: false });
-
-                window.location.hash = '#/dashboard';
-                updateHeaderProfile();
                 showNotification('Welcome', `Successfully signed in as ${currentUser.name}.`, 'success');
             } else if (errorMsg) {
                 errorMsg.textContent = 'Invalid username or password.';
@@ -3453,8 +3459,11 @@ async function setupAuth() {
         await stopCurrentTaskEditSession();
         if (currentUser) {
             currentUser.presenceStatus = 'offline';
-            persistSession(currentUser);
         }
+        clearSession();
+        window.location.hash = '#/login';
+        document.getElementById('login-password').value = '';
+
         await syncCurrentPresenceState('offline').catch(() => {});
         await flushSessionHeartbeat(true);
         stopSessionActivityTracking();
@@ -3475,10 +3484,6 @@ async function setupAuth() {
         }
         
         currentUser = null;
-        clearSession();
-        
-        window.location.hash = '#/login';
-        document.getElementById('login-password').value = '';
     });
 }
 

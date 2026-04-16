@@ -111,9 +111,9 @@ function getRuntimePresenceState() {
 const ADAPTIVE_POLLING_IDLE_AFTER_MS = 60 * 1000;
 const ADAPTIVE_POLLING_INTERVALS = {
     taskLocks: { active: 5000, idle: 20000, hidden: 60000 },
-    backendSync: { active: 8000, idle: 25000, hidden: 90000 },
-    presenceHeartbeat: { active: 20000, idle: 30000, hidden: 60000 },
-    presenceListener: { active: 10000, idle: 25000, hidden: 60000 }
+    backendSync: { active: 3000, idle: 10000, hidden: 30000 },
+    presenceHeartbeat: { active: 10000, idle: 20000, hidden: 45000 },
+    presenceListener: { active: 3000, idle: 8000, hidden: 30000 }
 };
 const LOCAL_STATE_CACHE_KEY = 'backoffice_state';
 const LOCAL_STATE_BACKUP_KEY = 'backoffice_state_backup';
@@ -1592,24 +1592,48 @@ class DataStore {
     async deleteTasks(taskIds) {
         if (!this.state) return;
 
+        const normalizedIds = taskIds
+            .map(item => parseInt(item))
+            .filter(item => Number.isFinite(item));
+
+        if (!normalizedIds.length) return;
+
         if (this.isBackendReady()) {
-            const normalizedIds = taskIds.map(item => parseInt(item));
             if (!navigator.onLine) {
                 this.state.tasks = this.state.tasks.filter(t => !normalizedIds.includes(parseInt(t.id)));
                 this.enqueueOfflineAction({ type: 'deleteTasks', payload: { taskIds: normalizedIds } });
                 this.saveToLocal();
                 return;
             }
-            await this.backendFetch('/tasks/bulk-delete', {
-                method: 'POST',
-                body: JSON.stringify({ taskIds: normalizedIds })
-            });
-            await this.fetchFromBackend();
+
+            const previousTasks = this.state.tasks;
+            const previousTaskLocks = { ...(this.state.taskLocks || {}) };
+
+            this.state.tasks = this.state.tasks.filter(t => !normalizedIds.includes(parseInt(t.id)));
+            if (this.state.taskLocks) {
+                normalizedIds.forEach((id) => {
+                    delete this.state.taskLocks[id];
+                });
+            }
+            this.saveToLocal();
+
+            try {
+                await this.backendFetch('/tasks/bulk-delete', {
+                    method: 'POST',
+                    body: JSON.stringify({ taskIds: normalizedIds })
+                });
+                void this.fetchFromBackend(true).catch(() => {});
+            } catch (error) {
+                this.state.tasks = previousTasks;
+                this.state.taskLocks = previousTaskLocks;
+                this.saveToLocal();
+                throw error;
+            }
             return;
         }
 
         await this.runWithConflictRetry(async () => {
-            this.state.tasks = this.state.tasks.filter(t => !taskIds.includes(t.id.toString()) && !taskIds.includes(t.id));
+            this.state.tasks = this.state.tasks.filter(t => !normalizedIds.includes(parseInt(t.id)));
         });
     }
 
@@ -1674,8 +1698,19 @@ class DataStore {
             if (!existing) {
                 throw new Error(`Client "${clientName}" not found.`);
             }
-            await this.backendFetch(`/clients/${existing.id}`, { method: 'DELETE' });
-            await this.fetchFromBackend();
+
+            const previousClients = this.state.config.clients;
+            this.state.config.clients = this.state.config.clients.filter(item => item.name !== clientName);
+            this.saveToLocal();
+
+            try {
+                await this.backendFetch(`/clients/${existing.id}`, { method: 'DELETE' });
+                void this.fetchFromBackend(true).catch(() => {});
+            } catch (error) {
+                this.state.config.clients = previousClients;
+                this.saveToLocal();
+                throw error;
+            }
             return;
         }
 
