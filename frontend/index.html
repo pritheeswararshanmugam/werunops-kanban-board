@@ -120,7 +120,7 @@
             <button
                 class="nav-tab flex items-center gap-3 w-full rounded-lg px-3 py-3 text-sm font-medium transition-colors text-slate-500 hover:bg-slate-100 hover:text-slate-700"
                 data-target="view-kanban">
-                <i data-lucide="trello" class="w-4 h-4"></i>
+                <i data-lucide="layout-grid" class="w-4 h-4"></i>
                 Kanban Board
             </button>
             <button
@@ -162,7 +162,7 @@
                         <i data-lucide="search" class="w-5 h-5"></i>
                         <span class="hidden md:inline text-sm font-medium">Search</span>
                     </button>
-                    <div class="absolute right-0 md:left-0 md:right-auto mt-2 md:mt-3 w-[92vw] max-w-72 md:w-80 bg-white rounded-xl shadow-xl border border-slate-200 hidden p-3 text-sm text-slate-500"
+                    <div class="absolute right-0 md:left-full md:right-auto mt-2 md:mt-0 md:ml-3 top-8 md:top-auto md:bottom-0 w-[92vw] max-w-72 md:w-80 bg-white rounded-xl shadow-xl border border-slate-200 hidden p-3 text-sm text-slate-500"
                         id="header-search-panel">
                         <input type="text" id="header-search-input" placeholder="Search tasks by name or ID..."
                             class="w-full border-slate-200 border rounded-xl bg-slate-50 px-3 py-2 text-slate-700 focus:border-slate-400 focus:bg-white outline-none">
@@ -181,7 +181,7 @@
                         <span class="hidden md:inline text-sm font-medium">Alerts</span>
                         <span class="absolute top-2 right-2 md:right-3 w-2 h-2 bg-rose-500 rounded-full" id="notification-dot"></span>
                     </button>
-                    <div class="absolute right-0 md:left-0 md:right-auto mt-2 md:mt-3 top-8 md:top-full w-[92vw] max-w-80 md:w-80 bg-white rounded-xl shadow-xl border border-slate-200 hidden flex-col overflow-hidden max-h-96"
+                    <div class="absolute right-0 md:left-full md:right-auto mt-2 md:mt-0 md:ml-3 top-8 md:top-auto md:bottom-0 w-[92vw] max-w-80 md:w-[22rem] bg-white rounded-xl shadow-xl border border-slate-200 hidden flex-col overflow-hidden max-h-96"
                         id="header-notifications-panel">
                     <div
                         class="px-4 py-3 border-b border-slate-100 font-semibold text-slate-700 text-sm flex justify-between items-center">
@@ -268,7 +268,7 @@
             <button id="btn-discard-offline-failed" type="button" class="hidden px-2 py-1 text-xs rounded border border-amber-300 bg-white hover:bg-amber-50">Discard Failed</button>
         </div>
     </div>
-    <main class="mt-16 md:mt-0 md:ml-64 min-h-screen overflow-y-auto w-full relative hidden bg-slate-50" id="main-content">
+    <main class="mt-16 md:mt-0 md:ml-64 min-h-screen overflow-y-auto overflow-x-hidden w-full md:w-auto relative hidden bg-slate-50" id="main-content">
 
         <!-- Loading Overlay -->
         <div id="global-loader" class="absolute inset-0 bg-slate-50/90 z-50 flex items-center justify-center backdrop-blur-sm">

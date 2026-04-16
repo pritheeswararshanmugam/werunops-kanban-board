@@ -1304,7 +1304,12 @@ function updateStatusChart(tasks, statusList) {
 function updatePriorityChart(tasks, priorityList) {
     const ctx = document.getElementById('chart-priority').getContext('2d');
     const counts = priorityList.map(prio => tasks.filter(t => t.priority === prio && t.status !== 'Completed').length);
-    const bgColors = ['#475569', '#64748b', '#94a3b8'];
+    const priorityColorMap = {
+        'High': '#be123c',
+        'Medium': '#4f46e5',
+        'Low': '#059669'
+    };
+    const bgColors = priorityList.map((priority) => priorityColorMap[priority] || '#64748b');
 
     if (!charts.priority) {
         charts.priority = new Chart(ctx, {
@@ -1468,7 +1473,10 @@ function updateStaffChart(tasks, staffList) {
 
     const labels = workloads.length ? workloads.map(w => w.name) : ['No active tasks'];
     const data = workloads.length ? workloads.map(w => w.count) : [0];
-    const backgroundColor = workloads.length ? '#475569' : '#e2e8f0';
+    const staffPalette = ['#0f766e', '#6366f1', '#c2410c', '#334155', '#be123c', '#0f766e', '#7c3aed'];
+    const backgroundColor = workloads.length
+        ? workloads.map((_, index) => staffPalette[index % staffPalette.length])
+        : '#e2e8f0';
 
     if (!charts.staff) {
         charts.staff = new Chart(ctx, {
@@ -1545,7 +1553,7 @@ function updateClientChart(tasks) {
     const finalLabels = labels.length > 0 ? labels : ['No active tasks'];
     const finalData = counts.length > 0 ? counts : [1];
     const finalColors = counts.length > 0
-        ? ['#334155', '#475569', '#64748b', '#94a3b8', '#10b981', '#cbd5e1']
+        ? ['#334155', '#0f766e', '#4f46e5', '#c2410c', '#be123c', '#94a3b8']
         : ['#e2e8f0'];
     const legendPosition = finalLabels.length <= 3 ? 'bottom' : 'right';
 
@@ -2055,31 +2063,48 @@ function renderClientsList(state) {
         const activeTasks = state.tasks.filter(t => t.client === client.name && t.status !== 'Completed').length;
         const totalTasks = state.tasks.filter(t => t.client === client.name).length;
         const safeName = safe(client.name);
+        const safeInitial = safe((client.name || '?').trim().charAt(0).toUpperCase() || '?');
         const safeContact = safe(client.contact || '');
         const safeEmail = safe(client.email || '');
         const safePhone = safe(client.phone || '');
         const encodedName = encodeURIComponent(client.name);
         const deleteDisabledClass = activeTasks > 0 ? 'opacity-30 cursor-not-allowed' : '';
         const deleteDisabledAttr = activeTasks > 0 ? 'disabled' : '';
+        const statusText = activeTasks > 0 ? 'Active' : 'Inactive';
+        const statusHint = activeTasks > 0 ? 'Tasks in progress' : 'No active blockers';
 
         html += `
             <tr class="bg-white hover:bg-slate-50 transition-colors border-b border-slate-100 group">
                 <td class="px-6 py-4">
-                    <div class="font-bold text-slate-900">${safeName}</div>
-                    ${client.contact ? `<div class="text-xs text-slate-500 mt-1"><i data-lucide="user" class="w-3 h-3 inline mr-1"></i>${safeContact}</div>` : ''}
-                    ${client.email ? `<div class="text-xs text-slate-400 mt-0.5"><i data-lucide="mail" class="w-3 h-3 inline mr-1"></i>${safeEmail}</div>` : ''}
-                    ${client.phone ? `<div class="text-xs text-slate-400 mt-0.5"><i data-lucide="phone" class="w-3 h-3 inline mr-1"></i>${safePhone}</div>` : ''}
+                    <div class="flex items-start gap-3 min-w-0">
+                        <div class="w-10 h-10 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center text-sm font-bold flex-shrink-0">
+                            ${safeInitial}
+                        </div>
+                        <div class="min-w-0">
+                            <div class="font-bold tracking-tight text-slate-900 truncate">${safeName}</div>
+                            ${client.contact ? `<div class="text-xs text-slate-500 mt-1 font-medium"><i data-lucide="user" class="w-3 h-3 inline mr-1"></i>${safeContact}</div>` : ''}
+                            ${client.email ? `<div class="text-xs text-slate-400 mt-0.5 truncate"><i data-lucide="mail" class="w-3 h-3 inline mr-1"></i>${safeEmail}</div>` : ''}
+                            ${client.phone ? `<div class="text-xs text-slate-400 mt-0.5"><i data-lucide="phone" class="w-3 h-3 inline mr-1"></i>${safePhone}</div>` : ''}
+                        </div>
+                    </div>
                 </td>
-                <td class="px-6 py-4 whitespace-nowrap">
-                    <span class="status-badge ${activeTasks > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}">
-                        ${activeTasks > 0 ? 'Active' : 'Inactive'}
-                    </span>
+                <td class="px-6 py-4 whitespace-nowrap align-top">
+                    <div class="flex flex-col items-start gap-2">
+                        <span class="status-badge ${activeTasks > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}">
+                            ${statusText}
+                        </span>
+                        <span class="text-xs font-medium text-slate-400">${statusHint}</span>
+                    </div>
                 </td>
-                <td class="px-6 py-4 whitespace-nowrap">
-                    <div class="text-sm font-semibold text-slate-700 tabular-nums">${activeTasks} <span class="text-slate-400 font-normal">/ ${totalTasks} total</span></div>
+                <td class="px-6 py-4 whitespace-nowrap align-top">
+                    <div class="flex flex-wrap gap-2">
+                        <span class="inline-flex items-center rounded-full bg-indigo-100 text-indigo-700 px-2.5 py-1 text-xs font-bold tabular-nums">Open ${activeTasks}</span>
+                        <span class="inline-flex items-center rounded-full bg-slate-100 text-slate-600 px-2.5 py-1 text-xs font-bold tabular-nums">Total ${totalTasks}</span>
+                    </div>
+                    <div class="mt-2 text-xs font-medium text-slate-400">${activeTasks > 0 ? 'Delete stays disabled until open work is cleared.' : 'Ready for cleanup or archive.'}</div>
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap text-right">
-                    <div class="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div class="flex justify-end gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                         ${readOnlyClientView ? '' : `
                             <button class="text-slate-400 hover:text-primary transition p-1" onclick="openClientModalByEncoded('${encodedName}')" title="Edit Client">
                                 <i data-lucide="edit-2" class="w-4 h-4"></i>
