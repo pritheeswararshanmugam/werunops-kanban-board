@@ -4,51 +4,60 @@
     <meta charset='utf-8' />
     <meta name='viewport' content='width=device-width, initial-scale=1' />
     <title>WeRunOps Admin Operations Portal</title>
+    <link rel='preconnect' href='https://fonts.googleapis.com' />
+    <link rel='preconnect' href='https://fonts.gstatic.com' crossorigin />
+    <link href='https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap' rel='stylesheet' />
     <style>
-        :root { --bg:#f6f8fc; --ink:#1f2937; --muted:#6b7280; --line:#e5e7eb; --panel:#ffffff; --brand:#0f766e; --warn:#b45309; --danger:#b91c1c; }
+        :root { --bg:#f8fafc; --ink:#0f172a; --muted:#64748b; --line:#e2e8f0; --panel:#ffffff; --brand:#334155; --brand-hover:#1e293b; --soft:#f1f5f9; --warn:#b45309; --danger:#be123c; }
         * { box-sizing: border-box; }
-        body { margin:0; padding:18px; font-family: Segoe UI, Arial, sans-serif; color: var(--ink); background: var(--bg); }
-        h1 { margin:0; font-size:30px; }
-        h3 { margin:0 0 8px; }
-        .muted { color: var(--muted); margin-top:6px; }
-        .tabs { margin-top:12px; display:flex; gap:8px; flex-wrap:wrap; }
-        .tab { border:1px solid #d1d5db; background:#fff; border-radius:8px; padding:8px 12px; cursor:pointer; font-weight:600; }
-        .tab.active { background:var(--brand); color:#fff; border-color:var(--brand); }
-        .section { display:none; margin-top:12px; }
+        body { margin:0; padding:24px; font-family:'Inter','Plus Jakarta Sans',Segoe UI,Arial,sans-serif; color: var(--ink); background: var(--bg); }
+        body::before { content:''; position:fixed; inset:0; pointer-events:none; opacity:0.45; background-image:linear-gradient(rgba(148,163,184,0.12) 1px, transparent 1px), linear-gradient(90deg, rgba(148,163,184,0.12) 1px, transparent 1px); background-size:32px 32px; }
+        h1 { margin:0; font-size:34px; font-weight:800; letter-spacing:-0.04em; }
+        h3 { margin:0 0 8px; font-size:18px; font-weight:700; letter-spacing:-0.02em; }
+        .hero { position:relative; background:linear-gradient(135deg, rgba(51,65,85,0.08), rgba(226,232,240,0.55)); border:1px solid var(--line); border-radius:24px; padding:24px 26px; box-shadow:0 18px 48px rgba(15,23,42,0.08); }
+        .eyebrow { color:#94a3b8; font-size:11px; font-weight:700; letter-spacing:0.24em; text-transform:uppercase; }
+        .muted { color: var(--muted); margin-top:8px; font-size:14px; font-weight:500; max-width:720px; }
+        .tabs { position:relative; margin-top:18px; display:flex; gap:10px; flex-wrap:wrap; }
+        .tab { border:1px solid transparent; background:transparent; color:var(--muted); border-radius:12px; padding:10px 14px; cursor:pointer; font-weight:600; transition:background-color .2s ease, color .2s ease, border-color .2s ease, box-shadow .2s ease; }
+        .tab:hover { background:#fff; color:var(--ink); border-color:var(--line); }
+        .tab.active { background:#fff; color:var(--ink); border-color:var(--line); box-shadow:0 1px 2px rgba(15,23,42,0.06); }
+        .section { display:none; margin-top:18px; }
         .section.active { display:block; }
-        .panel { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px; margin-top:10px; }
+        .panel { background:var(--panel); border:1px solid var(--line); border-radius:20px; padding:18px; margin-top:12px; box-shadow:0 1px 2px rgba(15,23,42,0.04); }
         .row { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; }
         .row.center { align-items:center; }
         .field { display:flex; flex-direction:column; gap:5px; min-width:170px; }
-        .field label { font-size:12px; color:var(--muted); font-weight:600; }
-        .field input,.field select,.field textarea { border:1px solid #d1d5db; border-radius:8px; padding:8px; font-size:14px; }
-        .btn { border:1px solid #d1d5db; background:#fff; border-radius:8px; padding:8px 12px; min-height:36px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; }
-        .btn:hover { background:#f9fafb; }
+        .field label { font-size:11px; color:#94a3b8; font-weight:700; text-transform:uppercase; letter-spacing:0.12em; }
+        .field input,.field select,.field textarea { border:1px solid var(--line); border-radius:12px; padding:10px 12px; font-size:14px; background:var(--soft); color:var(--ink); font-family:inherit; }
+        .field input:focus,.field select:focus,.field textarea:focus { outline:none; border-color:#94a3b8; background:#fff; box-shadow:0 0 0 3px rgba(148,163,184,0.2); }
+        .btn { border:1px solid var(--line); background:#fff; color:#475569; border-radius:12px; padding:9px 14px; min-height:40px; font-weight:700; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; transition:background-color .2s ease, color .2s ease, border-color .2s ease, box-shadow .2s ease; }
+        .btn:hover { background:#f8fafc; color:var(--ink); }
         .btn:disabled { opacity:0.55; cursor:not-allowed; }
-        .btn.primary { background:var(--brand); color:#fff; border-color:var(--brand); }
-        .btn.primary:hover { background:#0c615a; }
-        .btn.warn { background:#fff7ed; border-color:#fdba74; color:var(--warn); }
-        .btn.danger { background:#fef2f2; border-color:#fecaca; color:var(--danger); }
-        .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:8px; margin-top:10px; }
-        .card { background:#fff; border:1px solid var(--line); border-radius:10px; padding:10px; }
-        .card small { color:var(--muted); text-transform:uppercase; font-size:11px; }
-        .card div { font-size:24px; font-weight:700; margin-top:4px; }
-        .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+        .btn.primary { background:var(--brand); color:#fff; border-color:var(--brand); box-shadow:0 1px 2px rgba(15,23,42,0.08); }
+        .btn.primary:hover { background:var(--brand-hover); border-color:var(--brand-hover); }
+        .btn.warn { background:#fff7ed; border-color:#fed7aa; color:var(--warn); }
+        .btn.danger { background:#fff1f2; border-color:#fecdd3; color:var(--danger); }
+        .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; margin-top:12px; }
+        .card { background:#fff; border:1px solid #f1f5f9; border-radius:16px; padding:14px; box-shadow:0 1px 2px rgba(15,23,42,0.04); }
+        .card small { color:#94a3b8; text-transform:uppercase; font-size:11px; font-weight:700; letter-spacing:0.08em; }
+        .card div { font-size:28px; font-weight:800; margin-top:6px; letter-spacing:-0.04em; font-variant-numeric:tabular-nums; }
+        .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
         .toolbar-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:10px; align-items:end; }
         .actions-row { display:flex; gap:10px; flex-wrap:wrap; align-items:end; margin-top:10px; }
-        .panel-header { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:10px; }
-        .panel-header p { margin:2px 0 0; color:var(--muted); font-size:12px; max-width:560px; }
+        .panel-header { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:12px; }
+        .panel-header p { margin:4px 0 0; color:var(--muted); font-size:13px; font-weight:500; max-width:560px; }
         .stack { display:flex; flex-direction:column; gap:10px; }
-        .table-wrap { max-height:340px; overflow:auto; border:1px solid var(--line); border-radius:10px; }
-        table { width:100%; border-collapse:collapse; font-size:13px; }
-        th,td { border:1px solid var(--line); padding:7px; text-align:left; vertical-align:top; }
-        th { background:#f9fafb; position:sticky; top:0; }
-        .pill { display:inline-block; border-radius:999px; padding:2px 8px; font-size:12px; border:1px solid #d1d5db; }
+        .table-wrap { max-height:340px; overflow:auto; border:1px solid var(--line); border-radius:16px; background:#fff; }
+        table { width:100%; border-collapse:collapse; font-size:13px; font-variant-numeric:tabular-nums; }
+        th,td { border-bottom:1px solid var(--line); padding:10px; text-align:left; vertical-align:top; }
+        th { background:var(--soft); position:sticky; top:0; color:var(--muted); font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; }
+        tbody tr:hover { background:#f8fafc; }
+        .pill { display:inline-block; border-radius:999px; padding:4px 10px; font-size:12px; border:1px solid var(--line); background:var(--soft); color:#475569; font-weight:700; }
         .bar-chart { display:flex; flex-direction:column; gap:10px; min-height:260px; }
         .bar-chart-row { display:grid; grid-template-columns:140px 1fr 64px; gap:12px; align-items:center; }
         .bar-chart-label { font-size:13px; font-weight:600; color:var(--ink); }
         .bar-chart-track { height:18px; border-radius:999px; background:#e2e8f0; overflow:hidden; position:relative; }
-        .bar-chart-fill { height:100%; border-radius:999px; background:linear-gradient(90deg, #0f766e, #0f766e 70%, #115e59); }
+        .bar-chart-fill { height:100%; border-radius:999px; background:linear-gradient(90deg, #334155, #475569 70%, #64748b); }
         .bar-chart-value { font-size:12px; font-weight:700; color:var(--muted); text-align:right; }
         .heatmap-shell { display:flex; flex-direction:column; gap:8px; min-height:260px; }
         .heatmap-head { display:grid; grid-template-columns:92px repeat(12, minmax(0, 1fr)); gap:4px; font-size:11px; color:var(--muted); }
@@ -57,9 +66,9 @@
         .heatmap-date { font-size:12px; font-weight:600; color:var(--ink); }
         .heatmap-cells { display:grid; grid-template-columns:repeat(12, minmax(0, 1fr)); gap:4px; }
         .heat-cell { height:22px; border-radius:6px; }
-        .notice { margin-top:10px; padding:10px 12px; border-radius:10px; border:1px solid #fecaca; background:#fef2f2; color:#991b1b; display:none; }
+        .notice { margin-top:14px; padding:12px 14px; border-radius:14px; border:1px solid #fecdd3; background:#fff1f2; color:#9f1239; display:none; font-weight:600; }
         .empty { color:var(--muted); text-align:center; }
-        .section-note { color:var(--muted); font-size:12px; }
+        .section-note { color:var(--muted); font-size:12px; font-weight:500; }
         @media (max-width:1000px){
             .grid2 { grid-template-columns:1fr; }
             .bar-chart-row { grid-template-columns:1fr; }
@@ -70,8 +79,11 @@
     </style>
 </head>
 <body>
-    <h1>WeRunOps Admin Operations Portal</h1>
-    <p class='muted'>Operations dashboard for sessions, tasks, users, automation rules, report schedules, and audit activity.</p>
+    <div class='hero'>
+        <div class='eyebrow'>Industrial Command Center</div>
+        <h1>WeRunOps Admin Operations Portal</h1>
+        <p class='muted'>Operations dashboard for sessions, tasks, users, automation rules, report schedules, and audit activity.</p>
+    </div>
     <div class='notice' id='global-error'></div>
 
     <div class='tabs' id='tabs'></div>

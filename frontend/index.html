@@ -6,10 +6,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WeRun Ops | Operations Dashboard</title>
 
-    <!-- Fonts: Inter -->
+    <!-- Fonts: Inter / Plus Jakarta Sans -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
     <!-- Tailwind CSS (via CDN) -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -18,7 +18,7 @@
             theme: {
                 extend: {
                     fontFamily: {
-                        sans: ['Inter', 'sans-serif'],
+                        sans: ['Inter', 'Plus Jakarta Sans', 'sans-serif'],
                     },
                     colors: {
                         primary: {
@@ -55,142 +55,157 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 
-<body class="bg-gray-50 text-gray-800 font-sans antialiased overflow-x-hidden overflow-y-auto">
+<body class="bg-slate-50 text-slate-700 font-sans antialiased overflow-x-hidden overflow-y-auto">
 
     <!-- Notification Container -->
     <div id="notification-container" class="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none"></div>
 
     <!-- Login View -->
-    <div id="view-login" class="absolute inset-0 z-[100] bg-gray-50 flex items-center justify-center p-4">
-        <div class="bg-white p-8 rounded-xl shadow-lg max-w-sm w-full border border-gray-100 text-center">
-            <div
-                class="mx-auto w-12 h-12 bg-primary text-white rounded-xl flex items-center justify-center mb-5 shadow-sm">
-                <i data-lucide="layout-dashboard" class="w-6 h-6"></i>
+    <div id="view-login" class="absolute inset-0 z-[100] overflow-hidden bg-slate-50 flex items-center justify-center p-6">
+        <div class="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(51,65,85,0.14),_transparent_36%),radial-gradient(circle_at_bottom_right,_rgba(71,85,105,0.1),_transparent_28%)]"></div>
+        <div class="absolute inset-0 opacity-40" style="background-image: linear-gradient(rgba(148,163,184,0.15) 1px, transparent 1px), linear-gradient(90deg, rgba(148,163,184,0.15) 1px, transparent 1px); background-size: 32px 32px;"></div>
+        <div class="relative w-full max-w-md rounded-[28px] border border-slate-200 bg-white/95 p-8 shadow-[0_24px_80px_rgba(15,23,42,0.12)] backdrop-blur">
+            <div class="mb-8 flex items-start justify-between gap-4">
+                <div>
+                    <p class="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400">Industrial Command Center</p>
+                    <h2 class="mt-3 text-3xl font-bold tracking-tight text-slate-900">WeRun Ops</h2>
+                    <p class="mt-2 text-sm font-medium text-slate-500">Sign in to access live operations, task flow, and client control.</p>
+                </div>
+                <div class="flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-700 text-white shadow-sm ring-1 ring-slate-600/10">
+                    <i data-lucide="layout-dashboard" class="w-7 h-7"></i>
+                </div>
             </div>
-            <h2 class="text-2xl font-bold text-gray-800 mb-2">WeRun Ops</h2>
-            <p class="text-gray-500 mb-6 text-sm">Sign in to your workspace</p>
             <form id="login-form" class="space-y-4">
                 <div>
-                    <input type="text" id="login-username" placeholder="Username" required class="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-left focus:ring-2 focus:ring-primary focus:border-primary outline-none transition">
+                    <label for="login-username" class="mb-2 block text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Username</label>
+                    <input type="text" id="login-username" placeholder="Enter username" required class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-left text-sm font-medium text-slate-800 outline-none transition focus:border-slate-400 focus:bg-white focus:ring-2 focus:ring-slate-300/50">
                 </div>
                 <div>
-                    <input type="password" id="login-password" placeholder="Password" required
-                        class="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-left focus:ring-2 focus:ring-primary focus:border-primary outline-none transition">
+                    <label for="login-password" class="mb-2 block text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Password</label>
+                    <input type="password" id="login-password" placeholder="Enter password" required
+                        class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-left text-sm font-medium text-slate-800 outline-none transition focus:border-slate-400 focus:bg-white focus:ring-2 focus:ring-slate-300/50">
                 </div>
                 <button type="submit"
-                    class="w-full bg-primary hover:bg-primary-hover text-white font-medium py-2.5 rounded-lg transition-colors flex justify-center items-center mt-2 shadow-sm">
-                    <span id="login-text">Sign In</span>
-                    <i data-lucide="loader-2" class="w-4 h-4 ml-2 animate-spin hidden" id="login-spinner"></i>
+                    class="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-slate-700 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-slate-800">
+                    <span id="login-text">Enter Workspace</span>
+                    <i data-lucide="loader-2" class="hidden h-4 w-4 animate-spin" id="login-spinner"></i>
                 </button>
-                <div id="login-error-msg" class="hidden text-red-500 text-sm text-center mt-2 font-medium"></div>
+                <div id="login-error-msg" class="hidden rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700"></div>
             </form>
         </div>
     </div>
 
     <!-- Header -->
     <header
-        class="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-4 sm:px-6 fixed top-0 w-full z-40 shadow-sm hidden"
+        class="fixed top-0 inset-x-0 md:inset-y-0 md:right-auto h-16 md:h-screen w-full md:w-64 bg-white/95 backdrop-blur border-b md:border-b-0 md:border-r border-slate-200 flex md:flex-col items-center md:items-stretch justify-between md:justify-start px-4 sm:px-6 md:px-5 py-0 md:py-6 z-40 shadow-sm hidden"
         id="main-header">
-        <div class="flex items-center gap-2 w-auto min-w-0 sm:w-52 lg:w-60">
-            <div class="bg-primary text-white p-1.5 rounded-md">
+        <div class="flex items-center gap-3 w-auto min-w-0 md:w-full">
+            <div class="bg-slate-700 text-white p-2 rounded-xl shadow-sm">
                 <i data-lucide="layout-dashboard"></i>
             </div>
-            <h1 class="text-xl font-bold tracking-tight hidden sm:block">WeRun Ops</h1>
+            <div class="min-w-0">
+                <p class="hidden md:block text-[11px] font-semibold uppercase tracking-[0.26em] text-slate-400">Command Center</p>
+                <h1 class="text-lg md:text-xl font-bold tracking-tight text-slate-900">WeRun Ops</h1>
+            </div>
         </div>
 
         <!-- Navigation Tabs -->
-        <nav class="hidden md:flex flex-1 justify-center space-x-1" id="main-nav">
+        <nav class="hidden md:flex md:flex-col md:mt-8 gap-1" id="main-nav">
             <button
-                class="nav-tab active px-4 py-2 text-sm font-medium rounded-t-lg transition-colors border-b-2 border-transparent hover:text-gray-900"
+                class="nav-tab active flex items-center gap-3 w-full rounded-lg px-3 py-3 text-sm font-medium transition-colors bg-white text-slate-900 shadow-sm"
                 data-target="view-dashboard">
-                <i data-lucide="layout" class="w-4 h-4 inline mr-1 pb-0.5"></i>
+                <i data-lucide="layout" class="w-4 h-4"></i>
                 Dashboard
             </button>
             <button
-                class="nav-tab px-4 py-2 text-sm font-medium rounded-t-lg transition-colors border-b-2 border-transparent text-gray-500 hover:text-gray-900"
+                class="nav-tab flex items-center gap-3 w-full rounded-lg px-3 py-3 text-sm font-medium transition-colors text-slate-500 hover:bg-slate-100 hover:text-slate-700"
                 data-target="view-kanban">
-                <i data-lucide="trello" class="w-4 h-4 inline mr-1 pb-0.5"></i>
+                <i data-lucide="trello" class="w-4 h-4"></i>
                 Kanban Board
             </button>
             <button
-                class="nav-tab px-4 py-2 text-sm font-medium rounded-t-lg transition-colors border-b-2 border-transparent text-gray-500 hover:text-gray-900"
+                class="nav-tab flex items-center gap-3 w-full rounded-lg px-3 py-3 text-sm font-medium transition-colors text-slate-500 hover:bg-slate-100 hover:text-slate-700"
                 data-target="view-tasks">
-                <i data-lucide="list-todo" class="w-4 h-4 inline mr-1 pb-0.5"></i>
+                <i data-lucide="list-todo" class="w-4 h-4"></i>
                 All Tasks
             </button>
             <button
-                class="nav-tab px-4 py-2 text-sm font-medium rounded-t-lg transition-colors border-b-2 border-transparent text-gray-500 hover:text-gray-900"
+                class="nav-tab flex items-center gap-3 w-full rounded-lg px-3 py-3 text-sm font-medium transition-colors text-slate-500 hover:bg-slate-100 hover:text-slate-700"
                 data-target="view-today">
-                <i data-lucide="calendar" class="w-4 h-4 inline mr-1 pb-0.5"></i>
+                <i data-lucide="calendar" class="w-4 h-4"></i>
                 Today's Tasks
             </button>
             <button
-                class="nav-tab px-4 py-2 text-sm font-medium rounded-t-lg transition-colors border-b-2 border-transparent text-gray-500 hover:text-gray-900"
+                class="nav-tab flex items-center gap-3 w-full rounded-lg px-3 py-3 text-sm font-medium transition-colors text-slate-500 hover:bg-slate-100 hover:text-slate-700"
                 data-target="view-clients">
-                <i data-lucide="users" class="w-4 h-4 inline mr-1 pb-0.5"></i>
+                <i data-lucide="users" class="w-4 h-4"></i>
                 Clients
             </button>
         </nav>
 
         <!-- User Menu -->
-        <div class="flex items-center gap-3 justify-end w-auto sm:w-52 lg:w-60 relative z-[60]">
+        <div class="flex items-center gap-3 justify-end w-auto relative z-[60] md:w-full md:mt-auto md:flex-col md:items-stretch md:justify-start md:gap-3">
             <!-- Undo / Redo -->
-            <div class="hidden sm:flex items-center gap-1">
-                <button id="btn-undo" class="text-gray-500 hover:text-gray-700 transition disabled:opacity-40" aria-label="Undo" title="Undo (Ctrl+Z)" disabled>
+            <div class="hidden sm:flex items-center gap-1 md:justify-between md:rounded-xl md:border md:border-slate-200 md:bg-slate-50 md:px-2 md:py-2">
+                <button id="btn-undo" class="text-slate-500 hover:text-slate-700 transition disabled:opacity-40" aria-label="Undo" title="Undo (Ctrl+Z)" disabled>
                     <i data-lucide="undo-2" class="w-5 h-5"></i>
                 </button>
-                <button id="btn-redo" class="text-gray-500 hover:text-gray-700 transition disabled:opacity-40" aria-label="Redo" title="Redo (Ctrl+Y)" disabled>
+                <button id="btn-redo" class="text-slate-500 hover:text-slate-700 transition disabled:opacity-40" aria-label="Redo" title="Redo (Ctrl+Y)" disabled>
                     <i data-lucide="redo-2" class="w-5 h-5"></i>
                 </button>
             </div>
 
-            <!-- Search -->
-            <div class="relative">
-                <button class="text-gray-500 hover:text-gray-700 transition" aria-label="Search" id="header-search-btn">
-                    <i data-lucide="search" class="w-5 h-5"></i>
-                </button>
-                <div class="absolute right-0 mt-2 w-[92vw] max-w-72 bg-white rounded-md shadow-lg border border-gray-100 hidden p-2 text-sm text-gray-500"
-                    id="header-search-panel">
-                    <input type="text" id="header-search-input" placeholder="Search tasks by name or ID..."
-                        class="w-full border-gray-300 border rounded px-3 py-1.5 focus:border-primary outline-none">
+            <div class="flex items-center gap-3 md:grid md:grid-cols-2 md:gap-2">
+                <!-- Search -->
+                <div class="relative">
+                    <button class="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:text-slate-700 md:w-full md:justify-start md:gap-2 md:px-3" aria-label="Search" id="header-search-btn">
+                        <i data-lucide="search" class="w-5 h-5"></i>
+                        <span class="hidden md:inline text-sm font-medium">Search</span>
+                    </button>
+                    <div class="absolute right-0 md:left-0 md:right-auto mt-2 md:mt-3 w-[92vw] max-w-72 md:w-80 bg-white rounded-xl shadow-xl border border-slate-200 hidden p-3 text-sm text-slate-500"
+                        id="header-search-panel">
+                        <input type="text" id="header-search-input" placeholder="Search tasks by name or ID..."
+                            class="w-full border-slate-200 border rounded-xl bg-slate-50 px-3 py-2 text-slate-700 focus:border-slate-400 focus:bg-white outline-none">
                     <div id="header-search-results"
-                        class="mt-2 max-h-64 overflow-y-auto custom-scrollbar hidden flex flex-col gap-1 border-t border-gray-100 pt-2">
+                        class="mt-3 max-h-64 overflow-y-auto custom-scrollbar hidden flex flex-col gap-1 border-t border-slate-100 pt-3">
                         <!-- Search results injected here -->
                     </div>
                 </div>
-            </div>
+                </div>
 
-            <!-- Notifications -->
-            <div class="relative">
-                <button class="text-gray-500 hover:text-gray-700 transition relative" aria-label="Notifications"
-                    id="header-bell-btn">
-                    <i data-lucide="bell" class="w-5 h-5"></i>
-                    <span class="absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-full" id="notification-dot"></span>
-                </button>
-                <div class="absolute right-0 mt-2 top-8 w-[92vw] max-w-80 bg-white rounded-md shadow-lg border border-gray-100 hidden flex-col overflow-hidden max-h-96"
-                    id="header-notifications-panel">
+                <!-- Notifications -->
+                <div class="relative">
+                    <button class="relative flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:text-slate-700 md:w-full md:justify-start md:gap-2 md:px-3" aria-label="Notifications"
+                        id="header-bell-btn">
+                        <i data-lucide="bell" class="w-5 h-5"></i>
+                        <span class="hidden md:inline text-sm font-medium">Alerts</span>
+                        <span class="absolute top-2 right-2 md:right-3 w-2 h-2 bg-rose-500 rounded-full" id="notification-dot"></span>
+                    </button>
+                    <div class="absolute right-0 md:left-0 md:right-auto mt-2 md:mt-3 top-8 md:top-full w-[92vw] max-w-80 md:w-80 bg-white rounded-xl shadow-xl border border-slate-200 hidden flex-col overflow-hidden max-h-96"
+                        id="header-notifications-panel">
                     <div
-                        class="px-4 py-2 border-b border-gray-100 font-semibold text-gray-700 text-sm flex justify-between items-center">
+                        class="px-4 py-3 border-b border-slate-100 font-semibold text-slate-700 text-sm flex justify-between items-center">
                         Notifications
-                        <span class="bg-red-100 text-red-600 px-2 py-0.5 rounded-full text-xs font-bold"
+                        <span class="bg-rose-100 text-rose-700 px-2 py-0.5 rounded-full text-xs font-bold"
                             id="notification-count">0</span>
                     </div>
                     <div class="overflow-y-auto custom-scrollbar flex-1" id="notifications-list">
                         <!-- Injected via JS -->
-                        <div class="p-4 text-center text-sm text-gray-500">
-                            <i data-lucide="inbox" class="w-8 h-8 mx-auto text-gray-300 mb-2"></i>
+                        <div class="p-4 text-center text-sm text-slate-500">
+                            <i data-lucide="inbox" class="w-8 h-8 mx-auto text-slate-300 mb-2"></i>
                             No new notifications.
                         </div>
                     </div>
                 </div>
+                </div>
             </div>
 
             <!-- Profile Menu -->
-            <div class="relative">
-                <div class="flex items-center gap-2 cursor-pointer hover:bg-gray-100 p-1 rounded-md transition"
+            <div class="relative md:w-full">
+                <div class="flex items-center gap-2 cursor-pointer rounded-xl border border-slate-200 bg-white p-1.5 transition hover:bg-slate-50 md:w-full"
                     id="header-user-menu-btn">
                     <div class="relative">
-                        <div class="w-8 h-8 rounded-full bg-primary-light text-primary flex items-center justify-center font-bold text-sm"
+                        <div class="w-9 h-9 rounded-full bg-slate-100 text-slate-700 flex items-center justify-center font-bold text-sm"
                             id="header-avatar">
                             P
                         </div>
@@ -198,34 +213,38 @@
                             class="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 border-2 border-white rounded-full"
                             id="user-status-dot" title="Online"></span>
                     </div>
-                    <i data-lucide="chevron-down" class="w-4 h-4 text-gray-500"></i>
+                    <div class="hidden md:block min-w-0 flex-1">
+                        <p class="truncate text-sm font-semibold text-slate-900" id="header-sidebar-user-name">Workspace User</p>
+                        <p class="truncate text-xs font-medium text-slate-500" id="header-sidebar-user-role">Operations</p>
+                    </div>
+                    <i data-lucide="chevron-down" class="w-4 h-4 text-slate-500"></i>
                 </div>
-                <div class="absolute right-0 mt-2 top-8 w-64 bg-white rounded-md shadow-lg border border-gray-100 hidden divide-y divide-gray-100"
+                <div class="absolute right-0 md:left-0 md:right-auto mt-2 md:mt-0 top-8 md:top-auto md:bottom-full md:mb-3 w-64 md:w-full bg-white rounded-xl shadow-xl border border-slate-200 hidden divide-y divide-slate-100"
                     id="header-user-panel">
                     <div class="px-4 py-3">
-                        <p class="text-sm font-medium text-gray-900 truncate" id="header-user-name">...</p>
-                        <p class="text-xs text-gray-500 truncate" id="header-user-role">User</p>
+                        <p class="text-sm font-semibold text-slate-900 truncate" id="header-user-name">...</p>
+                        <p class="text-xs font-medium text-slate-500 truncate" id="header-user-role">User</p>
                     </div>
-                    <div class="px-4 py-3 bg-gray-50/70 border-b border-gray-100">
-                        <label class="block text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1" for="header-work-status">Work Status</label>
-                        <select id="header-work-status" class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-primary focus:ring-1 focus:ring-primary outline-none transition">
+                    <div class="px-4 py-3 bg-slate-50/80 border-b border-slate-100">
+                        <label class="block text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 mb-1" for="header-work-status">Work Status</label>
+                        <select id="header-work-status" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-slate-400 focus:ring-1 focus:ring-slate-300 outline-none transition">
                             <option value="online">Online</option>
                             <option value="away">Away / Break</option>
                             <option value="meeting">In a Meeting</option>
                         </select>
-                        <p class="mt-2 text-[11px] leading-4 text-gray-500">Away pauses idle tracking. Meeting keeps activity active without penalizing low input.</p>
+                        <p class="mt-2 text-[11px] leading-4 text-slate-500">Away pauses idle tracking. Meeting keeps activity active without penalizing low input.</p>
                     </div>
                     <!-- Presence List -->
-                    <div class="py-2 px-2 border-b border-gray-100 bg-gray-50" id="header-presence-list">
+                    <div class="py-2 px-2 border-b border-slate-100 bg-slate-50" id="header-presence-list">
                         <!-- Injected via JS -->
                     </div>
                     <div class="py-1">
-                        <a href="#" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" id="btn-open-profile"><i
-                                data-lucide="user" class="w-4 h-4 inline mr-2 text-gray-400"></i> Profile</a>
-                        <a href="#" class="hidden px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" id="btn-open-admin-portal"><i
-                            data-lucide="shield-check" class="w-4 h-4 inline mr-2 text-gray-400"></i> Admin Portal</a>
-                        <a href="#" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" id="btn-open-settings"><i
-                                data-lucide="settings" class="w-4 h-4 inline mr-2 text-gray-400"></i> Settings</a>
+                        <a href="#" class="block px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100" id="btn-open-profile"><i
+                                data-lucide="user" class="w-4 h-4 inline mr-2 text-slate-400"></i> Profile</a>
+                        <a href="#" class="hidden px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100" id="btn-open-admin-portal"><i
+                            data-lucide="shield-check" class="w-4 h-4 inline mr-2 text-slate-400"></i> Admin Portal</a>
+                        <a href="#" class="block px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100" id="btn-open-settings"><i
+                                data-lucide="settings" class="w-4 h-4 inline mr-2 text-slate-400"></i> Settings</a>
                     </div>
                     <div class="py-1">
                         <a href="#" class="block px-4 py-2 text-sm text-red-600 hover:bg-red-50" id="btn-logout"><i
@@ -235,36 +254,36 @@
             </div>
 
             <!-- Mobile Menu Toggle -->
-            <button class="md:hidden text-gray-500 hover:text-gray-700" id="mobile-menu-btn">
+            <button class="md:hidden text-slate-500 hover:text-slate-700" id="mobile-menu-btn">
                 <i data-lucide="menu" class="w-6 h-6"></i>
             </button>
         </div>
     </header>
 
     <!-- Main Content Area -->
-    <div id="offline-banner" class="hidden fixed top-16 inset-x-0 z-30 bg-amber-100 text-amber-800 border-b border-amber-200 text-sm px-4 py-2">
+    <div id="offline-banner" class="hidden fixed top-16 md:top-0 md:left-64 inset-x-0 md:right-0 z-30 bg-amber-100 text-amber-800 border-b border-amber-200 text-sm px-4 py-2">
         <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-center gap-2">
             <span id="offline-banner-text">Offline mode active. Changes are saved locally and will sync when online.</span>
             <button id="btn-retry-offline-sync" type="button" class="hidden px-2 py-1 text-xs rounded border border-amber-300 bg-white hover:bg-amber-50">Retry Failed Sync</button>
             <button id="btn-discard-offline-failed" type="button" class="hidden px-2 py-1 text-xs rounded border border-amber-300 bg-white hover:bg-amber-50">Discard Failed</button>
         </div>
     </div>
-    <main class="mt-16 min-h-[calc(100vh-4rem)] overflow-y-auto w-full relative hidden" id="main-content">
+    <main class="mt-16 md:mt-0 md:ml-64 min-h-screen overflow-y-auto w-full relative hidden bg-slate-50" id="main-content">
 
         <!-- Loading Overlay -->
-        <div id="global-loader" class="absolute inset-0 bg-white/80 z-50 flex items-center justify-center">
+        <div id="global-loader" class="absolute inset-0 bg-slate-50/90 z-50 flex items-center justify-center backdrop-blur-sm">
             <div class="flex flex-col items-center gap-3">
                 <i data-lucide="loader-2" class="w-8 h-8 animate-spin text-primary"></i>
-                <p class="text-gray-600 font-medium text-sm">Loading WeRun Ops...</p>
+                <p class="text-slate-600 font-medium text-sm">Loading WeRun Ops...</p>
             </div>
         </div>
 
         <!-- Dashboard View (Module 1) -->
-        <div id="view-dashboard" class="view-section active p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
-            <div class="flex justify-between items-center mb-6">
-                <h2 class="text-2xl font-bold text-gray-800">Dashboard</h2>
+        <div id="view-dashboard" class="view-section active p-6 sm:p-8 lg:p-10 max-w-[1680px] mx-auto">
+            <div class="flex justify-between items-center mb-8">
+                <h2 class="text-3xl font-bold tracking-tight text-slate-900">Dashboard</h2>
                 <button id="refresh-dashboard-btn"
-                    class="flex items-center gap-2 px-3 py-1.5 text-sm bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition shadow-sm">
+                    class="flex items-center gap-2 px-4 py-2 text-sm font-semibold bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition shadow-sm text-slate-700">
                     <i data-lucide="refresh-cw" class="w-4 h-4"></i>
                     Refresh
                 </button>
@@ -277,33 +296,33 @@
 
             <!-- Session Hours + Activity Heatmap -->
             <div id="dashboard-session-analytics" class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-                <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+                <div class="bg-white p-5 rounded-2xl border border-slate-100/60 shadow-sm">
                     <div class="flex items-center justify-between mb-3">
-                        <h3 class="font-semibold text-gray-800">Today's Hours Logged</h3>
-                        <button id="btn-export-sessions-csv" class="text-xs px-2.5 py-1.5 border border-gray-300 rounded-md hover:bg-gray-50 transition">Export CSV</button>
+                        <h3 class="font-bold tracking-tight text-slate-900">Today's Hours Logged</h3>
+                        <button id="btn-export-sessions-csv" class="text-xs font-semibold px-2.5 py-1.5 border border-slate-200 rounded-xl hover:bg-slate-50 transition text-slate-600">Export CSV</button>
                     </div>
-                    <div id="dashboard-hours-logged" class="space-y-2 text-sm text-gray-600">
-                        <p class="text-gray-500">No session data yet.</p>
+                    <div id="dashboard-hours-logged" class="space-y-2 text-sm text-slate-600">
+                        <p class="text-slate-500 font-medium">No session data yet.</p>
                     </div>
                 </div>
-                <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
-                    <h3 class="font-semibold text-gray-800 mb-3">Peak Activity Hours</h3>
-                    <div id="dashboard-hours-heatmap" class="grid grid-cols-6 gap-2 text-xs text-gray-600">
-                        <p class="text-gray-500 col-span-6">No activity heatmap available.</p>
+                <div class="bg-white p-5 rounded-2xl border border-slate-100/60 shadow-sm">
+                    <h3 class="font-bold tracking-tight text-slate-900 mb-3">Peak Activity Hours</h3>
+                    <div id="dashboard-hours-heatmap" class="grid grid-cols-6 gap-2 text-xs text-slate-600">
+                        <p class="text-slate-500 font-medium col-span-6">No activity heatmap available.</p>
                     </div>
                 </div>
             </div>
 
             <!-- Charts Grid -->
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-                <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
-                    <h3 class="font-semibold text-gray-800 mb-4">Tasks by Status</h3>
+                <div class="bg-white p-5 rounded-2xl border border-slate-100/60 shadow-sm">
+                    <h3 class="font-bold tracking-tight text-slate-900 mb-4">Tasks by Status</h3>
                     <div class="relative h-64">
                         <canvas id="chart-status"></canvas>
                     </div>
                 </div>
-                <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
-                    <h3 class="font-semibold text-gray-800 mb-4">Tasks by Priority</h3>
+                <div class="bg-white p-5 rounded-2xl border border-slate-100/60 shadow-sm">
+                    <h3 class="font-bold tracking-tight text-slate-900 mb-4">Tasks by Priority</h3>
                     <div class="relative h-64">
                         <canvas id="chart-priority"></canvas>
                     </div>
@@ -313,14 +332,14 @@
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <!-- Max H blocks with internal scrolling -->
                 <div class="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex flex-col min-h-[18rem] sm:min-h-[22rem] lg:h-[400px]">
-                        <h3 id="chart-staff-title" class="font-semibold text-gray-800 mb-4 shrink-0">Workload by Staff</h3>
+                    <div class="bg-white p-5 rounded-2xl border border-slate-100/60 shadow-sm flex flex-col min-h-[18rem] sm:min-h-[22rem] lg:h-[400px]">
+                        <h3 id="chart-staff-title" class="font-bold tracking-tight text-slate-900 mb-4 shrink-0">Workload by Staff</h3>
                         <div class="relative flex-1 min-h-0 w-full">
                             <canvas id="chart-staff"></canvas>
                         </div>
                     </div>
-                    <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex flex-col min-h-[18rem] sm:min-h-[22rem] lg:h-[400px]">
-                        <h3 id="chart-client-title" class="font-semibold text-gray-800 mb-4 shrink-0">Client Activity</h3>
+                    <div class="bg-white p-5 rounded-2xl border border-slate-100/60 shadow-sm flex flex-col min-h-[18rem] sm:min-h-[22rem] lg:h-[400px]">
+                        <h3 id="chart-client-title" class="font-bold tracking-tight text-slate-900 mb-4 shrink-0">Client Activity</h3>
                         <div class="relative flex-1 min-h-0 w-full">
                             <canvas id="chart-client"></canvas>
                         </div>
@@ -328,32 +347,32 @@
                 </div>
                 <!-- Recent Activity Feed -->
                 <div
-                    class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex flex-col items-stretch lg:col-span-1 min-h-[18rem] sm:min-h-[22rem] lg:h-[400px]">
-                    <h3 class="font-semibold text-gray-800 mb-4 flex items-center gap-2 shrink-0">
-                        <i data-lucide="activity" class="w-4 h-4 text-gray-500"></i>
+                    class="bg-white p-5 rounded-2xl border border-slate-100/60 shadow-sm flex flex-col items-stretch lg:col-span-1 min-h-[18rem] sm:min-h-[22rem] lg:h-[400px]">
+                    <h3 class="font-bold tracking-tight text-slate-900 mb-4 flex items-center gap-2 shrink-0">
+                        <i data-lucide="activity" class="w-4 h-4 text-slate-500"></i>
                         Recent Activity
                     </h3>
                     <div class="flex-1 overflow-y-auto pr-2 custom-scrollbar min-h-0 relative" id="activity-feed">
                         <!-- Activity items injected via JS -->
-                        <p class="text-sm text-gray-500 text-center py-4">Loading activity...</p>
+                        <p class="text-sm text-slate-500 text-center py-4 font-medium">Loading activity...</p>
                     </div>
                 </div>
             </div>
         </div>
 
         <!-- Kanban Board View (Module 2) -->
-        <div id="view-kanban" class="view-section h-full flex flex-col p-4 sm:p-6 hidden">
-            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4 flex-shrink-0">
-                <h2 class="text-2xl font-bold text-gray-800">Kanban Board</h2>
+        <div id="view-kanban" class="view-section h-full flex flex-col p-6 sm:p-8 lg:p-10 hidden max-w-[1800px] mx-auto">
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4 flex-shrink-0">
+                <h2 class="text-3xl font-bold tracking-tight text-slate-900">Kanban Board</h2>
                 <div class="flex items-center gap-3 w-full sm:w-auto">
                     <!-- Filters Quick Select could go here -->
                     <button
-                        class="flex items-center justify-center gap-2 px-4 py-2 text-sm bg-primary text-white font-medium rounded-md hover:bg-primary-hover transition shadow-sm flex-1 sm:flex-none btn-add-task">
+                        class="flex items-center justify-center gap-2 px-4 py-2.5 text-sm bg-primary text-white font-semibold rounded-xl hover:bg-primary-hover transition shadow-sm flex-1 sm:flex-none btn-add-task">
                         <i data-lucide="plus" class="w-4 h-4"></i>
                         Add Task
                     </button>
                     <button
-                        class="flex items-center justify-center gap-2 px-3 py-2 text-sm bg-white border border-gray-300 rounded-md shadow-sm transition opacity-50 cursor-not-allowed hidden"
+                        class="flex items-center justify-center gap-2 px-3 py-2 text-sm bg-white border border-slate-200 rounded-xl shadow-sm transition opacity-50 cursor-not-allowed hidden text-slate-500"
                         id="btn-kanban-filter" title="Coming soon">
                         <i data-lucide="filter" class="w-4 h-4"></i>
                         <span class="hidden sm:inline">Filters</span>
@@ -362,44 +381,44 @@
             </div>
 
             <!-- Kanban Columns Container -->
-            <div class="flex gap-4 overflow-x-auto pb-4 custom-scrollbar flex-1 items-start" id="kanban-board">
+            <div class="flex gap-5 overflow-x-auto pb-4 custom-scrollbar flex-1 items-start" id="kanban-board">
                 <!-- Columns injected via JS -->
             </div>
         </div>
 
         <!-- All Tasks View (Module 3) -->
-        <div id="view-tasks" class="view-section p-4 sm:p-6 lg:p-8 max-w-[1600px] mx-auto hidden h-full flex-col">
-            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4 flex-shrink-0">
-                <h2 class="text-2xl font-bold text-gray-800">All Tasks</h2>
+        <div id="view-tasks" class="view-section p-6 sm:p-8 lg:p-10 max-w-[1700px] mx-auto hidden h-full flex-col">
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4 flex-shrink-0">
+                <h2 class="text-3xl font-bold tracking-tight text-slate-900">All Tasks</h2>
                 <div class="flex items-center gap-3 w-full sm:w-auto">
                     <div class="relative inline-block text-left relative z-[36]">
                         <button type="button"
-                            class="flex items-center justify-center gap-2 px-3 py-2 text-sm bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition shadow-sm"
+                            class="flex items-center justify-center gap-2 px-3 py-2 text-sm font-semibold bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition shadow-sm text-slate-700"
                             id="btn-export-dropdown">
                             <i data-lucide="download" class="w-4 h-4"></i>
                             <span class="hidden sm:inline">Export</span>
                         </button>
                         <!-- Export Sub-menu -->
-                        <div class="origin-top-right absolute left-0 mt-2 w-40 rounded-md shadow-xl bg-white ring-1 ring-black ring-opacity-5 divide-y divide-gray-100 hidden z-40 border border-gray-200"
+                        <div class="origin-top-right absolute left-0 mt-2 w-40 rounded-xl shadow-xl bg-white ring-1 ring-black ring-opacity-5 divide-y divide-slate-100 hidden z-40 border border-slate-200"
                             id="export-actions-menu">
                             <div class="py-1">
-                                <a href="#" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                                <a href="#" class="block px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                                     id="btn-export-csv"><i data-lucide="file-spreadsheet"
                                         class="w-4 h-4 inline mr-2 text-green-600"></i>CSV Excel</a>
-                                <a href="#" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                                <a href="#" class="block px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                                     id="btn-export-pdf"><i data-lucide="file-text"
                                         class="w-4 h-4 inline mr-2 text-red-500"></i>Export to PDF</a>
                             </div>
                         </div>
                     </div>
                     <button
-                        class="flex items-center justify-center gap-2 px-3 py-2 text-sm bg-white border border-gray-300 rounded-md shadow-sm transition opacity-50 cursor-not-allowed hidden"
+                        class="flex items-center justify-center gap-2 px-3 py-2 text-sm bg-white border border-slate-200 rounded-xl shadow-sm transition opacity-50 cursor-not-allowed hidden text-slate-500"
                         id="btn-tasks-filter" title="Coming soon">
                         <i data-lucide="filter" class="w-4 h-4"></i>
                         <span class="hidden sm:inline">Filter</span>
                     </button>
                     <button
-                        class="flex items-center justify-center gap-2 px-4 py-2 text-sm bg-primary text-white font-medium rounded-md hover:bg-primary-hover transition shadow-sm btn-add-task">
+                        class="flex items-center justify-center gap-2 px-4 py-2.5 text-sm bg-primary text-white font-semibold rounded-xl hover:bg-primary-hover transition shadow-sm btn-add-task">
                         <i data-lucide="plus" class="w-4 h-4"></i>
                         Add Task
                     </button>
@@ -408,28 +427,28 @@
 
             <!-- Table Controls -->
             <div
-                class="bg-white p-4 border-b border-gray-200 rounded-t-xl flex flex-col md:flex-row justify-between items-center gap-4 flex-shrink-0">
+                class="bg-white p-4 border border-slate-100/60 rounded-t-2xl flex flex-col md:flex-row justify-between items-center gap-4 flex-shrink-0 shadow-sm">
                 <div class="relative w-full md:w-96">
-                    <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"></i>
+                    <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"></i>
                     <input type="text" id="tasks-search" placeholder="Search tasks, clients, projects..."
-                        class="w-full pl-9 pr-8 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary">
-                    <button class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 hidden"
+                        class="w-full pl-9 pr-8 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-700 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-300/50 focus:border-slate-400 focus:bg-white">
+                    <button class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 hidden"
                         id="tasks-search-clear">
                         <i data-lucide="x" class="w-3 h-3"></i>
                     </button>
                 </div>
                 <div class="flex items-center gap-2">
-                    <span class="text-sm text-gray-500 hidden sm:inline" id="tasks-count-display">Showing 0 tasks</span>
+                    <span class="text-sm text-slate-500 font-medium hidden sm:inline" id="tasks-count-display">Showing 0 tasks</span>
                     <!-- Bulk Actions Dropdown Trigger -->
                     <div class="relative inline-block text-left ml-2 z-[35]">
                         <button type="button"
-                            class="inline-flex justify-center w-full px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed relative z-20"
+                            class="inline-flex justify-center w-full px-3 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl shadow-sm hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-300 disabled:opacity-50 disabled:cursor-not-allowed relative z-20"
                             id="btn-bulk-actions" disabled>
                             Bulk Actions
                             <i data-lucide="chevron-down" class="w-4 h-4 ml-2 -mr-1"></i>
                         </button>
                         <!-- Dropdown panel -->
-                        <div class="origin-top-right absolute right-0 mt-2 w-48 rounded-md shadow-xl bg-white ring-1 ring-black ring-opacity-5 divide-y divide-gray-100 hidden z-30 border border-gray-200"
+                        <div class="origin-top-right absolute right-0 mt-2 w-48 rounded-xl shadow-xl bg-white ring-1 ring-black ring-opacity-5 divide-y divide-slate-100 hidden z-30 border border-slate-200"
                             id="bulk-actions-menu">
                             <div class="py-1">
                                 <a href="#"
@@ -443,100 +462,100 @@
             </div>
 
             <!-- Table Container -->
-            <div class="bg-white border-x border-b border-gray-200 rounded-b-xl flex-1 overflow-hidden flex flex-col">
+            <div class="bg-white border-x border-b border-slate-100/60 rounded-b-2xl shadow-sm flex-1 overflow-hidden flex flex-col">
                 <div class="overflow-x-auto overflow-y-auto custom-scrollbar flex-1 relative" id="table-container">
-                    <table class="min-w-full divide-y divide-gray-200 text-sm">
-                        <thead class="bg-gray-50 sticky top-0 z-10 shadow-sm border-b border-gray-200">
+                    <table class="min-w-full divide-y divide-slate-100 text-sm tabular-nums">
+                        <thead class="bg-slate-50 sticky top-0 z-10 shadow-sm border-b border-slate-100">
                             <tr>
                                 <th scope="col" class="w-10 px-4 py-3 text-left">
                                     <input type="checkbox" id="selectAllTasks"
                                         class="rounded border-gray-300 text-primary cursor-pointer w-4 h-4 focus:ring-primary">
                                 </th>
                                 <th scope="col"
-                                    class="px-4 py-3 text-left font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 sort-header"
+                                    class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 cursor-pointer hover:bg-slate-100 sort-header"
                                     data-sort="id">
                                     ID <i data-lucide="chevron-down" class="w-3 h-3 inline sort-icon hidden"></i>
                                 </th>
                                 <th scope="col"
-                                    class="px-4 py-3 text-left font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 sort-header"
+                                    class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 cursor-pointer hover:bg-slate-100 sort-header"
                                     data-sort="client">
                                     Client <i data-lucide="chevron-down" class="w-3 h-3 inline sort-icon hidden"></i>
                                 </th>
                                 <th scope="col"
-                                    class="px-4 py-3 text-left font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 sort-header"
+                                    class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 cursor-pointer hover:bg-slate-100 sort-header"
                                     data-sort="project">
                                     Project <i data-lucide="chevron-down" class="w-3 h-3 inline sort-icon hidden"></i>
                                 </th>
                                 <th scope="col"
-                                    class="px-4 py-3 text-left font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 sort-header"
+                                    class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 cursor-pointer hover:bg-slate-100 sort-header"
                                     data-sort="task">
                                     Task Name <i data-lucide="chevron-down" class="w-3 h-3 inline sort-icon hidden"></i>
                                 </th>
                                 <th scope="col"
-                                    class="px-4 py-3 text-left font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 sort-header"
+                                    class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 cursor-pointer hover:bg-slate-100 sort-header"
                                     data-sort="staff">
                                     Staff <i data-lucide="chevron-down" class="w-3 h-3 inline sort-icon hidden"></i>
                                 </th>
                                 <th scope="col"
-                                    class="px-4 py-3 text-left font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 sort-header"
+                                    class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 cursor-pointer hover:bg-slate-100 sort-header"
                                     data-sort="status">
                                     Status <i data-lucide="chevron-down" class="w-3 h-3 inline sort-icon hidden"></i>
                                 </th>
                                 <th scope="col"
-                                    class="px-4 py-3 text-left font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 sort-header"
+                                    class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 cursor-pointer hover:bg-slate-100 sort-header"
                                     data-sort="priority">
                                     Priority <i data-lucide="chevron-down" class="w-3 h-3 inline sort-icon hidden"></i>
                                 </th>
                                 <th scope="col"
-                                    class="px-4 py-3 text-left font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 sort-header"
+                                    class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 cursor-pointer hover:bg-slate-100 sort-header"
                                     data-sort="dueDate">
                                     Due Date <i data-lucide="chevron-down" class="w-3 h-3 inline sort-icon hidden"></i>
                                 </th>
-                                <th scope="col" class="px-4 py-3 text-right font-semibold text-gray-700 w-24">
+                                <th scope="col" class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-500 w-24">
                                     Actions
                                 </th>
                             </tr>
                         </thead>
-                        <tbody class="bg-white divide-y divide-gray-200" id="tasks-table-body">
+                        <tbody class="bg-white divide-y divide-slate-100" id="tasks-table-body">
                             <!-- Rows injected via JS -->
                         </tbody>
                     </table>
                 </div>
                 <!-- Pagination (Simple implementation for now) -->
-                <div class="bg-gray-50 border-t border-gray-200 px-4 py-3 flex items-center justify-between sm:px-6">
-                    <p class="text-sm text-gray-700" id="pagination-info">Showing All Tasks</p>
+                <div class="bg-slate-50 border-t border-slate-100 px-4 py-3 flex items-center justify-between sm:px-6">
+                    <p class="text-sm text-slate-600 font-medium" id="pagination-info">Showing All Tasks</p>
                 </div>
             </div>
         </div>
 
         <!-- Today's Tasks View (Module 4) -->
-        <div id="view-today" class="view-section p-4 sm:p-6 lg:p-8 max-w-5xl mx-auto hidden h-full overflow-y-auto">
+        <div id="view-today" class="view-section p-6 sm:p-8 lg:p-10 max-w-6xl mx-auto hidden h-full overflow-y-auto">
             <div class="flex justify-between items-center mb-6">
                 <div>
-                    <h2 class="text-2xl font-bold text-gray-800">Today's Tasks</h2>
-                    <p class="text-sm text-gray-500 mt-1" id="today-date-display"></p>
+                    <h2 class="text-3xl font-bold tracking-tight text-slate-900">Today's Tasks</h2>
+                    <p class="text-sm text-slate-500 font-medium mt-1" id="today-date-display"></p>
                 </div>
             </div>
 
             <!-- Today Metrics -->
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8" id="today-metrics">
-                <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-                    <h3 class="text-sm font-medium text-gray-500 flex items-center gap-2">
+                <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100/60">
+                    <h3 class="text-sm font-medium text-slate-500 flex items-center gap-2 uppercase tracking-wide">
                         <span class="w-2 h-2 rounded-full bg-primary inline-block"></span> DUE TODAY
                     </h3>
-                    <p class="text-3xl font-bold mt-2" id="metric-today-due">0</p>
+                    <p class="text-3xl font-bold tracking-tight mt-2 tabular-nums text-slate-900" id="metric-today-due">0</p>
                 </div>
-                <div class="bg-white p-4 rounded-xl shadow-sm border border-red-200">
-                    <h3 class="text-sm font-medium text-red-500 flex items-center gap-2">
+                <div class="bg-white p-4 rounded-2xl shadow-sm border border-rose-100">
+                    <h3 class="text-sm font-medium text-rose-500 flex items-center gap-2 uppercase tracking-wide">
                         <span class="w-2 h-2 rounded-full bg-red-500 inline-block animate-pulse"></span> OVERDUE
                     </h3>
-                    <p class="text-3xl font-bold mt-2 text-red-600" id="metric-today-overdue">0</p>
+                    <p class="text-3xl font-bold tracking-tight mt-2 text-rose-700 tabular-nums" id="metric-today-overdue">0</p>
                 </div>
-                <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-                    <h3 class="text-sm font-medium text-gray-500 flex items-center gap-2">
+                <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100/60">
+                    <h3 class="text-sm font-medium text-slate-500 flex items-center gap-2 uppercase tracking-wide">
                         <span class="w-2 h-2 rounded-full bg-green-500 inline-block"></span> FOLLOW UP
                     </h3>
-                    <p class="text-3xl font-bold mt-2" id="metric-today-followup">0</p>
+                    <p class="text-3xl font-bold tracking-tight mt-2 tabular-nums text-slate-900" id="metric-today-followup">0</p>
                 </div>
             </div>
 
@@ -545,8 +564,8 @@
                 <!-- Overdue Section -->
                 <section>
                     <h3
-                        class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4 border-b border-gray-200 pb-2">
-                        Overdue <span class="bg-red-100 text-red-700 py-0.5 px-2 rounded-full text-xs ml-2"
+                        class="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-4 border-b border-slate-200 pb-2">
+                        Overdue <span class="bg-rose-100 text-rose-700 py-0.5 px-2 rounded-full text-xs ml-2 tabular-nums"
                             id="badge-overdue">0 tasks</span></h3>
                     <div class="space-y-4" id="list-overdue">
                         <!-- Cards injected via JS -->
@@ -556,8 +575,8 @@
                 <!-- Due Today Section -->
                 <section>
                     <h3
-                        class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4 border-b border-gray-200 pb-2">
-                        Due Today <span class="bg-blue-100 text-blue-700 py-0.5 px-2 rounded-full text-xs ml-2"
+                        class="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-4 border-b border-slate-200 pb-2">
+                        Due Today <span class="bg-indigo-100 text-indigo-700 py-0.5 px-2 rounded-full text-xs ml-2 tabular-nums"
                             id="badge-today">0 tasks</span></h3>
                     <div class="space-y-4" id="list-today">
                         <!-- Cards injected via JS -->
@@ -567,8 +586,8 @@
                 <!-- Follow Up Section -->
                 <section>
                     <h3
-                        class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4 border-b border-gray-200 pb-2">
-                        Follow Up <span class="bg-green-100 text-green-700 py-0.5 px-2 rounded-full text-xs ml-2"
+                        class="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-4 border-b border-slate-200 pb-2">
+                        Follow Up <span class="bg-emerald-100 text-emerald-700 py-0.5 px-2 rounded-full text-xs ml-2 tabular-nums"
                             id="badge-followup">0 tasks</span></h3>
                     <div class="space-y-4" id="list-followup">
                         <!-- Cards injected via JS -->
@@ -577,31 +596,31 @@
             </div>
         </div>
         <!-- View 5: Manage Clients -->
-        <div id="view-clients" class="view-section hidden max-w-5xl mx-auto p-4 md:p-6 lg:p-8 relative">
+        <div id="view-clients" class="view-section hidden max-w-6xl mx-auto p-6 md:p-8 lg:p-10 relative">
             <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
                 <div>
-                    <h2 class="text-2xl font-bold text-gray-800">Manage Clients</h2>
-                    <p class="text-sm text-gray-500 mt-1">Add, edit, or remove client definitions used across tasks.</p>
+                    <h2 class="text-3xl font-bold tracking-tight text-slate-900">Manage Clients</h2>
+                    <p class="text-sm text-slate-500 font-medium mt-1">Add, edit, or remove client definitions used across tasks.</p>
                 </div>
-                <button class="btn-primary w-full md:w-auto" id="btn-add-client">
+                <button class="btn-primary w-full md:w-auto rounded-xl px-4 py-2.5 font-semibold" id="btn-add-client">
                     <i data-lucide="plus" class="w-4 h-4"></i>
                     Add Client
                 </button>
             </div>
 
-            <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-100/60 overflow-hidden">
                 <div class="overflow-x-auto">
-                    <table class="w-full text-left border-collapse min-w-[500px]">
+                    <table class="w-full text-left border-collapse min-w-[500px] tabular-nums">
                         <thead>
                             <tr
-                                class="bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                                class="bg-slate-50 border-b border-slate-100 text-xs font-semibold text-slate-500 uppercase tracking-wider">
                                 <th class="px-6 py-4">Client Name</th>
                                 <th class="px-6 py-4">Status</th>
                                 <th class="px-6 py-4">Active Tasks</th>
                                 <th class="px-6 py-4 text-right">Actions</th>
                             </tr>
                         </thead>
-                        <tbody id="clients-table-body" class="divide-y divide-gray-100 bg-white text-sm">
+                        <tbody id="clients-table-body" class="divide-y divide-slate-100 bg-white text-sm">
                             <!-- Injected by JS -->
                         </tbody>
                     </table>

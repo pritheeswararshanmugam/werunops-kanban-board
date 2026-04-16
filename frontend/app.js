@@ -901,16 +901,16 @@ function initNavigation() {
 
         // Process tabs
         navTabs.forEach(t => {
-            t.classList.remove('active', 'text-primary');
-            t.classList.add('text-gray-500');
+            t.classList.remove('active', 'text-primary', 'bg-white', 'shadow-sm', 'font-semibold', 'text-slate-900');
+            t.classList.add('text-slate-500');
             t.style.borderBottomColor = 'transparent';
         });
 
         const activeTab = Array.from(navTabs).find(t => t.getAttribute('data-target') === targetId);
         if (activeTab) {
-            activeTab.classList.add('active', 'text-primary');
-            activeTab.classList.remove('text-gray-500');
-            activeTab.style.borderBottomColor = 'var(--primary-blue)';
+            activeTab.classList.add('active', 'text-primary', 'bg-white', 'shadow-sm', 'font-semibold', 'text-slate-900');
+            activeTab.classList.remove('text-slate-500');
+            activeTab.style.borderBottomColor = 'transparent';
         }
 
         views.forEach(view => {
@@ -943,9 +943,9 @@ function initNavigation() {
         const nav = document.getElementById('main-nav');
         nav.classList.toggle('hidden');
         if (!nav.classList.contains('hidden')) {
-            nav.classList.add('flex', 'flex-col', 'absolute', 'top-16', 'left-0', 'w-full', 'bg-white', 'shadow-md', 'z-40');
+            nav.classList.add('flex', 'flex-col', 'absolute', 'top-16', 'left-0', 'w-full', 'bg-white', 'shadow-xl', 'z-40', 'border-b', 'border-slate-200', 'px-4', 'py-3', 'gap-1');
         } else {
-            nav.classList.remove('flex', 'flex-col', 'absolute', 'top-16', 'left-0', 'w-full', 'bg-white', 'shadow-md', 'z-40');
+            nav.classList.remove('flex', 'flex-col', 'absolute', 'top-16', 'left-0', 'w-full', 'bg-white', 'shadow-xl', 'z-40', 'border-b', 'border-slate-200', 'px-4', 'py-3', 'gap-1');
         }
     });
 
@@ -963,7 +963,7 @@ function getStatusColorClass(status) {
         'Follow Up': 'status-badge-followup',
         'Completed': 'status-badge-completed'
     };
-    return map[status] || 'bg-gray-100 text-gray-800';
+    return map[status] || 'status-badge-new';
 }
 
 function getStatusIcon(status) {
@@ -985,6 +985,15 @@ function getPriorityColor(priority) {
         'Low': 'var(--priority-low)'
     };
     return map[priority] || 'gray';
+}
+
+function getPriorityBadgeClass(priority) {
+    const map = {
+        'High': 'bg-priority-High text-priority-High',
+        'Medium': 'bg-priority-Medium text-priority-Medium',
+        'Low': 'bg-priority-Low text-priority-Low'
+    };
+    return map[priority] || 'bg-slate-100 text-slate-600';
 }
 
 function formatDate(dateString) {
@@ -1024,7 +1033,7 @@ function renderDashboardHoursWidget(hoursByUser = {}) {
 
     const entries = Object.entries(hoursByUser).sort((a, b) => (b[1] || 0) - (a[1] || 0));
     if (!entries.length) {
-        container.innerHTML = '<p class="text-gray-500">No one has logged session time today.</p>';
+        container.innerHTML = '<p class="text-slate-500 font-medium">No one has logged session time today.</p>';
         return;
     }
 
@@ -1032,7 +1041,7 @@ function renderDashboardHoursWidget(hoursByUser = {}) {
         .map(([user, seconds]) => {
             const label = safe(user);
             const value = safe(formatDurationCompact(seconds));
-            return `<div class="flex items-center justify-between rounded-md border border-gray-100 px-3 py-2"><span class="text-gray-700">${label}</span><span class="font-semibold text-gray-900">${value}</span></div>`;
+            return `<div class="flex items-center justify-between rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5"><span class="text-sm font-medium text-slate-600">${label}</span><span class="tabular-nums text-sm font-bold tracking-tight text-slate-900">${value}</span></div>`;
         })
         .join('');
 }
@@ -1048,16 +1057,16 @@ function renderDashboardHeatmap(hourMap = {}) {
     const maxValue = Math.max(...values, 0);
 
     if (maxValue === 0) {
-        container.innerHTML = '<p class="text-gray-500 col-span-6">No activity heatmap available.</p>';
+        container.innerHTML = '<p class="text-slate-500 font-medium col-span-6">No activity heatmap available.</p>';
         return;
     }
 
     container.innerHTML = values
         .map((value, hour) => {
             const intensity = Math.max(0.15, value / maxValue);
-            const bg = `rgba(37, 99, 235, ${intensity.toFixed(2)})`;
-            const textClass = intensity > 0.5 ? 'text-white' : 'text-gray-700';
-            return `<div class="rounded px-2 py-2 text-center font-medium ${textClass}" style="background:${bg}" title="${hour}:00 - ${formatDurationCompact(value)}">${String(hour).padStart(2, '0')}</div>`;
+            const bg = `rgba(51, 65, 85, ${Math.min(0.88, intensity + 0.08).toFixed(2)})`;
+            const textClass = intensity > 0.45 ? 'text-white' : 'text-slate-700';
+            return `<div class="rounded-lg px-2 py-2 text-center text-[11px] font-semibold tabular-nums ${textClass}" style="background:${bg}" title="${hour}:00 - ${formatDurationCompact(value)}">${String(hour).padStart(2, '0')}</div>`;
         })
         .join('');
 }
@@ -1171,10 +1180,10 @@ function renderDashboard(state) {
 
     if (lastDashboardFingerprint !== currentFingerprint) {
         metricsContainer.innerHTML = `
-            ${createMetricCard('Open Tasks', openCount, 'folder-open', 'bg-blue-500')}
-            ${createMetricCard('In Progress', inProgressCount, 'settings-2', 'bg-amber-500')}
-            ${createMetricCard('Completed', completedCount, 'check-circle', 'bg-gray-500')}
-            ${createMetricCard('Overdue', overdueCount, 'alert-circle', overdueCount > 0 ? 'bg-red-500 animate-pulse' : 'bg-red-500')}
+            ${createMetricCard('Open Tasks', openCount, 'folder-open', 'bg-slate-700')}
+            ${createMetricCard('In Progress', inProgressCount, 'settings-2', 'bg-indigo-600')}
+            ${createMetricCard('Completed', completedCount, 'check-circle', 'bg-emerald-600')}
+            ${createMetricCard('Overdue', overdueCount, 'alert-circle', 'bg-rose-600')}
         `;
         lucide.createIcons({ root: metricsContainer });
         lastDashboardFingerprint = currentFingerprint;
@@ -1201,13 +1210,13 @@ function renderDashboard(state) {
 
 function createMetricCard(title, value, icon, iconBgClass) {
     return `
-        <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow flex items-center gap-4">
-            <div class="w-12 h-12 rounded-full ${iconBgClass} text-white flex items-center justify-center flex-shrink-0 shadow-inner">
-                <i data-lucide="${icon}" class="w-6 h-6"></i>
+        <div class="bg-white rounded-xl shadow-sm border border-slate-100/50 px-5 py-4 transition-shadow hover:shadow-md flex items-center gap-4">
+            <div class="w-12 h-12 rounded-2xl ${iconBgClass} text-white flex items-center justify-center flex-shrink-0 shadow-sm">
+                <i data-lucide="${icon}" class="w-5 h-5"></i>
             </div>
-            <div>
-                <p class="text-sm font-medium text-gray-500">${title}</p>
-                <p class="text-3xl font-bold text-gray-800">${value}</p>
+            <div class="min-w-0">
+                <p class="text-sm font-medium text-slate-500">${title}</p>
+                <p class="tabular-nums text-3xl font-bold tracking-tight text-slate-900">${value}</p>
             </div>
         </div>
     `;
@@ -1240,10 +1249,16 @@ function areArraysEqual(a, b) {
 
 function updateStatusChart(tasks, statusList) {
     const ctx = document.getElementById('chart-status').getContext('2d');
-    const colors = getChartColors();
-
     const counts = statusList.map(status => tasks.filter(t => t.status === status).length);
-    const bgColors = [colors.new, colors.progress, colors.waitingClient, colors.waitingSupplier, colors.followup, colors.completed];
+    const statusColorMap = {
+        'New': '#334155',
+        'In Progress': '#6366f1',
+        'Waiting Client': '#94a3b8',
+        'Waiting Supplier': '#cbd5e1',
+        'Follow Up': '#64748b',
+        'Completed': '#10b981'
+    };
+    const bgColors = statusList.map((status) => statusColorMap[status] || '#e2e8f0');
 
     if (!charts.status) {
         charts.status = new Chart(ctx, {
@@ -1253,7 +1268,7 @@ function updateStatusChart(tasks, statusList) {
                 datasets: [{
                     data: counts,
                     backgroundColor: bgColors,
-                    borderWidth: 2,
+                    borderWidth: 0,
                     hoverOffset: 4
                 }]
             },
@@ -1261,9 +1276,17 @@ function updateStatusChart(tasks, statusList) {
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: {
-                    legend: { position: 'right', labels: { usePointStyle: true, padding: 15, font: { family: 'Inter' } } }
+                    legend: {
+                        position: 'right',
+                        labels: {
+                            usePointStyle: true,
+                            padding: 18,
+                            color: '#64748b',
+                            font: { family: 'Inter', weight: '600' }
+                        }
+                    }
                 },
-                cutout: '70%'
+                cutout: '75%'
             }
         });
         return;
@@ -1280,10 +1303,8 @@ function updateStatusChart(tasks, statusList) {
 
 function updatePriorityChart(tasks, priorityList) {
     const ctx = document.getElementById('chart-priority').getContext('2d');
-    const colors = getChartColors();
-
     const counts = priorityList.map(prio => tasks.filter(t => t.priority === prio && t.status !== 'Completed').length);
-    const bgColors = [colors.high, colors.medium, colors.low];
+    const bgColors = ['#475569', '#64748b', '#94a3b8'];
 
     if (!charts.priority) {
         charts.priority = new Chart(ctx, {
@@ -1294,6 +1315,7 @@ function updatePriorityChart(tasks, priorityList) {
                     label: 'Open Tasks',
                     data: counts,
                     backgroundColor: bgColors,
+                    borderSkipped: false,
                     borderRadius: 4
                 }]
             },
@@ -1304,8 +1326,8 @@ function updatePriorityChart(tasks, priorityList) {
                     legend: { display: false }
                 },
                 scales: {
-                    y: { beginAtZero: true, grid: { borderDash: [2, 4], color: '#f3f4f6' }, ticks: { stepSize: 1, font: { family: 'Inter' } } },
-                    x: { grid: { display: false }, ticks: { font: { family: 'Inter' } } }
+                    y: { beginAtZero: true, grid: { display: false }, ticks: { stepSize: 1, color: '#64748b', font: { family: 'Inter', weight: '600' } } },
+                    x: { grid: { display: false }, ticks: { color: '#64748b', font: { family: 'Inter', weight: '600' } } }
                 }
             }
         });
@@ -1332,12 +1354,12 @@ function updateStaffChart(tasks, staffList) {
             {
                 label: 'Overdue',
                 count: activeTasks.filter((task) => isOverdue(task.dueDate)).length,
-                color: '#dc2626'
+                color: '#e11d48'
             },
             {
                 label: 'Due Today',
                 count: activeTasks.filter((task) => !isOverdue(task.dueDate) && isToday(task.dueDate)).length,
-                color: '#d97706'
+                color: '#6366f1'
             },
             {
                 label: 'Due This Week',
@@ -1350,7 +1372,7 @@ function updateStaffChart(tasks, staffList) {
                     const diffDays = (dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24);
                     return diffDays > 0 && diffDays <= 7;
                 }).length,
-                color: '#2563eb'
+                color: '#475569'
             },
             {
                 label: 'Later',
@@ -1364,7 +1386,7 @@ function updateStaffChart(tasks, staffList) {
                     const diffDays = (dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24);
                     return diffDays > 7;
                 }).length,
-                color: '#6b7280'
+                color: '#cbd5e1'
             }
         ].filter((bucket) => bucket.count > 0);
 
@@ -1390,8 +1412,8 @@ function updateStaffChart(tasks, staffList) {
                     maintainAspectRatio: false,
                     plugins: { legend: { display: false } },
                     scales: {
-                        x: { beginAtZero: true, grid: { borderDash: [2, 4] }, ticks: { stepSize: 1 } },
-                        y: { grid: { display: false } }
+                        x: { beginAtZero: true, grid: { display: false }, ticks: { stepSize: 1, color: '#64748b' } },
+                        y: { grid: { display: false }, ticks: { color: '#64748b', font: { weight: '600' } } }
                     }
                 }
             });
@@ -1446,7 +1468,7 @@ function updateStaffChart(tasks, staffList) {
 
     const labels = workloads.length ? workloads.map(w => w.name) : ['No active tasks'];
     const data = workloads.length ? workloads.map(w => w.count) : [0];
-    const backgroundColor = workloads.length ? '#3b82f6' : '#e5e7eb';
+    const backgroundColor = workloads.length ? '#475569' : '#e2e8f0';
 
     if (!charts.staff) {
         charts.staff = new Chart(ctx, {
@@ -1457,6 +1479,7 @@ function updateStaffChart(tasks, staffList) {
                     label: 'Active Tasks',
                     data,
                     backgroundColor,
+                    borderSkipped: false,
                     borderRadius: 4
                 }]
             },
@@ -1466,8 +1489,8 @@ function updateStaffChart(tasks, staffList) {
                 maintainAspectRatio: false,
                 plugins: { legend: { display: false } },
                 scales: {
-                    x: { beginAtZero: true, grid: { borderDash: [2, 4] }, ticks: { stepSize: 1 } },
-                    y: { grid: { display: false } }
+                    x: { beginAtZero: true, grid: { display: false }, ticks: { stepSize: 1, color: '#64748b' } },
+                    y: { grid: { display: false }, ticks: { color: '#64748b', font: { weight: '600' } } }
                 }
             }
         });
@@ -1522,8 +1545,8 @@ function updateClientChart(tasks) {
     const finalLabels = labels.length > 0 ? labels : ['No active tasks'];
     const finalData = counts.length > 0 ? counts : [1];
     const finalColors = counts.length > 0
-        ? ['#2563eb', '#7c3aed', '#059669', '#d97706', '#dc2626', '#6b7280']
-        : ['#e5e7eb'];
+        ? ['#334155', '#475569', '#64748b', '#94a3b8', '#10b981', '#cbd5e1']
+        : ['#e2e8f0'];
     const legendPosition = finalLabels.length <= 3 ? 'bottom' : 'right';
 
     if (!charts.client) {
@@ -1541,7 +1564,10 @@ function updateClientChart(tasks) {
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: {
-                    legend: { position: legendPosition, labels: { boxWidth: 12, font: { family: 'Inter' } } }
+                    legend: {
+                        position: legendPosition,
+                        labels: { boxWidth: 12, color: '#64748b', font: { family: 'Inter', weight: '600' } }
+                    }
                 }
             }
         });
@@ -1582,26 +1608,26 @@ function renderActivityFeed(tasks) {
     const recentActivities = allActivities.slice(0, 15);
 
     if (recentActivities.length === 0) {
-        feedContainer.innerHTML = `<p class="text-sm text-gray-500 text-center py-4">No recent activity.</p>`;
+        feedContainer.innerHTML = `<p class="text-sm font-medium text-slate-500 text-center py-4">No recent activity.</p>`;
         return;
     }
 
     let html = '<div class="space-y-4 relative">';
     // Add timeline line
-    html += '<div class="absolute top-0 bottom-0 left-[19px] w-px bg-gray-200"></div>';
+    html += '<div class="absolute top-0 bottom-0 left-[19px] w-px bg-slate-200"></div>';
 
     recentActivities.forEach(act => {
         const timeAgo = getTimeAgo(act.timestamp);
         let icon = 'activity';
-        let bg = 'bg-gray-100 text-gray-600';
+        let bg = 'bg-slate-100 text-slate-600';
         const safeUser = safe(act.user);
         const safeAction = safe((act.action || '').toLowerCase());
         const safeTaskName = safe(act.taskName);
         const safeTaskId = Number(act.taskId) || 0;
 
-        if (act.action.includes('created')) { icon = 'plus'; bg = 'bg-blue-100 text-blue-600'; }
-        else if (act.action.includes('Status changed') || act.action.includes('via drag')) { icon = 'arrow-right-left'; bg = 'bg-amber-100 text-amber-600'; }
-        else if (act.action.toLowerCase().includes('completed')) { icon = 'check'; bg = 'bg-green-100 text-green-600'; }
+        if (act.action.includes('created')) { icon = 'plus'; bg = 'bg-slate-200 text-slate-700'; }
+        else if (act.action.includes('Status changed') || act.action.includes('via drag')) { icon = 'arrow-right-left'; bg = 'bg-indigo-100 text-indigo-700'; }
+        else if (act.action.toLowerCase().includes('completed')) { icon = 'check'; bg = 'bg-emerald-100 text-emerald-700'; }
 
         html += `
             <div class="flex gap-4 relative z-10">
@@ -1660,19 +1686,21 @@ function renderKanban(state) {
         const headClass = `kanban-col-head-${status.replace(/\s+/g, '')}`;
 
         html += `
-            <div class="flex flex-col bg-gray-50 rounded-xl w-72 flex-shrink-0 ${headClass} shadow-sm border border-gray-200 max-h-full overflow-hidden pb-1">
-                <div class="p-4 flex justify-between items-center border-b border-gray-200 sticky top-0 bg-gray-50 z-10 rounded-t-xl shrink-0">
-                    <h3 class="font-bold text-gray-700 flex items-center gap-2">
-                        <div class="w-6 h-6 rounded-md ${colorClass} flex items-center justify-center">
-                            <i data-lucide="${icon}" class="w-3.5 h-3.5"></i>
-                        </div>
-                        ${status}
-                    </h3>
-                    <span class="bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full text-xs font-semibold">${columnTasks.length}</span>
+            <div class="flex flex-col bg-slate-100/60 rounded-xl p-3 w-72 flex-shrink-0 ${headClass} max-h-full overflow-hidden">
+                <div class="px-1 pb-3 sticky top-0 bg-slate-100/95 backdrop-blur z-10 shrink-0">
+                    <div class="flex justify-between items-center rounded-xl bg-white/80 border border-slate-200 px-3 py-3 shadow-sm">
+                        <h3 class="font-bold tracking-tight text-slate-900 flex items-center gap-2">
+                            <div class="w-7 h-7 rounded-lg ${colorClass} flex items-center justify-center shadow-sm">
+                                <i data-lucide="${icon}" class="w-3.5 h-3.5"></i>
+                            </div>
+                            ${status}
+                        </h3>
+                        <span class="bg-slate-100 text-slate-600 px-2.5 py-0.5 rounded-full text-xs font-bold tabular-nums">${columnTasks.length}</span>
+                    </div>
                 </div>
-                
-                <div class="p-3 flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-3 min-h-[50px] sortable-col" data-status="${status}">
-                    ${columnTasks.map(task => createKanbanCard(task)).join('')}
+
+                <div class="px-1 flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-3 min-h-[180px] sortable-col" data-status="${status}">
+                    ${columnTasks.length ? columnTasks.map(task => createKanbanCard(task)).join('') : '<div class="kanban-empty-state">Drop tasks here</div>'}
                 </div>
             </div>
         `;
@@ -1725,7 +1753,6 @@ function renderKanban(state) {
 }
 
 function createKanbanCard(task) {
-    const priorityColor = `border-priority-${task.priority}`;
     const safeTaskId = Number(task.id) || 0;
     const safeClient = safe(task.client);
     const safeTaskName = safe(task.task);
@@ -1734,50 +1761,52 @@ function createKanbanCard(task) {
     const safeStaff = safe(getTaskStaffLabel(task.staff));
     const safeWaitingFor = safe(task.waitingFor || '');
     const safeStaffInitial = safe(getTaskStaffInitial(task.staff));
+    const safePriority = safe(task.priority);
+    const priorityBadgeClass = getPriorityBadgeClass(task.priority);
     const taskMode = canEditTaskDetails(task)
         ? 'edit'
         : (canUpdateTaskStatus(task) ? 'status' : 'view');
     const dragClass = canDragTask(task) ? 'task-card-draggable cursor-grab active:cursor-grabbing' : 'task-card-static cursor-pointer';
     const lock = getTaskLockInfo(task.id);
     const lockBadge = lock
-        ? `<div class="absolute top-2 left-2 text-[10px] px-2 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200">Collaborating: ${safe(lock.lockedByName || lock.lockedBy)}</div>`
+        ? `<div class="absolute top-3 left-3 text-[10px] px-2 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200">Collaborating: ${safe(lock.lockedByName || lock.lockedBy)}</div>`
         : '';
-    const lockClass = lock ? 'border-amber-200' : '';
+    const lockClass = lock ? 'ring-1 ring-amber-200' : '';
     const quickActionHtml = taskMode === 'view'
         ? ''
         : `
-            <div class="absolute ${lock ? 'top-10' : 'top-2'} right-2 opacity-0 group-hover:opacity-100 transition flex gap-1 bg-white rounded-md shadow-sm border border-gray-100 p-0.5 z-10">
-                <button class="p-1 text-gray-400 hover:text-primary rounded" onclick="event.stopPropagation(); openTaskModal(${safeTaskId})" title="${taskMode === 'edit' ? 'Edit Task' : 'Update Status'}"><i data-lucide="${taskMode === 'edit' ? 'edit-2' : 'check-circle'}" class="w-3.5 h-3.5"></i></button>
+            <div class="absolute ${lock ? 'top-11' : 'top-3'} right-3 opacity-0 group-hover:opacity-100 transition flex gap-1 bg-white rounded-lg shadow-sm border border-slate-200 p-0.5 z-10">
+                <button class="p-1 text-slate-400 hover:text-primary rounded" onclick="event.stopPropagation(); openTaskModal(${safeTaskId})" title="${taskMode === 'edit' ? 'Edit Task' : 'Update Status'}"><i data-lucide="${taskMode === 'edit' ? 'edit-2' : 'check-circle'}" class="w-3.5 h-3.5"></i></button>
             </div>
         `;
 
     return `
-        <div class="kanban-task-card bg-white p-3 rounded-lg shadow-sm hover:shadow-md border items-center border-l-4 border-y-gray-200 border-r-gray-200 ${priorityColor} ${lockClass} ${dragClass} transition group relative" data-id="${safeTaskId}" onclick="openTaskModal(${safeTaskId})">
+        <div class="kanban-task-card bg-white rounded-lg shadow-sm hover:shadow-md border border-slate-100 ${lockClass} ${dragClass} transition group relative p-4" data-id="${safeTaskId}" onclick="openTaskModal(${safeTaskId})">
             ${lockBadge}
             ${quickActionHtml}
 
-            <div class="flex justify-between items-start mb-1.5 pr-6">
-                <span class="text-xs font-semibold text-gray-500">#${safeTaskId} &bull; ${safeClient}</span>
+            <div class="flex justify-between items-start mb-1.5 pr-7">
+                <span class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400"><span class="tabular-nums text-slate-500">#${safeTaskId}</span> · ${safeClient}</span>
             </div>
             
-            <h4 class="text-sm font-semibold text-gray-800 leading-tight mb-1">${safeTaskName}</h4>
-            ${task.project ? `<p class="text-xs text-gray-500 mb-2 truncate"><i data-lucide="home" class="w-3 h-3 inline mr-1 pb-0.5"></i>${safeProject}</p>` : ''}
+            <h4 class="text-sm font-semibold tracking-tight text-slate-900 leading-tight mb-1">${safeTaskName}</h4>
+            ${task.project ? `<p class="text-xs text-slate-500 font-medium mb-2 truncate"><i data-lucide="home" class="w-3 h-3 inline mr-1 pb-0.5"></i>${safeProject}</p>` : ''}
             
-            ${task.notes ? `<p class="text-xs text-gray-500 mb-3 line-clamp-2 italic border-l-2 pl-2">"${safeNotes}"</p>` : '<div class="mb-3"></div>'}
+            <div class="mt-3 flex items-center gap-2 text-xs font-medium text-slate-500">
+                <div class="w-6 h-6 rounded-full bg-slate-100 text-slate-700 flex items-center justify-center text-[11px] font-bold" title="${safeStaff}">
+                    ${safeStaffInitial}
+                </div>
+                <span class="truncate">${safeStaff}</span>
+                ${task.waitingFor ? `<span class="ml-auto text-slate-400" title="Waiting for: ${safeWaitingFor}"><i data-lucide="clock" class="w-3.5 h-3.5 inline"></i></span>` : ''}
+            </div>
+
+            ${task.notes ? `<p class="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500 line-clamp-2 italic">"${safeNotes}"</p>` : ''}
             
-            <div class="flex items-center justify-between mt-auto">
-                <div class="flex items-center gap-1.5">
-                    <div class="w-6 h-6 rounded-full bg-primary-light text-primary flex items-center justify-center text-xs font-bold" title="${safeStaff}">
-                        ${safeStaffInitial}
-                    </div>
-                </div>
-                
-                <div class="flex gap-2 text-xs">
-                    ${task.waitingFor ? `<span class="text-red-500 font-medium" title="Waiting for: ${safeWaitingFor}"><i data-lucide="clock" class="w-3.5 h-3.5 inline"></i></span>` : ''}
-                    <span class="${isOverdue(task.dueDate) ? 'text-red-600 font-bold bg-red-100 px-1.5 rounded' : 'text-gray-500'}">
-                        ${formatDate(task.dueDate).replace(/, 202./, '')}
-                    </span>
-                </div>
+            <div class="mt-4 flex justify-between items-end gap-3">
+                <span class="px-2.5 py-0.5 rounded-full text-xs font-bold ${priorityBadgeClass}">${safePriority}</span>
+                <span class="tabular-nums text-xs font-semibold ${isOverdue(task.dueDate) ? 'text-rose-700' : 'text-slate-500'}">
+                    ${formatDate(task.dueDate).replace(/, 202./, '')}
+                </span>
             </div>
         </div>
     `;
@@ -1848,25 +1877,25 @@ function renderAllTasksList(state) {
         const canUpdateStatus = canUpdateTaskStatus(task);
 
         html += `
-            <tr class="hover:bg-gray-50 transition border-b border-gray-100 group">
+            <tr class="bg-white hover:bg-slate-50 transition-colors border-b border-slate-100 group">
                 <td class="px-4 py-3 whitespace-nowrap">
                     <input type="checkbox" class="task-checkbox rounded border-gray-300 text-primary cursor-pointer w-4 h-4 focus:ring-primary" value="${safeTaskId}" ${isChecked}>
                 </td>
-                <td class="px-4 py-3 whitespace-nowrap font-mono text-xs text-gray-500">
+                <td class="px-4 py-3 whitespace-nowrap font-mono text-xs text-slate-500 tabular-nums">
                     #${safeTaskId}
                 </td>
                 <td class="px-4 py-3 whitespace-nowrap">
-                    <div class="font-medium text-gray-800">${safeClient}</div>
+                    <div class="font-semibold text-slate-900">${safeClient}</div>
                 </td>
-                <td class="px-4 py-3 whitespace-nowrap text-gray-600">
+                <td class="px-4 py-3 whitespace-nowrap text-slate-600 font-medium">
                     ${safeProject}
                 </td>
                 <td class="px-4 py-3 min-w-[200px]">
-                    <div class="font-medium text-gray-800 w-full truncate max-w-xs cursor-pointer hover:text-primary hover:underline hover-active" onclick="openTaskModal(${safeTaskId})">${safeTaskName}</div>
+                    <div class="font-semibold text-slate-900 w-full truncate max-w-xs cursor-pointer hover:text-primary hover:underline hover-active" onclick="openTaskModal(${safeTaskId})">${safeTaskName}</div>
                 </td>
                 <td class="px-4 py-3 whitespace-nowrap">
-                    <div class="flex items-center gap-2 text-gray-700">
-                        <div class="w-6 h-6 rounded-full bg-primary-light text-primary flex items-center justify-center text-xs font-bold">
+                    <div class="flex items-center gap-2 text-slate-700 font-medium">
+                        <div class="w-6 h-6 rounded-full bg-slate-100 text-slate-700 flex items-center justify-center text-xs font-bold">
                             ${safeStaffInitial}
                         </div>
                         ${safeStaff}
@@ -1878,30 +1907,30 @@ function renderAllTasksList(state) {
                     </span>
                 </td>
                 <td class="px-4 py-3 whitespace-nowrap">
-                    <span class="text-xs font-bold px-2 py-1 rounded bg-priority-${safePriority} border border-priority-${safePriority} border-opacity-20 text-priority-${safePriority}">
+                    <span class="text-xs font-bold px-2.5 py-0.5 rounded-full ${getPriorityBadgeClass(task.priority)}">
                         ${safePriority}
                     </span>
                 </td>
-                <td class="px-4 py-3 whitespace-nowrap ${isOverdue(task.dueDate) && task.status !== 'Completed' ? 'text-red-600 font-semibold bg-red-50 rounded px-2' : 'text-gray-600'}">
+                <td class="px-4 py-3 whitespace-nowrap tabular-nums ${isOverdue(task.dueDate) && task.status !== 'Completed' ? 'text-rose-700 font-semibold bg-rose-50 rounded-xl px-2' : 'text-slate-600 font-medium'}">
                     ${formatDate(task.dueDate)}
                 </td>
                 <td class="px-4 py-3 whitespace-nowrap text-right text-sm font-medium">
                     <div class="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                         ${canEdit ? `
-                            <button class="text-gray-400 hover:text-primary transition p-1" onclick="openTaskModal(${safeTaskId})" title="Edit">
+                            <button class="text-slate-400 hover:text-primary transition p-1" onclick="openTaskModal(${safeTaskId})" title="Edit">
                                 <i data-lucide="edit" class="w-4 h-4"></i>
                             </button>
                         ` : canUpdateStatus ? `
-                            <button class="text-gray-400 hover:text-green-600 transition p-1" onclick="openTaskModal(${safeTaskId})" title="Update Status">
+                            <button class="text-slate-400 hover:text-emerald-600 transition p-1" onclick="openTaskModal(${safeTaskId})" title="Update Status">
                                 <i data-lucide="check-circle" class="w-4 h-4"></i>
                             </button>
                         ` : `
-                            <button class="text-gray-400 hover:text-primary transition p-1" onclick="openTaskModal(${safeTaskId})" title="View">
+                            <button class="text-slate-400 hover:text-primary transition p-1" onclick="openTaskModal(${safeTaskId})" title="View">
                                 <i data-lucide="eye" class="w-4 h-4"></i>
                             </button>
                         `}
                         ${canDelete ? `
-                            <button class="text-gray-400 hover:text-red-500 transition p-1" onclick="deleteSingleTask(${safeTaskId})" title="Delete">
+                            <button class="text-slate-400 hover:text-rose-500 transition p-1" onclick="deleteSingleTask(${safeTaskId})" title="Delete">
                                 <i data-lucide="trash-2" class="w-4 h-4"></i>
                             </button>
                         ` : ''}
@@ -2034,28 +2063,28 @@ function renderClientsList(state) {
         const deleteDisabledAttr = activeTasks > 0 ? 'disabled' : '';
 
         html += `
-            <tr class="hover:bg-gray-50 transition border-b border-gray-100 group">
+            <tr class="bg-white hover:bg-slate-50 transition-colors border-b border-slate-100 group">
                 <td class="px-6 py-4">
-                    <div class="font-bold text-gray-800">${safeName}</div>
-                    ${client.contact ? `<div class="text-xs text-gray-500 mt-1"><i data-lucide="user" class="w-3 h-3 inline mr-1"></i>${safeContact}</div>` : ''}
-                    ${client.email ? `<div class="text-xs text-gray-400 mt-0.5"><i data-lucide="mail" class="w-3 h-3 inline mr-1"></i>${safeEmail}</div>` : ''}
-                    ${client.phone ? `<div class="text-xs text-gray-400 mt-0.5"><i data-lucide="phone" class="w-3 h-3 inline mr-1"></i>${safePhone}</div>` : ''}
+                    <div class="font-bold text-slate-900">${safeName}</div>
+                    ${client.contact ? `<div class="text-xs text-slate-500 mt-1"><i data-lucide="user" class="w-3 h-3 inline mr-1"></i>${safeContact}</div>` : ''}
+                    ${client.email ? `<div class="text-xs text-slate-400 mt-0.5"><i data-lucide="mail" class="w-3 h-3 inline mr-1"></i>${safeEmail}</div>` : ''}
+                    ${client.phone ? `<div class="text-xs text-slate-400 mt-0.5"><i data-lucide="phone" class="w-3 h-3 inline mr-1"></i>${safePhone}</div>` : ''}
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap">
-                    <span class="status-badge ${activeTasks > 0 ? 'bg-green-50 text-green-700 border-green-200' : 'bg-gray-100 text-gray-600 border-gray-200'}">
+                    <span class="status-badge ${activeTasks > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}">
                         ${activeTasks > 0 ? 'Active' : 'Inactive'}
                     </span>
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap">
-                    <div class="text-sm font-medium text-gray-700">${activeTasks} <span class="text-gray-400 font-normal">/ ${totalTasks} total</span></div>
+                    <div class="text-sm font-semibold text-slate-700 tabular-nums">${activeTasks} <span class="text-slate-400 font-normal">/ ${totalTasks} total</span></div>
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap text-right">
                     <div class="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                         ${readOnlyClientView ? '' : `
-                            <button class="text-gray-400 hover:text-primary transition p-1" onclick="openClientModalByEncoded('${encodedName}')" title="Edit Client">
+                            <button class="text-slate-400 hover:text-primary transition p-1" onclick="openClientModalByEncoded('${encodedName}')" title="Edit Client">
                                 <i data-lucide="edit-2" class="w-4 h-4"></i>
                             </button>
-                            <button class="text-gray-400 hover:text-red-500 transition p-1 ${deleteDisabledClass}" onclick="deleteClientActionByEncoded('${encodedName}')" title="Delete Client" ${deleteDisabledAttr}>
+                            <button class="text-slate-400 hover:text-rose-500 transition p-1 ${deleteDisabledClass}" onclick="deleteClientActionByEncoded('${encodedName}')" title="Delete Client" ${deleteDisabledAttr}>
                                 <i data-lucide="trash-2" class="w-4 h-4"></i>
                             </button>
                         `}
@@ -2066,7 +2095,7 @@ function renderClientsList(state) {
     });
 
     if (clients.length === 0) {
-        html = `<tr><td colspan="4" class="px-6 py-8 text-center text-gray-500">No clients found. Click Add Client to begin.</td></tr>`;
+        html = `<tr><td colspan="4" class="px-6 py-8 text-center text-slate-500 font-medium">No clients found. Click Add Client to begin.</td></tr>`;
     }
 
     tbody.innerHTML = html;
@@ -2147,7 +2176,7 @@ function renderTodayTasks(state) {
 
 function emptyState(message, icon = 'smile', colorClass = 'text-gray-400') {
     return `
-        <div class="bg-gray-50 border border-gray-200 border-dashed rounded-lg p-6 text-center text-gray-500 flex flex-col items-center justify-center gap-2">
+        <div class="border-2 border-dashed border-slate-200 bg-transparent rounded-lg p-6 text-center text-slate-400 font-medium text-sm flex flex-col items-center justify-center gap-2 py-10">
             <i data-lucide="${icon}" class="w-8 h-8 ${colorClass} mb-1"></i>
             <p>${message}</p>
         </div>
@@ -2180,28 +2209,28 @@ function createTodayCard(task) {
         `;
 
     return `
-        <div class="bg-white p-4 rounded-xl shadow-sm hover:shadow-md transition-shadow border items-center border-l-4 border-y-gray-200 border-r-gray-200 border-priority-${task.priority}">
+        <div class="bg-white p-4 rounded-xl shadow-sm hover:shadow-md transition-shadow border border-slate-100">
             <div class="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
                 
                 <div class="flex-1">
                     <div class="flex items-center gap-2 mb-1">
-                        <span class="text-xs font-mono text-gray-500">#${safeTaskId}</span>
-                        <span class="text-xs font-bold px-2 py-0.5 rounded bg-priority-${safePriority} text-priority-${safePriority}">${safePriority}</span>
+                        <span class="text-xs font-mono text-slate-500 tabular-nums">#${safeTaskId}</span>
+                        <span class="text-xs font-bold px-2.5 py-0.5 rounded-full ${getPriorityBadgeClass(task.priority)}">${safePriority}</span>
                         <span class="status-badge ${getStatusColorClass(task.status)}">${safeStatus}</span>
                     </div>
                     
-                    <h4 class="text-lg font-bold text-gray-800 leading-tight mb-1 cursor-pointer hover:text-primary hover:underline" onclick="openTaskModal(${safeTaskId})">${safeTaskName}</h4>
-                    <p class="text-sm text-gray-600 font-medium"><i data-lucide="home" class="w-4 h-4 inline mr-1 text-gray-400"></i>${safeClient} ${task.project ? `&rsaquo; ${safeProject}` : ''}</p>
-                    ${task.notes ? `<p class="text-sm text-gray-500 mt-2 line-clamp-1 italic bg-gray-50 p-2 rounded">"${safeNotes}"</p>` : ''}
+                    <h4 class="text-lg font-bold tracking-tight text-slate-900 leading-tight mb-1 cursor-pointer hover:text-primary hover:underline" onclick="openTaskModal(${safeTaskId})">${safeTaskName}</h4>
+                    <p class="text-sm text-slate-600 font-medium"><i data-lucide="home" class="w-4 h-4 inline mr-1 text-slate-400"></i>${safeClient} ${task.project ? `&rsaquo; ${safeProject}` : ''}</p>
+                    ${task.notes ? `<p class="text-sm text-slate-500 mt-2 line-clamp-1 italic bg-slate-50 p-2 rounded-lg">"${safeNotes}"</p>` : ''}
                 </div>
                 
-                <div class="flex flex-row sm:flex-col items-end gap-3 sm:gap-2 justify-between w-full sm:w-auto mt-2 sm:mt-0 pt-3 sm:pt-0 border-t border-gray-100 sm:border-0">
+                <div class="flex flex-row sm:flex-col items-end gap-3 sm:gap-2 justify-between w-full sm:w-auto mt-2 sm:mt-0 pt-3 sm:pt-0 border-t border-slate-100 sm:border-0">
                     <div class="flex gap-4 sm:gap-2">
-                        <div class="flex items-center text-sm text-gray-600" title="${safeStaff}">
-                            <i data-lucide="user" class="w-4 h-4 mr-1 text-gray-400"></i> ${safeStaff}
+                        <div class="flex items-center text-sm text-slate-600 font-medium" title="${safeStaff}">
+                            <i data-lucide="user" class="w-4 h-4 mr-1 text-slate-400"></i> ${safeStaff}
                         </div>
-                        <div class="flex items-center text-sm ${isOverdueTask ? 'text-red-600 font-bold' : 'text-gray-600'}">
-                            <i data-lucide="calendar" class="w-4 h-4 mr-1 ${isOverdueTask ? 'text-red-500' : 'text-gray-400'}"></i> ${formatDate(task.dueDate)}
+                        <div class="flex items-center text-sm tabular-nums ${isOverdueTask ? 'text-rose-700 font-bold' : 'text-slate-600 font-medium'}">
+                            <i data-lucide="calendar" class="w-4 h-4 mr-1 ${isOverdueTask ? 'text-rose-500' : 'text-slate-400'}"></i> ${formatDate(task.dueDate)}
                         </div>
                     </div>
                     
@@ -3469,10 +3498,14 @@ function updateHeaderProfile() {
     const nameEl = document.getElementById('header-user-name');
     const roleEl = document.getElementById('header-user-role');
     const avatarEl = document.getElementById('header-avatar');
+    const sidebarNameEl = document.getElementById('header-sidebar-user-name');
+    const sidebarRoleEl = document.getElementById('header-sidebar-user-role');
     const workStatusEl = document.getElementById('header-work-status');
     if (nameEl) nameEl.textContent = currentUser.name;
     if (roleEl) roleEl.textContent = getRoleDisplayLabel(currentUser.role);
     if (avatarEl) avatarEl.textContent = currentUser.initials;
+    if (sidebarNameEl) sidebarNameEl.textContent = currentUser.name;
+    if (sidebarRoleEl) sidebarRoleEl.textContent = getRoleDisplayLabel(currentUser.role);
     if (workStatusEl) workStatusEl.value = getCurrentPresenceStatus();
 
     const adminPortalBtn = document.getElementById('btn-open-admin-portal');

@@ -39,6 +39,16 @@
       "department": "Delivery",
       "timezone": "Asia/Kolkata",
       "isActive": true
+    },
+    "PortalVerify1776330075668": {
+      "username": "PortalVerify1776330075668",
+      "passwordHash": "9d6ca2185eba968706ba9ef07abde8e2dd8d7555f2d2590968a402318ac8cf9c",
+      "name": "Portal Verify User",
+      "role": "Manager",
+      "initials": "P",
+      "department": "QA",
+      "timezone": "UTC",
+      "isActive": true
     }
   },
   "tasks": [
@@ -124,16 +134,16 @@
       "username": "Eshwar",
       "online": true,
       "status": "online",
-      "lastSeen": "2026-04-14T00:17:24.130286Z",
+      "lastSeen": "2026-04-16T09:01:12.974326Z",
       "browser": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.7632.6 Safari/537.36 Edg/145.0.7632.6",
       "device": "Web"
     }
   ],
   "sessions": [
     {
-      "id": "sess_1ac6572f5ab5",
+      "id": "sess_df89f78c9104",
       "username": "Eshwar",
-      "loginTime": "2026-04-14T00:17:24.063476Z",
+      "loginTime": "2026-04-16T09:01:12.892148Z",
       "logoutTime": null,
       "durationSeconds": 0,
       "activeSeconds": 0,
@@ -147,7 +157,31 @@
     }
   ],
   "task_locks": [],
-  "admin_audit_logs": [],
+  "admin_audit_logs": [
+    {
+      "id": "audit_7ed4d17be7",
+      "timestamp": "2026-04-16T09:01:16.452610+00:00",
+      "admin": "Eshwar",
+      "adminName": "Pritheeswarar",
+      "action": "task_comment_added",
+      "details": {
+        "taskId": 1,
+        "commentId": "c_eef01f7a"
+      }
+    },
+    {
+      "id": "audit_5a01dcf398",
+      "timestamp": "2026-04-16T09:01:15.907041+00:00",
+      "admin": "Eshwar",
+      "adminName": "Pritheeswarar",
+      "action": "user_created",
+      "details": {
+        "username": "PortalVerify1776330075668",
+        "role": "Manager",
+        "department": "QA"
+      }
+    }
+  ],
   "saved_filter_sets": [],
   "automation_rules": [
     {
@@ -165,7 +199,18 @@
       "action": "notify_admin"
     }
   ],
-  "task_comments": {},
-  "next_task_id": 4,
-  "next_client_id": 4
+  "task_comments": {
+    "1": [
+      {
+        "id": "c_eef01f7a",
+        "taskId": 1,
+        "comment": "Portal verification comment",
+        "user": "Pritheeswarar",
+        "username": "Eshwar",
+        "timestamp": "2026-04-16T09:01:16.451340+00:00"
+      }
+    ]
+  },
+  "next_task_id": 3,
+  "next_client_id": 3
 }
